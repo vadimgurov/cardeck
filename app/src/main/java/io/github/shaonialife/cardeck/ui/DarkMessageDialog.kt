@@ -12,30 +12,32 @@ import androidx.appcompat.app.AlertDialog
 import io.github.shaonialife.cardeck.R
 
 /**
- * 深色消息弹窗：标题 + 正文（超长可滚动）+ 操作按钮。
+ * Всплывающее окно темного сообщения: заголовок + текст (очень длинный и прокручиваемый) + кнопка действия.
  *
- * **为什么不用裸 `AlertDialog.Builder.setMessage`**：系统对话框在
- * `Theme.AppCompat.DayNight` 下是浅色主题，与本应用全深色 UI 割裂
- * （2026-10-18 真机截图暴露）。这里自绘 `bg_dialog_panel` 面板，
- * 与免责声明 / 选择目标车机两个弹窗保持一致。
+ * **Почему бы не использовать чистый `AlertDialog.Builder.setMessage`**: Системное диалоговое окно
+ * `Theme.AppCompat.DayNight` имеет светлую тему, которая отделена от полностью темного пользовательского интерфейса этого приложения.
+ * (18 октября 2026 г. представлены скриншоты реального устройства). Here is the self-painted `bg_dialog_panel` panel,
+ * соответствует двум всплывающим окнам отказа от ответственности/выбора целевого автомобиля.
  *
- * 布局规则：1~2 个操作横排靠右；3 个及以上竖排整宽（窄屏横排会挤爆）。
+ * Правила компоновки  : 1-2 операции располагаются горизонтально вправо; 3 и более операций располагаются
+ * вертикально по всей ширине (узкие экраны будут перегружены по горизонтали).
  */
 object DarkMessageDialog {
     enum class Emphasis {
-        /** 实心强调按钮（bg_cta_fill）。 */
+        /** Solid accent button (bg_cta_fill). */
         PRIMARY,
 
-        /** 文字按钮（bg_tbtn）。 */
+        /** Текстовая кнопка (bg_tbtn). */
         TEXT,
 
-        /** 危险操作（暗红底）。 */
+        /** Dangerous operation (dark red background). */
         DANGER,
     }
 
     /**
-     * @param dismissOnClick 点击后是否自动关闭（默认 true）。需要保留弹窗
-     *        （例如校验失败后让用户重试）时传 false。
+     * @param ignoreOnClick Указывает, следует ли автоматически закрывать окно после щелчка (по умолчанию — true).
+     * Need to keep the pop-up window
+     * Передайте false, когда       (например, разрешите пользователю повторить попытку после неудачной проверки).
      */
     data class Action(
         val label: String,
@@ -45,9 +47,9 @@ object DarkMessageDialog {
     )
 
     /**
-     * @param actions 按显示顺序排列；横排时靠右，竖排时自上而下
-     * @param cancelable 返回键/点外部是否可关闭
-     * @param onCancel 通过取消方式关闭时回调（null = 不关心）
+     * @param Действия расположены в порядке отображения; вправо при горизонтальном расположении, сверху вниз при вертикальном расположении
+     * @param отменяемый Возврат ключа/точки снаружи, можно ли закрыть
+     * @param onCancel Обратный вызов при закрытии посредством отмены (ноль = все равно)
      */
     fun show(
         activity: Activity,
@@ -91,8 +93,12 @@ object DarkMessageDialog {
             dialog.setOnCancelListener { onCancel?.invoke() }
         }
         dialog.setOnShowListener {
-            // 正文超长时夹到屏高 46% 并内部滚动；短文案贴合内容（固定高度会留大片空白）。
-            // clampBody 同时作为旋转回调：横屏屏高变小后要重新夹紧，否则会撑出屏幕。
+            // Если текст слишком длинный, он обрезается до 46% высоты экрана и прокручивается внутри; короткая копия
+            // соответствует содержимому (фиксированная высота оставляет большое пустое пространство).
+
+            // ClampBody также служит обратным вызовом вращения: когда высота экрана по горизонтали становится меньше, его
+            // необходимо снова зажать, иначе он вытянется за пределы экрана.
+
             val clampBody: (Activity) -> Unit = { ctx ->
                 val maxBodyHeight = (ctx.resources.displayMetrics.heightPixels * 0.46f).toInt()
                 bodyView.post {
@@ -108,7 +114,9 @@ object DarkMessageDialog {
                     }
                 }
             }
-            // 宽度 92%、高度按内容自适应；旋转时 PanelWindow 会回调 clampBody 重算
+            // Ширина составляет 92%, а высота адаптивна в зависимости от содержимого; при вращении PanelWindow вызовет
+            // ClampBody для перерасчета.
+
             PanelWindow.apply(dialog, activity, onResize = clampBody)
             clampBody(activity)
         }
@@ -139,7 +147,7 @@ object DarkMessageDialog {
                 }
 
                 Emphasis.DANGER -> {
-                    // 危险动作：暗红底 + 浅红字（复用错误容器色）
+                    // Опасные действия: темно-красный фон + светло-красный текст (повторное использование неправильного цвета контейнера)
                     background =
                         GradientDrawable().apply {
                             cornerRadius = 999f * density
@@ -149,8 +157,12 @@ object DarkMessageDialog {
                 }
 
                 Emphasis.TEXT -> {
-                    // 竖排时次要按钮也上胶囊底：否则只有主按钮是实心整宽胶囊，
-                    // 另两项是裸文字，视觉权重完全失衡（真机截图暴露）
+                    // При вертикальном расположении второстепенные кнопки также находятся в нижней части капсулы: в противном случае
+                    // только основная кнопка представляет собой сплошную полноразмерную капсулу.
+
+                    // Два других элемента представляют собой простой текст, а визуальный вес совершенно несбалансирован (открыты
+                    // скриншоты реальных машин)
+
                     background =
                         activity.getDrawable(
                             if (vertical) R.drawable.bg_btn_tonal else R.drawable.bg_tbtn,
@@ -169,7 +181,7 @@ object DarkMessageDialog {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                         ).apply {
-                            // 竖排：按钮之间留 6dp（首个不留）
+                            // Вертикальное расположение: оставьте расстояние 6 dp между кнопками (не оставляйте места для первой).
                             if (!isFirst) topMargin = (6 * density).toInt()
                         }
                 } else {
@@ -178,12 +190,16 @@ object DarkMessageDialog {
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                         ).apply {
-                            // 横排：首项贴右缘，后续各项之间留 6dp
+                            // Горизонтальное расположение: первый элемент прикрепляется к правому краю, оставляя расстояние 6dp между
+                            // последующими элементами.
+
                             if (!isFirst) marginStart = (6 * density).toInt()
                         }
                 }
             setOnClickListener {
-                // 防连点：回调里通常要跳转/重开流程/写系统设置
+                // Точка антисоединения: в обратном вызове обычно необходимо перепрыгнуть/перезапустить процесс/записать
+                // системные настройки.
+
                 isEnabled = false
                 onClick()
             }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页进入：右侧滑入 + 淡入（对照原型 0.3s ease-out） -->
+<!-- Вход на страницу настроек: слайд справа + постепенное появление (сравните с замедлением прототипа 0,3 с) -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
     android:shareInterpolator="false">
     <translate

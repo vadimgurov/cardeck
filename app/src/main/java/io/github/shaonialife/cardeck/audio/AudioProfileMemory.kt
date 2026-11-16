@@ -3,25 +3,29 @@ package io.github.shaonialife.cardeck.audio
 import android.content.Context
 
 /**
- * 音频档位的**按车机持久化记忆**（与 [io.github.shaonialife.cardeck.iap2.MfiLengthMemory]
- * 同一套思路）。
+ * Аудиоаппаратура  **постоянная память** (аналогично [io.github.shaonialife.cardeck.iap2.MfiLengthMemory]
+ * тот же набор идей).
  *
- * 背景（2026-10-19 Honda HFT / Alpine 实车）：选「视频+音频」连接后，会话建立成功、
- * 视频正常、音频 SETUP 也回 200 并拿到 dataPort，但音频包发出去约 6s 后车机把整条
- * AirPlay 会话拆掉（`EVENT: 读取结束 - Connection reset`）。同一台车机只推视频则稳定。
- * 这说明**具体某个音频档位**是雷，而不同车机踩雷的档位不同（奥迪 media/44.1k 可用，
- * 这台只声明 media/44.1k 却用不了）。既不能全局写死档位，也不能每次连接都盲试，
- * 所以按车机身份记住三件事：
+ * Предыстория (19 октября 2026 г., реальный автомобиль Honda HFT / Alpine): После выбора соединения «Видео +
+ * аудио» сеанс был успешно установлен.
+ * Видео   нормальное, настройка звука также возвращает 200 и получает dataPort, но аудиопакет отправляется
+ * примерно через 6 секунд после завершения
+ * Разрыв сеанса AirPlay (`EVENT: Конец чтения - Connection reset`). Та же машина и машина только видео толкают и всё стабильно.
+ * Это показывает, что **определенная звуковая передача** является громом, а разные автомобили имеют разные
+ * передачи для грома (доступен Audi media/44.1k,
+ * только объявляет media/44.1k, но не может его использовать). Ни шестерни не могут быть жестко
+ * запрограммированы глобально, ни слепо тестироваться каждый раз при подключении.
+ * Итак, запомните три вещи в зависимости от идентичности автомобиля и машины:
  *
- *  - [Entry.working]：最近一次**跑满存活窗口**的档位 → 下次直接首选；
- *  - [Entry.rejected]：上线后很快被拆链的档位 → 排到最后；
- *  - [Entry.disabled]：所有档位都被拆过 → 这台车机不再尝试音频，直接只推视频
- *    （宁可没声音，也不要「一连就断」）。
+ * - [Entry.working]: снаряжение, которое прослужит **полное окно выживания** →, в следующий раз будет предпочтительнее;
+ * — [Entry.rejected]: шестерни, которые были отключены вскоре после выхода в Интернет → заняли последнее место;
+ * - [Entry.disabled]: Все шестеренки удалены → Эта машина больше не будет воспроизводить звук, а будет передавать только видео.
+ * (Лучше бы звука не было, чем отключиться сразу после начала подключения).
  *
- * 判定「快」的窗口由调用方给（[SessionController] 用 20s）。
+ * определяет «быстрое» окно, заданное вызывающей стороной ([SessionController] использует 20 с).
  */
 object AudioProfileMemory {
-    /** 单台车机的音频记忆。 */
+    /** Аудиопамять на один автомобильный блок. */
     data class Entry(
         val working: String? = null,
         val rejected: Set<String> = emptySet(),
@@ -30,15 +34,17 @@ object AudioProfileMemory {
         val isEmpty: Boolean get() = working == null && rejected.isEmpty() && !disabled
     }
 
-    // v2：档位键加入「流类型 + 编码方式」（102/AAC-LC 与 100/PCM 是两条完全不同的通路）。
-    // 换文件名而不是复用旧文件，是为了让 v1 时代「PCM 三档全拆链」的结论不再挡路——
-    // 那套结论只覆盖 PCM，对新增的 AAC 通路没有参考价值。
+    // v2: Ключ шестеренки добавляет «тип потока + метод кодирования» (102/AAC-LC и 100/PCM — это два совершенно разных пути).
+    // Изменение имени файла вместо повторного использования старого файла должно помешать завершению эпохи v1 «всех
+    // трех уровней разделения PCM» —
+
+    // Этот набор выводов охватывает только PCM и не имеет справочной ценности для недавно добавленных путей AAC.
     private const val FILE = "audio_profile_memory_v2"
     private const val KEY_OK = "ok_"
     private const val KEY_REJECTED = "rejected_"
     private const val KEY_DISABLED = "disabled_"
 
-    /** 车机身份 → 存储键（只留稳定字符，避免蓝牙名/固件串里的可变部分影响命中）。 */
+    /** Идентификация автомобиля → Ключ хранения (сохраняйте только стабильные символы, чтобы переменная часть имени Bluetooth/строки прошивки не влияла на попадание). */
     fun receiverKey(identityText: String): String =
         identityText
             .lowercase()
@@ -63,7 +69,7 @@ object AudioProfileMemory {
         )
     }
 
-    /** 该档位跑满存活窗口：记为首选，并证伪历史 rejected 结论（固件升级后可能变好）。 */
+    /** Это снаряжение заполняет окно выживания: записывается как первый выбор и фальсифицирует исторически отвергнутое заключение (оно может стать лучше после обновления прошивки). */
     fun recordWorking(
         context: Context?,
         identityText: String,
@@ -79,10 +85,11 @@ object AudioProfileMemory {
     }
 
     /**
-     * 该档位不可用：排到最后。
+     * Это снаряжение недоступно: занимает последнее место.
      *
-     * @param markExhausted 全部档位都被否掉时是否直接置 [Entry.disabled]。**只有「拆链」
-     *   这种确定性证据才允许置**；SETUP 被拒/超时可能只是一次网络或仲裁抖动，传 false。
+     * @param markExhausted Устанавливать ли [Entry.disabled] напрямую, когда все передачи запрещены. **Только «расцепить»
+     * Этот вид детерминированного доказательства позволяет установить **; Отклонение/тайм-аут SETUP может быть
+     * просто джиттером сети или арбитража, поэтому отправляется false.
      */
     fun recordRejected(
         context: Context?,
@@ -103,7 +110,7 @@ object AudioProfileMemory {
         }
     }
 
-    /** 手动恢复（换车机后复位，或车机固件升级后重新试探）。 */
+    /** Ручное восстановление (сброс после замены ТС или повторная попытка после обновления прошивки ТС). */
     fun reset(
         context: Context?,
         identityText: String,
@@ -111,7 +118,7 @@ object AudioProfileMemory {
         update(context, identityText) { Entry() }
     }
 
-    /** 是否存在任何记忆（决定 UI 是否显示「清除音频兼容记忆」入口）。 */
+    /** Существует ли какая-либо память (определяет, отображает ли пользовательский интерфейс запись «Очистить память, совместимую со звуком»). */
     fun hasAny(context: Context?): Boolean {
         val all = prefs(context)?.all ?: return synchronized(memory) { memory.isNotEmpty() }
         return all.any { (key, value) ->
@@ -124,7 +131,7 @@ object AudioProfileMemory {
         }
     }
 
-    /** 清空全部车机的音频记忆（车机固件升级、换车后重新试探）。 */
+    /** Очистите аудиопамять всех автомобилей (обновите прошивку автомобиля, после смены автомобиля повторите попытку). */
     fun clearAll(context: Context?) {
         synchronized(memory) {
             memory.clear()
@@ -132,24 +139,25 @@ object AudioProfileMemory {
         }
     }
 
-    /** 打印用：压成一行日志。 */
+    /** Для печати: впечатайте в одну строку журнала. */
     fun describe(entry: Entry): String =
         when {
-            entry.disabled -> "本车机音频已判定不兼容（只推视频）"
-            entry.isEmpty -> "无"
+            entry.disabled -> "Аудио этого автомобиля определено как несовместимое (загружаются только видео)"
+            entry.isEmpty -> "Нет"
             else ->
                 buildList {
-                    entry.working?.let { add("可用=$it") }
-                    if (entry.rejected.isNotEmpty()) add("拆链=${entry.rejected.sorted().joinToString("/")}")
+                    entry.working?.let { add("Доступно=$it") }
+                    if (entry.rejected.isNotEmpty()) add("Разорвать цепочку=${entry.rejected.sorted().joinToString("/")}")
                 }.joinToString("，")
         }
 
     /**
-     * 计算本轮的尝试顺序（纯函数，便于单测）。
+     * вычисляет порядок попыток в этом раунде (чистая функция, удобная для одиночного тестирования).
      *
-     * @param candidates 按「越靠前越推荐」排好的基线候选（来自车机 /info）。
-     * @param entry 该车机的持久化记忆。
-     * @return 依次尝试的档位；**空列表表示不要再试音频**（记忆已判定全部档位拆链）。
+     * Кандидаты       @param Базовые кандидаты ранжируются по принципу «чем выше, тем больше рекомендуется» (из carmachine/info).
+     * @param запись Постоянная память этого автомобиля.
+     * @return Последовательно проверяются передачи; **Пустой список означает, что больше не воспроизводить звук**
+     * (память определила, что все шестерни отключены).
      */
     fun order(
         candidates: List<AudioProfile>,
@@ -161,15 +169,19 @@ object AudioProfileMemory {
         val rejected = entry.rejected.filter { it in keys }.toSet()
         val working = candidates.firstOrNull { it.key == entry.working }
         val rest = candidates.filter { it.key != working?.key }
-        // 只有「还有没被判死的档位」时才把 rejected 排到最后；全被判死说明与记忆矛盾
-        // （换车机/固件升级却沿用同一身份键），此时照常全试，避免永久无声。
+        // Лишь когда «остаются еще ларьки, не приговоренные к смертной казни», отвергнутый ставится на последнее место;
+        // объяснение того, что всех приговорили к смертной казни, несовместимо с памятью.
+
+        // (Для замены автомобиля/обновления прошивки используется тот же идентификационный ключ). В это время попробуйте
+        // все как обычно, чтобы избежать постоянного молчания.
+
         val allRejected = rest.isNotEmpty() && rest.all { it.key in rejected }
         val safe = if (allRejected) rest else rest.filter { it.key !in rejected }
         val risky = if (allRejected) emptyList() else rest.filter { it.key in rejected }
         return (listOfNotNull(working) + safe + risky).distinctBy { it.key }
     }
 
-    // ---- 内部 ----
+    // ---- Внутренний ----
 
     private val memory = HashMap<String, Entry>()
 

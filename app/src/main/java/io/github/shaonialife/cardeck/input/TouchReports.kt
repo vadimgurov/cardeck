@@ -1,17 +1,18 @@
 package io.github.shaonialife.cardeck.input
 
 /**
- * 触摸 HID 报文解析。
+ * сенсорный анализ сообщений HID.
  *
- * 两种报文格式，**由设备 HID 描述符区分**（不按车机型号或 uuid 写死）：
- *  - **多槽格式**（DiPlay 测试台）：12 字节 = 2 槽 × 6 字节
- *    [槽号][按下 0/1][X u16LE][Y u16LE]；描述符是 Digitizer(0x0D) 页、每指含
- *    Tip Switch + X/Y 两个 16bit 字段。
- *  - **单指绝对坐标**（奥迪 MIB3 eso_touchScreen）：5 字节
- *    [tip 1bit + 7bit 填充][X u16LE][Y u16LE]；描述符同为 Digitizer 页但字段布局不同。
+ * два формата сообщений, **отличающиеся дескриптором HID устройства** (не запрограммированные жестко в
+ * зависимости от модели автомобиля или uuid):
+ * — **Многослотовый формат** (тестовый стенд DiPlay): 12 байт = 2 слота × 6 байт
+ * [номер слота] [нажмите 0/1] [X u16LE][Y u16LE]; дескриптор — страница дигитайзера (0x0D), каждый палец содержит
+ * Tip Switch + X/Y два 16-битных поля.
+ * - **Абсолютные координаты одного пальца** (Audi MIB3 eso_touchScreen): 5 байт
+ * [tip 1bit + 7bit прокладка][X u16LE][Y u16LE]; дескрипторы такие же, как на странице дигитайзера, но расположение полей другое.
  *
- * 判定顺序：先看描述符里 X/Y 的 Report Size（16bit）与是否只有一个手指 Collection；
- * 描述符不可用时回退到「报文长度」判据（5B → 单指，12B+ → 多槽）。
+ * Порядок определения: сначала проверьте размер отчета (16 бит) X/Y в дескрипторе и наличие только одной коллекции пальцев;
+ * Когда дескриптор   недоступен, он возвращается к критерию «длина сообщения» (5B → один палец, 12B+ → многослотовый).
  */
 object TouchReports {
     const val TOUCH_UUID_HEX = "2a2a2a2a"
@@ -26,22 +27,24 @@ object TouchReports {
         val down: Boolean,
     )
 
-    /** 触摸报文格式（由描述符或报文长度判定）。 */
+    /** Формат сенсорного сообщения (определяется дескриптором или длиной сообщения). */
     enum class Format { MULTI_SLOT, SINGLE_ABSOLUTE }
 
     /**
-     * 按描述符判定触摸格式；非 Digitizer 页（触摸设备）返回 null。
+     * Определяет формат сенсорного экрана по дескриптору; возвращает значение null для страниц без дигитайзера (сенсорные устройства).
      *
-     * 识别依据：Digitizer 页（0x0D）出现且含 X/Y 的 16bit 输入 → 触摸设备；
-     * 单指 Collection（描述符里只有一个 0x22=Contact Identifier 的 Application）
-     * 且报文为 5 字节布局 → SINGLE_ABSOLUTE。
+     * Основа идентификации      : появляется страница дигитайзера (0x0D) и содержит 16-битный ввод X/Y → сенсорное устройство;
+     * single refers to Collection (there is only one Application with 0x22=Contact Identifier in the descriptor)
+     * и сообщение имеет 5-байтовый формат → SINGLE_ABSOLUTE.
      */
     fun formatFromDescriptor(descriptor: ByteArray): Format? {
         var page = 0
         var sawDigitizer = false
         var has16BitXy = false
-        // 单指/多槽都含 Contact ID(0x22) 的 Finger Collection；以「X 的 ReportSize=16」
-        // 作为两种格式共有的识别点，再用描述符长度与 bytes-per-finger 差异区分。
+        // Как один палец, так и несколько слотов содержат коллекцию идентификаторов контактов (0x22); используйте «X’s ReportSize=16»
+        // В качестве общей точки идентификации между двумя форматами используются различия в длине дескриптора и
+        // количестве байтов на палец.
+
         var index = 0
         while (index < descriptor.size) {
             val prefix = descriptor[index].toInt() and 0xFF
@@ -63,14 +66,14 @@ object TouchReports {
             index += 1 + dataBytes
             when {
                 type == 1 && tag == 0x0 -> if (value == 0x0D) sawDigitizer = true
-                // Report Size（全局项 tag=7）＝16 → X/Y 为 16bit（两种格式都是）
+                // Размер отчета (глобальный тег элемента = 7) = 16 → X/Y — 16 бит (оба формата)
                 type == 1 && tag == 0x7 -> if (value == 16) has16BitXy = true
             }
         }
         if (!sawDigitizer) return null
         if (!has16BitXy) return null
-        // 奥迪单指描述符 62B、DiPlay 双指描述符更长（含两个 Finger Collection）。
-        // 单一手指 Collection 的判定：Contact Identifier(0x09 0x22) 出现次数。
+        // Дескриптор Audi с одним пальцем 62B, дескриптор DiPlay с двумя пальцами длиннее (включая коллекцию с двумя пальцами).
+        // Оценка коллекции по одному пальцу: количество вхождений идентификатора контакта (0x09 0x22).
         val fingerCollections = countOccurrences(descriptor, byteArrayOf(0x09, 0x22))
         return if (fingerCollections <= 1) Format.SINGLE_ABSOLUTE else Format.MULTI_SLOT
     }
@@ -100,8 +103,9 @@ object TouchReports {
     }
 
     /**
-     * 解析触摸报文。
-     * @param format 描述符判定的格式；null 时按报文长度回退（5B=单指，≥12B=多槽）
+     * анализирует сенсорные сообщения.
+     * @param Формат Формат определения дескриптора; при нулевом значении происходит возврат в соответствии с длиной
+     * сообщения (5B=один палец, ≥12B=многослотовое)
      */
     fun parse(
         report: ByteArray,
@@ -119,18 +123,20 @@ object TouchReports {
         }
     }
 
-    /** 兼容旧调用点：按 uuid 选择解析器（描述符不可得时的回退路径）。 */
+    /** Совместимость со старыми сайтами вызовов: выберите преобразователь по uuid (резервный путь, если дескриптор недоступен). */
     fun parseByUuid(
         uuid: String?,
         report: ByteArray,
     ): List<Contact>? =
         when (uuid) {
             TOUCH_UUID_HEX -> parseMultiSlot(report)
-            // 单指设备（各车机 uuid 不同）：用报文长度自证
+            // Устройство с одним пальцем (различный uuid для каждого автомобиля): используйте длину сообщения для
+            // самостоятельной сертификации.
+
             else -> parse(report, format = null)
         }
 
-    /** 多槽格式解析（DiPlay 测试台：12 字节 2 槽）。 */
+    /** Анализ многослотового формата (тестовый стенд DiPlay: 12 байт, 2 слота). */
     fun parseMultiSlot(report: ByteArray): List<Contact> {
         if (report.size < SLOTS * BYTES_PER_FINGER) return emptyList()
         return (0 until SLOTS).mapNotNull { slot ->
@@ -144,7 +150,7 @@ object TouchReports {
         }
     }
 
-    /** 单指绝对坐标：5 字节 [tip 1bit][X u16LE][Y u16LE]。 */
+    /** Абсолютные координаты одного пальца: 5 байт [tip 1bit][X u16LE][Y u16LE]. */
     fun parseSingleTouch(report: ByteArray): List<Contact> {
         if (report.size < 5) return emptyList()
         return listOf(

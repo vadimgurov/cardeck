@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 日志「本次启动」切片：导出默认只给当前会话，历史轮次不能混进来。
- * 边界来自真实场景——旧版本文件没有标记、标记多次出现、文件刚被 2MB 截断。
+ * фрагмент журнала «этот запуск»: по умолчанию экспорт выполняется только для текущего сеанса, и исторические раунды не могут быть смешаны.
+ * Границы   взяты из реальных сценариев: файлы старой версии без маркеров, маркеры появляются несколько раз, файлы просто обрезаны на 2 МБ.
  */
 class DebugFileLogTest {
     @Test
@@ -23,7 +23,7 @@ class DebugFileLogTest {
 
         assertTrue(slice.contains("current line A"))
         assertTrue(slice.contains("current line B"))
-        // 上一轮与更早的内容都不能出现（标记本身也不该留在正文里）
+        // Ни предыдущий раунд, ни более ранний контент не могут появиться (сама отметка не должна оставаться в тексте)
         assertTrue(!slice.contains("previous run line"))
         assertTrue(!slice.contains("old line 1"))
         assertTrue(!slice.contains(DebugFileLog.SESSION_MARKER))
@@ -42,7 +42,7 @@ class DebugFileLogTest {
 
     @Test
     fun markerAsLastLineYieldsEmptySlice() {
-        // 刚写标记、还没有其它日志：切片为空，导出层会退回界面缓冲
+        // Отметка только что прописана и других логов пока нет: срез пуст и слой экспорта вернется в буфер интерфейса.
         val text = "[13:00:00.000] ${DebugFileLog.SESSION_MARKER}\n"
         assertEquals("\n", DebugFileLog.currentSessionSlice(text))
     }

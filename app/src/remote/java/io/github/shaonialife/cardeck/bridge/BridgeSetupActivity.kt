@@ -20,19 +20,23 @@ import java.io.File
 import java.lang.ref.WeakReference
 
 /**
- * 远程调试设置页（remote 变体的第二个桌面入口）：
- * 填服务器地址与配对码 → 连接；展示连接状态；引导悬浮窗/安装权限。
+ * Страница настроек удаленной отладки  (вторая запись на рабочем столе для удаленного варианта):
+ * Введите адрес сервера и код сопряжения → подключиться; отображение статуса подключения; направляйте плавающее
+ * окно/разрешения на установку.
  *
- * 兼任调试弹窗宿主：APK 安装确认、重装后续接询问等**必须用正规弹窗**
- * （DarkMessageDialog）——悬浮窗易被忽略（用户实测反馈）。App 后台时由
- * [ReinstallFlow]/[BridgeApp] 带参拉起本页（EXTRA_PROMPT），onCreate/onNewIntent 弹。
+ * также служит хостом всплывающих окон отладки: подтверждение установки APK, последующие запросы после
+ * переустановки и т. д. **Необходимо использовать обычные всплывающие окна**
+ * (DarkMessageDialog) — плавающее окно легко игнорировать (фактические отзывы пользователей). Время работы приложения в фоновом режиме
+ * [ReinstallFlow]/[BridgeApp] откройте эту страницу с параметрами (EXTRA_PROMPT), всплывающее окно onCreate/onNewIntent.
  */
 class BridgeSetupActivity : AppCompatActivity() {
     private val refresh = Handler(Looper.getMainLooper())
     private val ticker =
         object : Runnable {
             override fun run() {
-                // statusLine()：退避重连期间带「Ns 后自动重试」实时倒计时
+                // statusLine(): обратный отсчет в реальном времени с «автоматической повторной попыткой после Ns» во время
+                // отступления и повторного подключения.
+
                 statusText?.text = "Статус: ${BridgeClient.statusLine()}"
                 refresh.postDelayed(this, 1_000)
             }
@@ -65,7 +69,9 @@ class BridgeSetupActivity : AppCompatActivity() {
                 setText(BridgePrefs.serverUrl(this@BridgeSetupActivity))
                 imeOptions = EditorInfo.IME_ACTION_NEXT
                 setSingleLine()
-                // 主题默认字色是黑，深色窗口上不可见（用户实测），必须显式给亮色
+                // Цвет текста темы по умолчанию — черный, который не виден в темных окнах (проверено пользователями), и ему
+                // должен быть явно задан яркий цвет.
+
                 setTextColor(0xFFE0E0E5.toInt())
                 setHintTextColor(0xFF8A9099.toInt())
             }
@@ -87,7 +93,7 @@ class BridgeSetupActivity : AppCompatActivity() {
                         codeInput.text.toString(),
                     )
                     BridgePrefs.setAutoConnect(this@BridgeSetupActivity, true)
-                    // 悬浮窗权限顺手引导（提示窗依赖）
+                    // Разрешения для приостановленных окон отображаются плавно (от этого зависит окно подсказки)
                     if (!Settings.canDrawOverlays(this@BridgeSetupActivity)) {
                         runCatching {
                             startActivity(
@@ -200,7 +206,7 @@ class BridgeSetupActivity : AppCompatActivity() {
         refresh.removeCallbacks(ticker)
     }
 
-    /** 带参拉起时弹对应的正规弹窗（App 后台时安装确认/重装续接走这条路）。 */
+    /** При его открытии с параметрами появится соответствующее обычное всплывающее окно (подтверждение/переустановка установки продолжается таким образом в фоновом режиме приложения). */
     private fun handlePromptIntent(intent: Intent?) {
         when (intent?.getStringExtra(EXTRA_PROMPT)) {
             "install" -> {
@@ -210,8 +216,12 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
             "resume" -> promptResume()
             "confirm" -> {
-                // 安装确认的前台转发：系统确认框从后台 Receiver 直接拉起会被
-                // 荣耀静默拦截（无异常无界面），由前台 Activity 启动必然生效
+                // Фронтальная пересылка подтверждения установки: окно подтверждения системы будет вызвано непосредственно из
+                // фонового приемника.
+
+                // Уважайте тихий перехват (без исключений и без интерфейса), он обязательно вступит в силу при запуске
+                // активности на переднем плане.
+
                 val confirm = ReinstallFlow.pendingConfirmIntent
                 if (confirm == null) {
                     android.widget.Toast
@@ -234,7 +244,7 @@ class BridgeSetupActivity : AppCompatActivity() {
         }
     }
 
-    /** 新版本安装确认（正规弹窗；悬浮窗形式已被用户反馈否决）。 */
+    /** Подтверждение установки новой версии (обычное всплывающее окно; форма плавающего окна отклонена по отзывам пользователей). */
     fun promptInstall(
         file: File,
         version: String,
@@ -262,7 +272,7 @@ class BridgeSetupActivity : AppCompatActivity() {
         )
     }
 
-    /** 重装后的续接询问。 */
+    /** Продолжение запроса после переустановки. */
     fun promptResume() {
         DarkMessageDialog.show(
             this,
@@ -287,13 +297,13 @@ class BridgeSetupActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_PROMPT = "prompt"
 
-        /** 当前已 resume 的实例（弱引用防泄漏）：调试弹窗需要有前台的 Activity 宿主。 */
+        /** Возобновленный в настоящее время экземпляр (слабое предотвращение утечки ссылок): для отладки всплывающих окон требуется узел активности на переднем плане. */
         @Volatile
         private var resumedRef: WeakReference<BridgeSetupActivity>? = null
 
         fun resumed(): BridgeSetupActivity? = resumedRef?.get()
 
-        /** 安装确认前台转发：把设置页带到前台，由它启动系统确认界面。 */
+        /** Переадресация внешнего интерфейса подтверждения установки: перенесите страницу настроек во внешний интерфейс, после чего запустится интерфейс подтверждения системы. */
         fun startForConfirm(context: android.content.Context) {
             runCatching {
                 context.startActivity(
@@ -305,7 +315,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         }
 
-        /** 供 App 后台场景带参拉起本页并弹续接询问。 */
+        /** Предоставляет фоновую сцену приложения с параметрами для открытия этой страницы и всплывающего запроса. */
         fun startForResume(context: android.content.Context) {
             runCatching {
                 context.startActivity(

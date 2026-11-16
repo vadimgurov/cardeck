@@ -1,1050 +1,1066 @@
-# AGENTS.md — 给 AI 编码助手的项目指引
+# AGENTS.md — Рекомендации проекта для помощников по ИИ-кодированию
 
-让一台未 root 的 Android 手机（荣耀 Magic7 Pro）扮演 **CarPlay 发送端（iPhone 角色）**：
-自绘车机桌面 → H.264 编码推流 → 奥迪车机 / DiPlay 测试台（Redmi K40 上的接收端）显示，
-车机触摸经 Shizuku（shell 权限）回注虚拟屏。协议链路：蓝牙 iAP2 → 车机热点 → mDNS →
-AirPlay（配对/控制/事件/流）→ 视频 + 音频推流。
+Пусть нерутированный телефон Android (Honor Magic7 Pro) выступает в роли **отправителя CarPlay (роль iPhone)**:
+Саморисующийся рабочий стол автомобильной машины → кодирование H.264 → дисплей автомобильной машины Audi/испытательный стенд DiPlay (приемник на Redmi K40),
+Сенсорный экран автомобиля возвращается на виртуальный экран через Shizuku (авторитет оболочки). Ссылка на протокол: Bluetooth iAP2 → Автомобильная точка доступа → mDNS →
+AirPlay (сопряжение/управление/события/потоковая передача) → потоковая передача видео + аудио.
 
-## 常用命令
+## Общие команды
 
 ```bash
-./gradlew assembleStandardDebug         # 构建（日常包；远程调试版为 assembleRemoteDebug）
-./gradlew testStandardDebugUnitTest     # 单元测试（协议层/编解码为主）
-./gradlew :app:lintStandardDebug        # Android Lint（存量问题在基线，新问题会失败）
-./gradlew spotlessApply                 # 代码格式化（ktlint official 风格，规则在 .editorconfig）
-adb -s <serial> shell am force-stop io.github.shaonialife.cardeck   # 安装前必须先杀应用
+./gradlew assembleStandardDebug # Сборка (ежедневный пакет; версия для удаленной отладки — assembleRemoteDebug)
+./gradlew testStandardDebugUnitTest # Модульный тест (в основном уровень протокола/кодек)
+./gradlew :app:lintStandardDebug # Android Lint (существующие проблемы находятся в базовой версии, новые проблемы не будут работать)
+./gradlew SpotlessApply # Форматирование кода (официальный стиль ktlint, правила в .editorconfig)
+adb -s <serial> Shell am Force-Stop io.github.shaonialife.cardeck # Приложение должно быть закрыто перед установкой
 adb -s <serial> install -r app/build/outputs/apk/standard/debug/app-standard-debug.apk
 ```
 
-**安装流程（重要）**：会话进行中直接 `adb install` 时，系统安装确认弹窗会落到车机侧
-虚拟屏上（无人点得到，表现为 User rejected / 卡住）。**必须先 force-stop 再 install**；
-若仍被拒，先 `input keyevent KEYCODE_WAKEUP` 亮屏再装——**熄屏时确认弹窗无人应答会被
-系统自动拒绝**（2026-10-15 实测三次 INSTALL_FAILED_ABORTED，亮屏后即成）。
+**Процесс установки (важно)**: При непосредственном использовании `adb install` во время сеанса всплывающее окно подтверждения установки системы опустится сбоку от автомобиля.
+На виртуальном экране (никто не нажимает на него, отображается надпись «Пользователь отклонен/застрял»). **Сначала необходимо принудительно остановить, а затем установить**;
+Если он по-прежнему отклонен, сначала включите экран `input keyevent KEYCODE_WAKEUP`, а затем установите его. ** Когда экран выключен, всплывающее окно подтверждения будет отклонено, если никто не ответит.
+Система автоматически отклоняет ** (INSTALL_FAILED_ABORTED измерялось трижды 15 октября 2026 г., результат подтверждается после включения экрана).
 
-**装过 release 包之后 debug 包装不上**（2026-10-18）：`app-debug.apk` 用 debug 证书、
-release 包用正式 keystore，`adb install -r` 会报
-`INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match`。同一台机器上要换类型只能
-先 `adb uninstall`（会丢应用数据/Shizuku 授权），或直接改用
-`./gradlew :app:assembleRelease` 的产物验证——**推荐后者**，签名一致、可覆盖安装。
-注意 release 包不可 debuggable，`run-as ... tail files/main_debug.log` 会报
-`package not debuggable`；日志验证要另走 debug 包或临时开 debuggable。
+**После установки пакета выпуска пакет отладки не может быть установлен** (18.10.2026): `app-debug.apk` использует сертификат отладки,
+Пакет выпуска использует официальное хранилище ключей, и будет сообщено о `adb install -r`.
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match`. Изменить тип на той же машине можно только
+Сначала `adb uninstall` (данные приложения/авторизация Shizuku будут потеряны) или используйте вместо этого напрямую
+Проверка продукта `./gradlew :app:assembleRelease` — **Рекомендуется последнее**, подпись соответствует, и установку можно оплатить.
+Обратите внимание, что пакет выпуска не подлежит отладке, и об этом будет сообщено `run-as ... tail files/main_debug.log`.
+`package not debuggable`; Для проверки журнала необходимо установить отдельный пакет отладки или временно включить отладку.
 
-**卸载应用不会释放虚拟屏**（2026-10-18 实测，比上面更隐蔽）：虚拟屏由 Shizuku 的
-UserService 子进程持有，**父应用卸载后该进程仍存活**，4 块屏（CarPlayDock/App/AppHi/Map）
-继续占位。此时再 `adb install`，确认弹窗仍会落到这些屏上，表现为「安装卡死」，
-而且因为应用已卸载、**无法靠「启动应用自动清理残留」补救**（那条路径需要应用存在）。
-更糟的是每次尝试安装都会新叠一个 `PackageInstallerActivity`（实测堆积 11 个）。
-处置（按顺序）：
-1. `adb shell ps -A -o PID,NAME | grep car_input` 找到 `:<包名后缀>` 的 UserService 进程
-   （名形如 `io.github.shaonialife.cardeck:car_input`，UID 为 shell）；
-2. `adb shell kill <PID>` —— 进程退出，虚拟屏立即全部释放（实测 kill 后
-   `dumpsys display | grep CarPlay` 为空）；
-3. `adb shell am force-stop com.android.packageinstaller` 清掉堆积的安装弹窗；
-4. 再 `adb install`。
-（`adb install --user 0` / `-g` 等参数**绕不过** Honor 的安装确认弹窗，别指望静默安装。）
-残留屏数量与是否为「上次会话遗留」可用 `dumpsys display | grep -oE '"CarPlay[A-Za-z]+", displayId [0-9]+'`
-快速核对。
+**Удаление приложения не приведет к освобождению виртуального экрана** (фактическое тестирование состоялось 18 октября 2026 г., более скрыто, чем указано выше): виртуальный экран предоставлен Shizuku.
+UserService хранится в дочернем процессе. **Процесс продолжается после удаления родительского приложения**, 4 экрана (CarPlayDock/App/AppHi/Map)
+Продолжайте занимать свое место. В настоящее время, `adb install`, на этих экранах по-прежнему будет появляться всплывающее окно подтверждения с сообщением «Установка зависла».
+А поскольку приложение было удалено, его нельзя исправить, «запустив приложение для автоматической очистки остатков» (для этого пути необходимо, чтобы приложение существовало).
+Хуже всего то, что каждый раз, когда вы пытаетесь установить, в стопку будет добавляться новый `PackageInstallerActivity` (в реальном тесте было 11).
+Расположение (по порядку):
+1. `adb shell ps -A -o PID,NAME | grep car_input` находит процесс UserService `:<суффикс имени пакета>`.
+   (Имя в виде `io.github.shaonialife.cardeck:car_input`, UID — оболочка);
+2. `adb shell kill <PID>` — — Процесс завершается, и все виртуальные экраны открываются немедленно (после измеренного уничтожения
+   `dumpsys display | grep CarPlay` пуст);
+3. `adb shell am force-stop com.android.packageinstaller` очищает накопившиеся всплывающие окна установки;
+4. Затем `adb install`.
+(`adb install --user 0` / `-g` и другие параметры не могут обойти всплывающее окно подтверждения установки Honor, поэтому не ждите автоматической установки.)
+Доступно количество остаточных экранов и являются ли они «остатками от последнего сеанса» `dumpsys display | grep -oE '"CarPlay[A-Za-z]+", displayId [0-9]+'`
+Быстрая проверка.
 
-**发布（GitHub Release）**：
+**Релиз (релиз GitHub)**:
 ```bash
-# 1) 改 app/build.gradle.kts 的 appVersionName（versionCode 自动推导）
-# 2) 用正式密钥构建（需仓库根目录有 keystore.properties + .jks，均已 gitignore）
+# 1) Измените appVersionName на app/build.gradle.kts (versionCode создается автоматически)
+# 2) Сборка с официальным ключом (корневой каталог хранилища должен иметь keystore.properties + .jks, оба из которых были gitignore)
 ./gradlew :app:assembleStandardRelease
-# 3) 验证签名的 CN 不是 "Android Debug"（必须是自己的证书，见下）
+# 3) Убедитесь, что подписанный CN не является «Android Debug» (должен быть ваш собственный сертификат, см. ниже).
 $ANDROID_HOME/build-tools/<ver>/apksigner verify --print-certs app/build/outputs/apk/standard/release/app-standard-release.apk
-# 4) 打 tag 并发布（APK 重命名成 CarDeck-<版本>.apk，备注里写 SHA-256 与签名指纹）
+# 4) Пометить и опубликовать (переименовать APK в CarDeck-<версия>.apk, в примечаниях написать SHA-256 и отпечаток подписи)
 git tag -a v0.1.0 -m "CarDeck 0.1.0"; git push origin v0.1.0
 gh release create v0.1.0 CarDeck-0.1.0.apk --title "..." --notes-file notes.md --latest
 ```
-**CI（`.github/workflows/android-ci.yml`，2026-10-22 起）**：每次 push 自动出**正式签名**包，
-版本号自动累计——传 `-Pcardeck.buildNumber=<github.run_number>`，得到
-`versionName=<appVersionName>.<N>`、`versionCode=base*10000+N`（能覆盖安装上一版；
-base 升 patch 时自动反超）。产物名 `CarDeck-<版本>-release.apk`，**只在 Actions Artifacts，
-不发 GitHub Release**（`permissions: contents: read`）。签名来自仓库 Secrets
-`KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD`（可选
-`EXPECTED_CERT_SHA256` 做指纹比对）；**没配 KEYSTORE_BASE64 流水线直接失败**，
-且 Gradle 侧 `check` 会拦「带构建号却没有 keystore.properties」，不允许 debug 签名的
-「正式版」流出去。本地 `assembleRelease` 不带 `-P` 时仍是纯 base 版本（`1_130_000`）。
-**签名是不可逆决定**：debug 证书签的包一经发出，以后换正式证书时已安装用户必须
-卸载重装（证书不同无法覆盖安装）。所以**首个公开版本就必须用正式 keystore**。
-keystore 与密码只存本地/密码管理器：私钥泄露 = 任何人可签发覆盖安装的更新；
-私钥丢失 = 已安装用户再也收不到更新。证书 SHA-256 指纹写进 Release 备注，
-便于用户核对下载完整性。
+**CI (`.github/workflows/android-ci.yml`, начиная с 22 октября 2026 г.)**: пакет **официальной подписи** будет автоматически выдаваться для каждой отправки.
+Номер версии накапливается автоматически — передайте `-Pcardeck.buildNumber=<github.run_number>` и получите
+`versionName=<appVersionName>.<N>`, `versionCode=base*10000+N` (можно перезаписать и установить предыдущую версию;
+Автоматически обгонять, когда база поднимается до уровня патча). `CarDeck-<version>-release.apk`, **только в Actions Artifacts,
+Не выпускайте выпуск GitHub** (`permissions: contents: read`). Подпись со склада Секреты
+`KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD` (опционально)
+`EXPECTED_CERT_SHA256` для сравнения отпечатков пальцев); **Если KEYSTORE_BASE64 не настроен, конвейер выходит из строя напрямую**,
+А сторона Gradle `check` будет блокировать «с номером сборки, но без keystore.properties» и не разрешает подписи отладки.
+«Официальная версия» просочилась. Локальный `assembleRelease` без `-P` по-прежнему остается чистой базовой версией (`1_130_000`).
+**Подпись — это необратимое решение**. После выпуска пакета, подписанного сертификатом отладки, пользователи должны установить его при переходе на официальный сертификат в будущем.
+Удалите и переустановите (разные сертификаты не могут перезаписать установку). Поэтому первая общедоступная версия должна использовать официальное хранилище ключей.
+хранилище ключей и локальный менеджер паролей только с паролями: утечка закрытого ключа = любой может выпустить обновление, которое перезаписывает установку;
+Закрытый ключ потерян = установленные пользователи больше не получают обновления. Отпечаток сертификата SHA-256 указан в примечаниях к выпуску.
+Пользователям удобно проверять целостность загрузки.
 
-**提交**：pre-commit 钩子（`.githooks/pre-commit`，经 `core.hooksPath` 启用；克隆后需
-执行一次 `git config core.hooksPath .githooks`）会自动格式化暂存的 kt/kts 并跑
-`lintDebug`，失败即拦截。存量 lint 问题豁免在 `app/lint-baseline.xml`——新代码引入
-问题会直接失败；实际修复后条目自动失效，有意豁免经评审后 `./gradlew :app:updateLintBaseline`。
-协作约定：功能完成后**装机给用户验证，用户说「提交」才 git commit**。
+**Commit**: перехватчик предварительной фиксации (`.githooks/pre-commit`, включен `core.hooksPath`; требуется после клонирования).
+Выполните `git config core.hooksPath .githooks` один раз) автоматически отформатирует временный kt/kts и запустит
+`lintDebug`, перехват в случае неудачи. Существующая проблема с ворсом исключена в `app/lint-baseline.xml` — введен новый код
+Проблема напрямую потерпит неудачу; запись автоматически станет недействительной после фактического ремонта, а после проверки преднамеренным исключением станет `./gradlew :app:updateLintBaseline`.
+Соглашение о сотрудничестве: после завершения функции установите ее пользователю для проверки и зафиксируйте git только после того, как пользователь скажет «отправить».
 
-**作者邮箱（公开仓库，硬性要求）**：本仓库已公开（github.com/shaonialife/cardeck），
-提交里的作者/提交者邮箱**只允许 `*@users.noreply.github.com`**
-（`16135960+shaonialife@users.noreply.github.com`）。**绝不能出现公司/私人邮箱**——
-提交推送后无法真正撤回，GitHub 会永久索引，搜索引擎也能关联到你的雇主。
-四层防护（均已实测）：
-1. **仓库局部 `.git/config`** 已设 noreply 邮箱，覆盖全局 `~/.gitconfig` 里的公司邮箱
-   （根因就是全局配置是公司邮箱，任何新仓库都会默认带上）；
-2. **`pre-commit` 守门**：`user.email` 不在白名单直接拒绝提交；
-3. **`pre-push` 扫描**：检查**所有待推送提交**的 `%ae`/`%ce`，非白名单即拒绝推送。
-   这条覆盖 pre-commit 挡不住的情况——`--no-verify`、cherry-pick/rebase 沿用原提交
-   作者、从其它仓库 pull 进来的历史；
-4. 必要时 `git filter-branch --env-filter` 改写历史（已对全部提交执行过一次）。
+**Адрес автора (публичный склад, обязательное требование)**: Этот склад опубликован (github.com/shaonialife/cardeck),
+Адрес электронной почты автора/отправителя в заявке**Разрешается только `*@users.noreply.github.com`**
+(`16135960+shaonialife@users.noreply.github.com`). **Корпоративные/частные адреса электронной почты не должны указываться**——
+Как только вы совершите отправку, вы не сможете ее отозвать, GitHub навсегда проиндексирует ее, и поисковые системы смогут связать ее с вашим работодателем.
+Четыре уровня защиты (все проверено):
+1. **Локальный склад `.git/config`** установил почтовый ящик noreply, охватывающий почтовый ящик компании в глобальном `~/.gitconfig`.
+   (Основная причина в том, что глобальной конфигурацией является почтовый ящик компании, и любой новый склад будет приносить его по умолчанию);
+2. **`pre-commit` Gatekeeper**: `user.email` не находится в белом списке и напрямую отказывается отправлять сообщения;
+3. **Сканирование `pre-push`**: отметьте **все `%ae`/`%ce` для отправки и отправки**. Если их нет в белом списке, в push будет отказано.
+   Это охватывает ситуацию, которую предварительная фиксация не может предотвратить - `--no-verify`, Cherry-pick/rebase использует исходную фиксацию.
+   Автор, извлекайте историю из других репозиториев;
+4. `git filter-branch --env-filter` переписывает историю при необходимости (уже выполняется один раз для всех коммитов).
 
-**踩坑记录**：`git reflog expire --expire=now --all` 会**连带清掉 stash 的 reflog**，
-使 `git stash list` 变空（`refs/stash` 引用与内容其实还在，只是列表读 reflog）。
-误清后可用 `git update-ref --create-reflog refs/stash <sha>` 或手工补
-`.git/logs/refs/stash` 恢复。另：shell 脚本里 `$var` 紧跟中文/全角字符
-（如 `$remote_ref（`）会被当成变量名的一部分，必须写成 `${remote_ref}`。
+**Отслеживание**: `git reflog expire --expire=now --all` **очистит журнал** от тайников,
+Сделайте `git stash list` пустым (ссылка и содержимое `refs/stash` на самом деле все еще там, но журнал ссылок просто читается в списке).
+После ошибки вы можете использовать `git update-ref --create-reflog refs/stash <sha>` или ручную коррекцию.
+Восстановление `.git/logs/refs/stash`. Еще: `$var` в сценарии оболочки следует за китайскими/полноширинными символами.
+(например, `$remote_ref（`) будет рассматриваться как часть имени переменной и должна быть записана как `${remote_ref}`.
 
-**调试**：logcat 受限（HKS），运行日志走文件 `files/main_debug.log`（任意线程
-`SessionController.appendLog` 写入）：
-`adb shell "run-as io.github.shaonialife.cardeck grep/tail files/main_debug.log"`。
-接收端画面验证：`adb -s <测试台serial> exec-out screencap -p`。
+**Отладка**: logcat ограничен (HKS), выполняется файл журнала `files/main_debug.log` (любой поток
+`SessionController.appendLog` пишет):
+`adb shell "run-as io.github.shaonialife.cardeck grep/tail files/main_debug.log"`.
+Проверка приемника экрана: `adb -s <серийный номер испытательного стенда> exec-out screencap -p`.
 
-## 架构速览
+## Краткий обзор архитектуры
 
 ```
-bt/          蓝牙 iAP2：Server（测试台回连）/ Client（真车主动连）+ BtSessionGate
-iap2/        iAP2 链路层 + CSM + 发送端会话（0x5703 热点凭据 / 0x4301 AirPlay 端点）
-net/         WiFi 入网绑定（WifiCarPlayConnector）+ mDNS ctrl 广播 + ctrl-int HTTP
-airplay/     AirPlay：SRP 配对、加密 RTSP 控制通道、事件通道、流协商、ChaCha20 加密
-video/       MediaCodec Surface 输入 H.264 → 128B 头 + ChaCha20 帧封装 TCP 推流
+bt/Bluetooth iAP2: Сервер (подключение к тестовому стенду)/Клиент (активное подключение к реальному автомобилю) + BtSessionGate
+Канальный уровень iap2/iAP2 + CSM + сеанс отправителя (учетные данные точки доступа 0x5703 / конечная точка 0x4301 AirPlay)
+net/привязка сети Wi-Fi (WifiCarPlayConnector) + широковещательная рассылка ctrl mDNS + ctrl-int HTTP
+airplay/AirPlay: сопряжение SRP, зашифрованный канал управления RTSP, канал событий, согласование потока, шифрование ChaCha20.
+видео/MediaCodec Поверхностный ввод H.264 → заголовок 128B + инкапсуляция кадров ChaCha20 Push-поток TCP
 audio/       AudioPlaybackCapture → RTP/ChaCha20 over UDP
-launcher/    隐形屏启动器（核心）：四块受信虚拟屏
-render/      DualDisplayComposer：GL 合成多虚拟屏画面 → 编码器 Surface（出帧节奏在此）
-input/       TouchRouter：车机触摸按坐标分流注入 dock/app/map 屏
-shizuku/     Shell（cmd 执行）+ CarInputClient（触摸注入/虚拟屏创建/resize，AIDL UserService）
-SessionController  会话总管（进程级单例）：链路生命周期、配对、WiFi 自动加入、取消
-launcher/settings/ 设置面板体系（Fragment）：车机双栏与手机二级菜单共用同一套面板
-media/       通知使用权 → 媒体会话状态（音乐卡数据源）
-ui/ScreenDimmer  常亮+暗幕；WallpaperStore 壁纸
-MainActivity 手机侧操作台 UI（英雄卡状态机 1s 轮询）
+пусковая установка/невидимая пусковая установка экрана (ядро): четыре доверенных виртуальных экрана
+render/DualDisplayComposer: GL синтезирует несколько виртуальных экранов → поверхность кодировщика (здесь ритм кадра)
+ввод/TouchRouter: сенсорное управление автомобилем на основе ввода координат в док-станцию/приложение/экран карты
+shizuku/Shell (выполнение cmd) + CarInputClient (сенсорное внедрение/создание/изменение размера виртуального экрана, AIDL UserService)
+Менеджер сеансов SessionController (одиночный элемент на уровне процесса): жизненный цикл соединения, сопряжение, автоматическое присоединение к Wi-Fi, отмена
+система панели запуска/настроек/настроек (фрагмент): две колонки автомобиля и вторичное меню мобильного телефона используют одну и ту же панель.
+права на использование медиа/уведомлений → состояние медиа-сессии (источник данных музыкальной карты)
+ui/ScreenDimmer всегда яркий + темный экран; ОбоиМагазин обоев
+Пользовательский интерфейс консоли MainActivity Mobile (опрос конечного автомата карты героя 1с)
 ```
 
-**虚拟屏**（横屏车机，全部经 Shizuku shell 创建）：CarPlayDock（左侧竖条，自有
-DockActivity，不受信）+ CarPlayApp（原生应用屏）+ CarPlayAppHi（超采样应用屏，
-竖屏锁定应用 letterbox 缓解）+ CarPlayMap（地图屏，仪表盘 tile/全屏间动态 resize）。
-竖屏车机时 dock 落底部、无 Hi 屏。
+**Виртуальный экран** (горизонтальный экран машины, созданный оболочкой Shizuku): CarPlayDock (вертикальная полоса слева, собственная
+DockActivity, не доверенный) + CarPlayApp (собственный экран приложения) + CarPlayAppHi (суперсэмплированный экран приложения,
+Облегчение почтового ящика приложения вертикальной блокировки экрана) + CarPlayMap (динамическое изменение размера между экраном карты, плиткой приборной панели/полноэкранным режимом).
+Когда машина в портретной ориентации, док падает вниз и экрана Hi нет.
 
-## 关键约定与已踩过的坑（改代码前必读）
+## Ключевые соглашения и преодоленные подводные камни (обязательно прочитать перед изменением кода)
 
-- **首页旋转：声明 configChanges 不重建 + 横屏双栏**（2026-10-18）：手机侧首页是
-  有状态的操作台（滚动位置、折叠卡、已填 SSID、正在显示的弹窗），系统重建会全部丢掉，
-  所以 `MainActivity` 声明了 `orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden`。
-  **代价是 `layout-land/` 不会生效**，横屏排布只能在 `onConfigurationChanged` 里手工切：
-  `applyContentLayout(landscape)` 在横屏把英雄卡**移出 ScrollView**、挂到 `contentArea`
-  左缘固定（右栏 `mainScroll` 用左内边距让位），竖屏再移回 `contentRow`——
-  英雄卡若留在同一个 ScrollView 里，滑右栏会把它一起带走（用户实测反馈）。
-  移动父容器后 layoutParams 类型会变（LinearLayout ⇄ FrameLayout），必须整体重建；
-  横屏高度要 `WRAP_CONTENT`（FrameLayout 里 MATCH_PARENT 会把按钮顶到卡片底缘）。
-  **onCreate 也必须调一次**——以横屏启动不会触发 onConfigurationChanged。
-  横屏屏高只有 ~300dp，实测预算：顶部栏 60 + 波形框 70 + 状态 40 + 副标题 20 +
-  间距 18 + 按钮 52 + 内边距 24 ≈ 284dp 刚好放得下「未连接 + 启动连接」；波形框压矮后
-  圆盘要同步缩到 44dp（否则 74dp 圆盘撑满框、弧线被完全挤出可视区），CARPLAY 标签
-  在横屏隐藏。`SignalWavesView` 按 **min(宽比, 高比)** 缩放（原先只按宽度，压矮即溢出），
-  `hubPlate`/`hubCaption` 用 gravity 居中而非固定 marginTop（后者按 176dp 算死，压矮必错位）。
-  **英雄卡宽度不要读 `contentArea.width`**：旋转瞬间它还是旧方向的测量值（竖屏 1168 →
-  横屏里英雄卡只剩 537px、副标题挤成三行），要用 `屏幕宽 - 页面内边距` 推算。
-  弹窗尺寸统一走 `ui/PanelWindow`（宽度 92% 屏宽 + 可选高度比例），它维护「正在显示」
-  的弱引用清单，`onConfigurationChanged` 调 `resizeShowing(this)` 重算——不重算的话
-  弹窗会保持竖屏宽度、在横屏里只占中间一半。
-- **线程**：短命一次性任务用 `Bg.run("name") { }`（util/Bg.kt，cached 池）；长驻循环
-  线程（GL 合成、链路 reader/pacer、accept 循环、看门狗等）保持独立 Thread——需要
-  命名、interrupt 和生命周期持有，不要收进池。主线程禁止 IO/解码（封面等走专用执行器）。
-- **UI 线程绝对禁止 `Shell.exec`/Shizuku 调用**（2026-10-18 系统排查，两次真机 ANR 的
-  共同根因）：每条 `Shell.exec` 都是 `newProcess` + 进程等待，正常 ~100ms、超时上限
-  可达数秒；`detach()` 里 3 屏 ×(set+get) = 6 条直接 ANR，横屏勾选框的 `setEnabled`
-  2 条（各 4s 超时）最坏 8s 也够 ANR。**已加运行时守卫**：`Shell.exec` 检测到主线程
-  调用时累加 `mainThreadViolations` 并写文件日志
-  （`SHELL: ⚠ 主线程调用 shell（第 N 次）cmd=…`），接线在 `SessionController.ensure`。
-  出现该日志即说明有新代码走了 UI 线程，必须改 `Bg.run` / 异步包装。
-  排查结论（2026-10-18 全量复查）：`MainActivity`（refreshShellState/resetShellState/
-  releaseDisplays/通知授权）、`ScreenDimmer`、`SessionController`（autoJoinCarWifi/
-  shellWifiStatus，仅由 Bg 调用）、`DeviceIdentity.bluetoothMac`（调用方均在后台）、
-  `VirtualLauncher.launchApp`（三个调用点都包在 Bg）均已正确；本次修掉的两处是
-  `VirtualLauncher.detach` 与 `AppOrientationCompat.setEnabled`（后者新增
-  `setEnabledAsync` 供 UI 用，内部执行器串行保证连点顺序）。
-  另注意 `BtProfiles.proxy()` 用 `getProfileProxy`，其**回调经主线程 Handler 投递**——
-  在主线程调用必然等满 1.2s 超时并返回 null（已加显式主线程守卫与告警日志），
-  这类「阻塞等主线程回调」的 API 一律只能在后台调用。
-- **Shizuku 未就绪必须硬拦连接**（2026-10-18 用户实测：手动停掉 Shizuku 后仍能点
-  「启动连接」）：隐形屏模式的虚拟屏创建、触摸注入、窗口/显示状态读取全部经 Shizuku
-  shell，未就绪时放行只会走到「蓝牙已连、车机黑屏 + 触摸全丢」的半残态。
-  拦截点在两条路径上都设了：`ensureShizukuReady`（CTA 前置，排在蓝牙之前）与
-  `startConnectionNow` 开头（授权回调等延迟路径的兜底）。三态引导文案由
-  `ShizukuGate.guidanceOf` 给出**互不相同**的动作（未装=无跳转只说明；未运行=打开
-  Shizuku App；未授权=请求授权并自动续连），因为「未就绪」一句话无法指导用户。
-  **连接准备清单把 Shizuku 计为第 1 项**（`readyCount` 现在 x/4），状态行本身可点开引导。
-  授权结果经 `Shizuku.OnRequestPermissionResultListener` 驱动：granted 时刷新状态并
-  在 `pendingShizukuThenConnect` 置位时自动继续，Activity 销毁必须注销监听。
-  提示弹窗统一走 `ui/DarkMessageDialog`——裸 `AlertDialog.Builder.setMessage` 在
-  `Theme.AppCompat.DayNight` 下是**浅色**的，与全深色 UI 割裂（同日真机截图暴露）。
-  该组件支持 1~2 个操作横排靠右、3 个及以上**竖排等宽**（窄屏横排会挤爆；竖排时次要
-  按钮也要上胶囊底，否则只有主按钮是实心整宽、权重失衡）；`Emphasis` 区分主操作
-  （实心青）/ 正文按钮 / 危险操作（暗红）；`dismissOnClick=false` 可保留弹窗重试。
-  已统一：Shizuku 引导、音频选择、取消连接、断开连接、蓝牙未开启、加入热点、
-  残留虚拟屏、悬浮窗权限、横屏残留（列表外横幅 + 行内清除）。
-- **三套坐标系**：车机触摸 = 通告视图坐标系（如 1160×540）；流/虚拟屏 = 缩放后尺寸
-  （如 1450×674）。`TouchRouter.setCoordinateScale` 在会话建立时换算，改动触摸路由
-  时不要破坏这层映射。地图屏坐标 = 显示内容本身（动态 resize 后）。
-- **dock 尺寸必须随画布分辨率等比**（2026-10-17 修复「高分辨率下车机 dock 文字/图标
-  显小」）：dock 的所有尺寸源自设计稿 `design/launcher-proto.html`（基准画布
-  1160×540@420dpi，dock 48dp=126px、时钟 22px）。**dock 屏密度由 SessionController
-  按画布短边等比下发**（`420 × min(流W,流H)/540`，上限 1680）——奥迪基准下系数恰为
-  1.0、行为与旧版完全一致；测试台 2320×1080（2×）下密度 840，dock 条 252px、文字/
-  图标同步 ×2，占画布短边恒定 23.3%。此前密度固定 `420×缩放%`，高分辨率车机上 dock
-  相对画布减半显小（应用屏密度是自适应算的，所以只有 dock 显小）。配套约定：
-  ① dock 布局（`activity_dock_sidebar/bar.xml`）**全部用 dp**（= 设计 px ÷ 2.625），
-  禁止 px 写死；② 字号在 `DockActivity` 按「设计 px × designScale」以 PX 设置
-  （designScale = densityDpi/420；不用 sp——dock 是像素级设计画布，不跟手机字体缩放）；
-  ③ 模糊半径等物理像素量同样乘 designScale；④ `fitClockText` 的行程/步进也按
-  designScale 缩放。改 dock 视觉时先确认这三处都随密度走。
-- **竖屏桌面网格行数自适应**（2026-10-17 修复「竖屏单元格占用范围过大」：用户开
-  「显示布局边界」截图暴露——固定 3 行把格子拉成 ~1:2.5 瘦高条，图标只占三成、
-  大片空框）：`GridActivity.computeCellMetrics()` 按**格子目标高宽比 1.25** 自适应
-  行数（`usableH / (格宽 × 1.25)`，钳制 3~6 行）——横屏 CarPlay 规格仍算出 3 行、
-  行为与旧版完全一致；竖屏（如 648×1241 应用屏）算出 6 行（对齐 iPhone 竖屏主屏
-  4×6 观感），格子收敛到 ~154×193。分页容量 = `COLUMNS × rows`（运行时字段，
-  勿回退成常量）。UI 验证技巧：手机开发者选项「显示布局边界」下截图，单元格
-  红框即实况边界；改尺寸后先算 `usableH/(格宽×1.25)` 再对照截图红框高度核对。
-- **流尺寸必须为偶数**（H.264 4:2:0）：奇数高度会让编码器首帧输入时进错误态且
-  曾被静默吞掉。缩放计算后统一在 SessionController 对齐（VideoSender 内另有兜底）。
-- **虚拟屏 resize 必须同步消费端**：`VirtualDisplay.resize` 后要
-  `SurfaceTexture.setDefaultBufferSize(新尺寸)`，否则投影把新内容画进旧 buffer 左上角
-  （内容偏居左、宽度只剩比例值）。
-- **虚拟屏上的应用弹不出键盘：两条独立原因，都必须修**（2026-10-17 定谳，车机侧
-  「设置」搜索框点击无键盘根因；已实现并经真机端到端验证——车机屏弹键盘、点击按键
-  文本进入搜索框）：
-  **① 私有屏拒绝第三方 IME 窗口**：`createVirtualDisplay` 不声明
-  `VIRTUAL_DISPLAY_FLAG_PUBLIC` 时屏带 `FLAG_PRIVATE`（owner=shell uid 2000），而
-  `WMS.addWindow` 的访问闸 `displayContent.hasAccess(session.mUid)` → `Display.hasAccess`
-  对私有屏只放行 owner/system/root/UID-present——**输入法（uid 10xxx）的键盘窗口被
-  `ADD_INVALID_DISPLAY(-9)` 拒绝**，`SoftInputWindow.show()` 捕获后进入
-  `REJECTED_AT_LEAST_ONCE` **永不重试**（表现为 IME 服务侧 `mViewsCreated/mWindowVisible=
-  true` 但 WM 里没有 InputMethod 窗口、`mImeWindow` 恒 null）。修复：受信屏 flags 加
-  `VIRTUAL_DISPLAY_FLAG_PUBLIC`（公开 API = 1；只放宽窗口访问，「公开屏默认自动镜像」
-  仅在不声明 OWN_CONTENT_ONLY 时生效，我们已声明，不受影响；dock 屏保持私有）。
-  **② IME 展示策略默认 FALLBACK**：`VIRTUAL_DISPLAY_FLAG_TRUSTED` 只保证受信，**虚拟屏的
-  IME 展示策略默认是 `DISPLAY_IME_POLICY_FALLBACK_DISPLAY`**（`dumpsys window displays`
-  里该屏 SettingsEntry `mShouldShowIme=null` 即此默认值）——IMMS 的
-  `computeImeDisplayIdForTarget` 对非 LOCAL 策略一律返回默认屏，键盘请求被路由到
-  **手机主屏**。修复：创建受信屏后 shell 反射调 `IWindowManager.setDisplayImePolicy(id,
-  LOCAL)`——**LOCAL 值必须运行时反射读 `android.view.WindowManager.DISPLAY_IME_POLICY_LOCAL`
-  而非硬编码**（本机 ROM 有魔改枚举值的风险，用户 2026-10-17 提示；AOSP = 0，读不到回落 0
-  并记日志）。IWindowManager 代理走 `ServiceManager.getService("window")` +
-  `IWindowManager$Stub.asInterface` 反射（`WindowManagerGlobal.getWindowManagerService`
-  在本 ROM 上会致进程被杀，勿用）；需 `INTERNAL_SYSTEM_WINDOW`，本机
-  `com.android.shell` 已授予，`wm`/`cmd window` 均无对应命令。策略按 display 实例
-  （uniqueId 含代次）记录、虚拟屏每次会话重建，故必须随 createDisplay 重设（幂等）；
-  只对受信屏可设（否则 WMS 抛 SecurityException）。
-  两条都要修才通：只设策略 → 令牌迁到虚拟屏但窗口被 private 闸拒绝（实测
-  `imeDisplayId=299` 而 `mImeWindow=null`、show 卡在
-  `PHASE_SERVER_SET_REMOTE_TARGET_IME_VISIBILITY(49)`）；只放开 PUBLIC 不设策略 → 键盘
-  仍落手机屏。**诊断工具**：反射读 `WindowManager` 全部 IME_POLICY 字段 + 逐屏读策略
-  （`/data/local/tmp/const.jar ImeConst <ids...>`）；`dumpsys` 看 `mViewsCreated` 与
-  `mImeWindow` 是否同真。改动文件：`CarInputServiceImpl.createDisplay`。
-- **虚拟屏必须「忽略应用请求的方向」**（2026-10-18 定谳，头条旋转整屏的根因）：
-  竖屏应用（头条等）在横屏虚拟屏上会请求 portrait，系统照办就把**整块虚拟屏**旋转
-  ——`dumpsys display` 可见 `rotation 0→3`、`real 2251x1152→1152x2251`。后果是一连串：
-  合成器按整幅映射 → 画面比例异常；`TouchRouter` 按未旋转尺寸换算坐标 → 点击漂移、
-  点不到目标；退回桌面时仍是旋转态 → 「桌面分辨率也变了」。
-  修法：会话建立时对 **app / appHi / map 三块屏**执行
-  `cmd window set-ignore-orientation-request -d <id> true`，`detach` 时置回 false
-  （必须在释放虚拟屏**之前**，否则 id 失效、设置以 uniqueId 残留到下次会话）。
-  **踩过的坑**：这条命令只接受 `true|1|false|0`，传 `reset` 会报
-  `Error: expecting true, 1, false, 0, but we get reset` 且**只写 stderr**——
-  而 `Shell.exec` 不读 stderr，于是旧代码静默无效了整整一段时间（方向策略从未生效）。
-  现在 `setIgnoreOrientationRequest()` 写完**读回校验**，失败会打印
-  `⚠ 应用屏忽略方向请求失败`。**新增任何 shell 写操作都应读回确认**，
-  尤其 `cmd window` 这类参数校验严格的命令。
-- **GL 绘制坐标约定**：DualDisplayComposer 顶点/裁剪的 y 全程是 **GL 坐标（底部
-  原点，向上增长）**，触摸/流坐标是顶部原点——两套方向相反，混用即出 bug。圆角
-  裁剪矩形（uClipRect）必须与顶点同坐标系直传；曾因翻转成屏幕坐标 + 全高 tile
-  对称重合而长期未暴露，半高 tile（竖屏）整块被 discard（地图卡不可见根因，
-  2026-10-14）。部分区域可见性异常时优先核对该区域顶点与裁剪的坐标系一致性。
-- **出帧节奏**在 DualDisplayComposer 合成循环：有新帧按 `1000/targetFps` 节流，
-  静止画面保底 33ms 心跳（编码器断粮 = 接收端画面冻结）；「新帧」只统计会画进
-  输出画面的输入（dock + 活动应用屏 + tile 可见时的 map）。
-- **默认地图解析禁止回环**（2026-10-18，「卸载重装后地图卡不渲染」根因）：
-  `DefaultMapPrefs.resolve()` 在「未设置默认地图」时曾回调
-  `VirtualLauncher.defaultMapComponent()`，而后者只是转调回 `resolve()` ——
-  无限递归 → `StackOverflowError`。触发条件恰好是**偏好为空**（卸载重装/清除数据
-  后的状态），所以症状是「重装后首次连接地图卡黑屏、在车机设置里重选一次默认地图
-  就恢复」。异常还被 `Bg.run` 的 catch 吞进 logcat（本机型 HKS 加密读不到），
-  文件日志完全静默——极易误判成虚拟屏/合成器问题。
-  现状：解析逻辑集中在纯函数 `resolveDefaultMap()`（显式优先 → 优先序扫描），
-  单测 `DefaultMapPrefsTest` 覆盖 5 条路径（含「反复解析必须终止」）。
-  **改默认地图相关代码时不要引入跨对象互调**；`VirtualLauncher.defaultMapComponent`
-  只允许单向转调 `DefaultMapPrefs`。
-- **会话生命周期钩子**：强制横屏覆盖（AppOrientationCompat）attach 时 applyAll、
-  retireSession/onEnded 时 resetAll——新加系统级写入（settings/cmd）照此模式收口。
-- **锁屏/息屏对虚拟屏的影响：两条独立 token 路径 + ALWAYS_UNLOCKED 豁免**（2026-10-23
-  荣耀 Magic7 Pro 真机实证，flag 修复已落地、整车链路待车验证）：
-  手机按电源键后车机冻结/黑屏是系统两条休眠路径叠加：① **keyguard sleep token**
-  （锁屏时 KeyguardController 给每块屏发 token → 活动暂停）；② **Display-off sleep
-  token**（PUBLIC 虚拟屏没有 `FLAG_NEVER_BLANK`——AOSP 只给非 PUBLIC 屏配，系统熄屏时
-  虚拟屏电源态跟随主屏变 OFF/DOZE → WM 发 token）。修复：`CarInputServiceImpl.
-  createDisplay` 给屏加 **`VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED`（@hide，1<<12）**——
-  `setKeyguardShown` 对带此 flag 的屏直接忽略（连 PIN 安全锁也不影响），锁屏不再发
-  keyguard token；**必须同时声明 `VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP`（1<<11）**，
-  否则 flag 被系统剥掉（文档明说「只对不在默认 display group 的虚拟屏有效」，实测不带
-  时创建成功但读回 display.flags 无此位）。权限 `ADD_ALWAYS_UNLOCKED_DISPLAY`/
-  `ADD_TRUSTED_DISPLAY` 经实测 shell 已持有（dumpsys package com.android.shell）；
-  ROM 拒绝时降级去掉重试（createDisplay 内置回退）。真机验证：带 flag 的屏锁屏后
-  无 keyguard token，亮屏（仍 PIN 锁定）即自动苏醒、活动 RESUMED、画面帧恢复。
-  **配套认知**：① 屏在**熄屏态创建**会出生即带 Display-off token（休眠），交互态创建
-  才出生即醒——产品建屏发生在用户操作手机时，无此问题；② 系统真休眠（按电源键）期间
-  窗口表面会被剥离，唤醒后表面重挂在本 ROM 上不稳定（活动 RESUMED 但 mHasSurface=
-  false，靠后续亮屏稳态/活动重启恢复）——所以「按电源键」场景仍需产品侧配合：
-  引导用「假息屏」而非电源键。
-  **「连接时真息屏」（PR17，2026-10-24 合入）默认关**（设置→显示，用户要求）：
-  断电由暗幕承载（`enterDimNow`，同手动假息屏路径）——面板断电后触摸 IC 实测
-  仍工作（荣耀：黑屏下触摸直达 UI），点暗幕即唤醒；暗幕同时是口袋误触盾。
-  **按电源键 = 真休眠 = 车机冻结风险**（Keyguard/表面剥离，本 ROM 不稳），
-  正确姿势是点暗幕、别按电源键；降级路径（暗幕不可用）裸断电只能按电源键救。
-  **真·假息屏已实现（2026-10-23 真机验证）**：`ICarInput.setScreenPower(on)` 在
-  UserService 里反射 `SurfaceControl.setDisplayPowerMode(token, POWER_MODE_OFF/NORMAL)`
-  （需要 ACCESS_SURFACE_FLINGER，shell 已持有）。系统保持交互态 → 虚拟屏零影响
-  （`dumpsys power` mWakefulness 一直 Awake），物理面板真断电（
-  `dumpsys SurfaceFlinger` 头部 `powerMode=Off/On/Doze` 可直接核对）。屏幕暗着
-  但**没锁屏没睡眠**，触摸探针唤醒、会话结束/暗幕开关/detach 三路收口恢复供电、
-  SCREEN_OFF 广播（真休眠）清 `panelOffByUs` 标记把面板交还系统。
-  **token 获取入口随系统版本迁移，荣耀 A17 实测只有 ③ 通**：①
-  `SurfaceControl.getPhysicalDisplayIds/getPhysicalDisplayToken`（Android 11~14，
-  本机 NoSuchMethodException）→ ② `android.hardware.display.DisplayControl`（部分
-  新系统，本机 ClassNotFoundException）→ ③ `SurfaceControl.getInternalDisplayToken`
-  （本机可用）。三分支都失败时 setScreenPower 返回 false，暗幕自动退回纯遮罩态。
-  **注意**：面板断电后物理触摸能否唤醒未在真机验证（bench 用的是注入事件）——
-  若数字死屏不拾取，唤醒路径 = 电源键（真休眠一次再亮）。
-  **暗幕仍保留，角色变化**：①setScreenPower 失败（老 ROM/Shizuku 未就绪）时的降级
-  手段；②假息屏期间的误触盾——面板灭着时若无这层可点击遮罩，兜里触摸会点到前台
-  应用（如「断开连接」）。面板断电时暗幕不可见，不影响观感。
-  **生命周期收口（2026-10-23 用户实测 bug）**：假息屏中按电源键真休眠时，SCREEN_OFF
-  必须**同时**清面板标记、撤暗幕、停计时——否则解锁后暗幕还盖在锁屏上，要多点一下
-  才消失；USER_PRESENT（解锁）再重排计时——指纹/人脸解锁不产生屏幕触摸事件，探针
-  收不到，不补排的话解锁后自动假息屏是停摆的。
-  诊断：`dumpsys window displays` 看各屏 `mSleeping`/`mAllSleepTokens`；
-  `dumpsys display` 看虚拟屏 `state`； UserService 建屏读回校验打在
-  `/data/local/tmp/carinput_svc.log`（含 token 入口与 setScreenPower 结果）。
-- **暗幕/常亮必须由会话驱动，不能由 App 启动驱动**（2026-10-19 用户实测
-  「会话已断开、过一会儿仍然启动暗幕」）：`ScreenDimmer.attach` 原先在启动时就
-  `schedule()` 45 秒定时器，而车机侧断开走的是 `VideoSender.onEnded`——它**不经过
-  `retireSession`**，`VirtualLauncher` 仍挂着，定时器照常触发。现在自动暗幕的条件是
-  `enabled && sessionActive && attached`（纯函数 `shouldAutoDim`，有单测）：
-  会话开始（`VideoSender.start` 的 onSurfaceReady 里 `attach` 成功后才置位）才排程与
-  把屏幕超时改「永不」，`onEnded` / `retireSession` 与 `detach()` 都必须清零标记
-  （否则下次启动会沿用 true）。手动「假息屏」`enterDimNow` 走 `force` 路径不受限制。
-  **判断标准**：任何「会话期间才该生效」的 UI/系统副作用，都要同时挂在
-  「推流启动成功」与「onEnded」两端——只挂一端必然漏掉车机主动断开这条路径。
-- **手机真息屏（物理面板断电）+ 虚拟屏独立常亮**（2026-10-23，详见
-  `docs/PHONE-SCREEN-OFF.md`）：按电源键会「锁屏 + Doze」（车机黑屏/掉帧），正确做法是
-  让系统逻辑上保持「亮屏且未上锁」，只把物理面板在 SurfaceFlinger 层断电（scrcpy `-S` 同源）：
-  受信屏额外声明 `VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP(1<<11)` +
-  `VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED(1<<12)`，再对物理主屏 token 调
-  `SurfaceControl.setDisplayPowerMode(0)`。**dock 屏虽「不受信」也必须带同一对 flag**
-  （同样的三级降级）——否则它落在默认显示组，物理屏一断电整组跟着灭，车机侧表现为
-  「app 屏正常、dock 栏全黑，解锁后恢复」（2026-10-23 实测；AOSP 只在 `AUTO_MIRROR`
-  时清 `OWN_DISPLAY_GROUP`，dock 没声明 PUBLIC 故 flag 保留）。四条硬约束：① `ALWAYS_UNLOCKED` 需
-  `ADD_ALWAYS_UNLOCKED_DISPLAY`，**部分 ROM 未授予 shell**，带上会 SecurityException
-  打挂整块屏 → `createDisplay` 必须三级降级（组+解锁 → 组 → 基础 flags）；
-  ② **SDK 34+ 删除了 `SurfaceControl.getPhysicalDisplayIds/getPhysicalDisplayToken`**，
-  必须经 `ClassLoaderFactory` + `SYSTEMSERVERCLASSPATH` 加载
-  `com.android.server.display.DisplayControl`，并 `Runtime.loadLibrary0(cls,"android_servers")`，
-  否则 JNI 未注册（scrcpy 同款）；③ 时机：推流成功后 `enterPhoneScreenOff()`，
-  `onEnded` 走 `restorePhoneScreen(sleep=true)`（保持黑、直接 KEYCODE_SLEEP），
-  `retireSession`/手动断开设 false（点亮面板）；④ **必须有三层恢复**（会话结束 /
-  UserService 过期自尽前 / 应用下次启动）——否则应用崩溃会把手机留在黑屏
-  （电源键按两次能救回，但不能依赖它）。**用户开关**：设置 → 显示 →「连接时真息屏」
-  （默认开，`DisplayPrefs.screenOffOnConnect`，键 `screen_off_on_connect`）；关闭后
-  只保留暗幕。会话中切换经 `SessionController.applyScreenOffPreference` **立即收放**
-  （车机屏可操作，不必等下次连接）。「显示」面板已套 ScrollView——车机内容区只有
-  ~200dp 高，4 段内容不滚动会把最后一段裁掉。
-- **上车自动连接（ACL 广播唤醒，2026-10-23，详见 `docs/AUTO-CONNECT.md`）**：
-  `bt/CarBluetoothReceiver` 以**清单静态接收器**监听 `ACTION_ACL_CONNECTED/DISCONNECTED`
-  ——这两个在[隐式广播例外清单](https://developer.android.com/develop/background-work/background-tasks/broadcasts/broadcast-exceptions)
-  里，进程被杀也能冷启动。三条硬事实：① **Android 12+ 的后台 FGS 豁免清单里没有
-  「蓝牙广播」**，本项目能 `startForegroundService` 是因为持有 `SYSTEM_ALERT_WINDOW`
-  （暗幕/触摸探针本来就要，targetSdk 34 只看权限存在）；用户没授悬浮窗时会被
-  `ForegroundServiceStartNotAllowedException` 拦下，接收器只记日志、不崩；
-  ② FGS 必须用 `connectedDevice` 类型（2 参 `startForeground` 会带上 mediaProjection，
-  Android 14 校验 AppOps PROJECT_MEDIA 直接崩）；③ 冷启动进程里必须先
-  `SessionController.ensure(applicationContext)` 再 `startConnection(...)`——BT client /
-  WiFi 连接器都在 `ensureSessionObjects` 里建，跳过会 NullPointer。
-  自动连接**有声音**：靠 `audio/SilentProjectionActivity` 静默领 MediaProjection——
-  `appops set <pkg> PROJECT_MEDIA allow` 让 SystemUI 直接返回 RESULT_OK（Tasker 同款，
-  该 app-op **持久**，不需要时 `appops set … default` 清），再由 shell `am start` 拉起
-  1×1 透明、`exported`、`noHistory` 的跳板（shell 只有 START_ACTIVITIES_FROM_BACKGROUND，
-  没有 START_ANY_ACTIVITY，所以必须 exported）。**Android 14 铁律**：拿到授权后先
-  `upgradeToProjection()` 把 FGS 类型加上 mediaProjection，才能 `getMediaProjection`；
-  且 `onStartCommand` 里重复 `startForeground` 时若 `mediaProjection != null` 必须继续
-  带上该类型（否则类型被摘、投影被停）。**开关**：设置 → 显示 →「上车自动连接」
-  （`AutoConnectPrefs`，默认开；与「连接时真息屏」同一面板）。
-  下车走 `ACTION_AUTO_STOP_SESSION` → `disconnect()`；该 intent 用 `startService` 投递
-  （服务在跑时进程已是前台服务态，不受后台启动限制）。
-- **车机 HID：方向盘媒体键 + iDrive 旋钮**（2026-10-23，详见 `docs/HID-KNOB.md`）：
-  `/info` 的 hidDevices **已遍历全部 uuid 发 hidSetInputMode**——不要改成按 uuid/名称猜设备
-  （奥迪发 `"0"/"1"`、DiPlay 发整数），**描述符才是唯一稳定信号**。Consumer 页(0x0C) →
-  `ConsumerKeys`（Array/Variable 两种语义分开解，混用会一个键都点不出）→
-  `AudioManager.dispatchMediaKeyEvent` 全局媒体键；Generic Desktop 页(0x01) 的
-  Wheel(0x38)/Hat(0x39) → `HidNavigation` → `ICarInput.keyEvent(displayId, DPAD_*)`
-  注入虚拟屏（KeyEvent 也走 `setDisplayId`；失败回退 `input -d`）。**DPAD 不能全局分发**
-  （会落到手机主屏），目标屏取 `VirtualLauncher.activeAppDisplayId()`。焦点高亮 = 网格单元
-  `isFocusable=true` + `foreground=focus_ring`（foreground 不覆盖 background）；
-  **dock 是独立 display，DPAD 不跨屏**。键位校准开关：设置 → 显示 →「HID 原始日志」
-  （`DisplayPrefs.hidRawLog` → `HidNavigation.rawLogEnabled`，日志行 `HID-RAW: uuid=… bytes=…`）。
-- **取消连接必须全程可中断**：`sessionStarting` 互斥标志的复位依赖配对流程线程
-  走到 finally——该线程可能阻塞在不可中断的等待（无超时 connect、mDNS 等待、
-  BT 保活读循环），任何一处卡住都会让取消「无效」（英雄卡永久「正在连接」）。
-  防御三件套（2026-10-15 实战）：disconnect/取消时主动 detach 关 BT 会话 socket
-  （**只在用户终态做，见下条**）、AirPlayClient.cancelled 标志让配对重试循环提前退出、
-  cancelConnecting 强制 `sessionStarting.set(false)`（用户显式取消即强制解锁）。
-  **新增任何长等待点时必须响应 connectCancelled**，且取消路径要实测「发起后立即取消」场景。
-- **连接耗时三大头（奥迪实测，2026-10-18 日志量化）**：从「车机 ctrl 邀请/端点解析」
-  到 RECORD 的 4.9s 里，`/info` ~3.0s 是车机侧会话初始化（返回值与车机第二次 ctrl
-  邀请同一毫秒到达——它在窗口就绪前不应答，catplay 同样要等，**不可优化**）；
-  自家代码可省的两笔已移出关键路径：
-  ① `retireSession` 的 `AppOrientationCompat.resetAll`（6 应用 × 2 次 `am compat`
-     ≈1.6s，原先同步跑在配对前）；
-  ② 虚拟屏 attach 里的 `applyAll`（≈2.0s，原先推迟首帧）。
-  两者改为同一个**单线程执行器**异步执行（`applyAllAsync`/`resetAllAsync`，串行保证
-  「先复原上一会话、后写入本会话」）。**注意异步化的副作用**：`am compat enable`
-  会立即杀目标应用，而桌面图标点击可能在写入完成前发生——`VirtualLauncher.launchApp`
-  必须先 `AppOrientationCompat.awaitPending()` 排空队列，否则应用刚启动就被杀。
-  另一笔大浪费是 WiFi 绑定超时竞态：旧 `latch.await(5s)` 在手动加入热点场景会在
-  onAvailable 到达前 ~116ms 判失败并放弃整轮（真实耗时 20:02:09.352 放弃 →
-  20:02:09.467 成功），用户白等一轮 BT 重连（+13s）。现窗口 15s、分片等待可取消；
-  `WifiCarPlayConnector` 的 5s 看门狗只提示不改判定。
-- **iAP2 接收队列：暂存区与新到帧必须分开**（2026-10-18，日志刷屏活锁根因）：
-  `expectOrNull` 等待期间会把非目标帧放进 `pendingFrames`「待后续消费」，而
-  `recvFrame` 又优先从 `pendingFrames` 取——旧实现两者共用一个优先队列，同一帧被
-  反复取出→打日志→塞回，形成活锁，日志 ~1000 行/秒直到等待超时（触发场景：车机
-  bring-up 时 `0x5000 StartNowPlayingUpdates` 与 `0x5703` 相邻到达；跳过 2s
-  StartHID 空等后它直接落进下一段等待）。修法：`recvFrame`（通用，优先暂存）与
-  `recvNewFrame`（只读新帧）分开，`expectOrNull` 只走后者、并先查暂存区里是否已有
-  目标帧；暂存区加 256 条上限。回归测试 `Iap2SenderSessionTest` 在 mock 时序里插入
-  迟到的 0x5000——去掉修复即超时失败。另外 `pumpIncomingForever` 对同一消息 ID
-  连续到达做了限流（文件日志超 2MB 会被删，刷屏等于丢掉有用上下文）。
-- **连接时序：能力广播先行、邀请驱动、不盲等**（2026-10-18，对照 catplay 连接流程）：
-  catplay 发送端的顺序是「CarPlayCtrlServer 常驻广播 `_carplay-ctrl._tcp`（每 1s
-  force_announce）→ 车机 `GET /ctrl-int/1/connect` 邀请 → 收到邀请立刻建 AirPlay」，
-  全程没有固定 sleep。我们旧流程三处盲等，合计每轮白花 5~13s：
-  1) ctrl 广播要等 0x5703 才发布（车机发现手机天然晚一步）→ 改为 `startConnection`
-     即发布，0x5703/绑网后只做 `ensureForNetwork` 重注册；
-  2) 端点交接后固定睡 1.6s「赌邀请已到」→ 改 `awaitCtrlInvite`（邀请计数事件驱动，
-     2s 未到补一次 force_announce，4s 兜底；已发现 `_airplay._tcp` 也放行）；
-  3) 等 StartHID 2s + 等 0x4301 10s 无条件 → 先读 0x1D01 参数 6（车机声明它可发送的
-     消息清单），没声明就跳过（奥迪只声明 0x5703/0xea03，正是这两个空等的来源），
-     未给清单时才按保守窗口（0x4301 由 10s 收到 3s）。
-  配套：`_airplay._tcp` 发现器常驻（绑网即后台发现，需要时查缓存而非现查重试 3×6s）；
-  端点解析移到邀请之后（车机服务常在受邀后才上线）且不再占用网络回调线程；
-  WiFi 绑定前先确认 SSID 已是车机热点（`bindCurrentWifi` 只按 transport 请求、
-  **不校验 SSID**，切网途中会绑到旧网）；`bindCurrentWifi` 的 release+rebind 会
-  解绑进程网络，故绑过同一热点后走快路径、并用锁串行化两条绑定路径。
-  **注意**：广播提前后首注册可能赶上 Shizuku 未就绪 → TXT id 写成占位 MAC，
-  而车机按该 id 匹配手机（占位 = 永不邀请）。`DeviceIdentity.bluetoothMac(forceRetry)`
-  + `CarPlayCtrlAdvertiser.repairPlaceholderMac`（每 2s 重试、成功即重注册）是必需兜底。
-- **配对/推流期间绝不能断 BT 控制会话**（2026-10-16 定谳，「连上约 3 秒即断」循环根因）：
-  DiPlay 在 WiFi 隧道 iAP2 就绪前（AirPlay 通道从未下发 `disableBluetooth`，
-  `handoffRequested=false`）看到 RFCOMM 断开即判 `wireless bring-up failed` →
-  `closeWirelessStack` 拆掉整轮无线栈（Bonjour/热点/AirPlay 服务），**把已建立甚至
-  正在推流的 AirPlay 会话一起拆掉**（日志：DiPlay 侧 `RFCOMM reader FAILED` →
-  `bring-up failed`；手机侧约 +0.4s 后 `TUNNEL/EVENT 读取结束 - Connection reset`、
-  `推流中止`）。持续关一次就重建栈 30~40s，形成连上→断→重建→再连循环。
-  曾经错在 `retireSession()` 里 detach（每轮配对起步都会执行一次）；现在只在
-  `disconnect()`（用户断开/取消的终态）detach。**改会话退役逻辑时先确认没有新增
-  中途关 RFCOMM 的路径**；`SessionController.kt:876` 的「第二阶段 hack」（配对失败
-  后故意断 BT 重试）对 DiPlay 必然触发一次整栈重建，属已知代价。
-- **蓝牙只配对、不连接**（2026-10-18，用户实测奥迪 MIB3）：手机与车机处于蓝牙
-  **已连接**状态（HFP/A2DP 在线）时，车机**不开放无线 CarPlay 的 iAP2 服务窗口**
-  ——表现为 `BT-C: 连接失败（车机未就绪或不在无线配对窗口）` 每 3s 重试，直到系统
-  空闲自己断开才连上。真 iPhone 的无线 CarPlay 也只用系统级配对 + iAP2 RFCOMM
-  （独立 SDP 服务），声音走 WiFi 的 AirPlay，这些音频/通话配置文件可断。
-  实现（`bt/BtProfiles`）：发 iAP2 连接前查目标地址的配置文件状态，有连接就先断开
-  （配对成功回调里也断两次：立即 + 1.5s 后，车机侧重连常发生在两者之间）。
-  **断开只对「确认提供 iAP2 服务（SDP …caff）或用户选定目标」的设备做**（2026-10-20
-  收窄，`Iap2BluetoothClient.awaitIap2Service`）：自动模式候选=全部已配对设备，
-  耳机/手表没有该服务、连不上还白被断 HFP/A2DP（设备级断开兜底更会波及其它在线
-  设备）。SDP 探测先读系统 uuids 缓存、缺失再 fetchUuidsWithSdp 等 ACTION_UUID
-  （2.5s 窗），结论按地址缓存到客户端停止、start() 时重置。
-  **注意 API 约束**：`BluetoothHeadset/A2dp/LeAudio.disconnect(BluetoothDevice)` 是
-  **@SystemApi**（编译不可见，运行时只要 `BLUETOOTH_CONNECT`），只能反射调用；
-  查询用公开的 `getProfileProxy` + `connectedDevices`（需主 Looper）。**不要**把这段
-  挪进 Shizuku UserService（曾试过，不可行）：UserService 里
-  `BluetoothManager.getAdapter()` 返回 null（无主 Looper 的应用上下文），查询恒为
-  「未连接」，反而掩盖真实状态。诊断日志：`BT-PROFILE: 连接前…的蓝牙配置文件状态=`。
-- **Shell 命令**：参数用 `shellQuote`（单引号转义）；查 WiFi 开关/当前 SSID 用一次
-  `cmd wifi status`（勿用「任意 WiFi 即成功」的盲绑判定——手机连着别的 WiFi 时会误判）。
-  **无互联网热点：默认走应用专属网络，不再系统级入网**（2026-10-18 定谳）：
-  `WifiNetworkSpecifier`（`WifiCarPlayConnector.joinCarPlayNetwork`）加入车机热点——
-  网络只对本进程可见（系统侧 `Ephemeral: true` + `OwnerUid=本应用`），**不进系统已保存
-  网络、不成为默认网络**，其它应用继续走 4G/5G。实测（荣耀 + Redmi K40 + DiPlay）：
-  `cmd wifi list-networks` 无该 SSID（返回 0）、`Active default network` 仍是蜂窝、
-  推流期间 `ping baidu.com` 0 丢包。顺带解决三个老问题：系统 watchdog 不再切回原
-  WiFi；不需要 Shizuku 也能自动加入；不会因「已连接无互联网」被 ROM 连带关掉移动数据。
-  **迁移坑**：旧版本用 `cmd wifi connect-network` 存过热点，只要还在系统配置里系统就
-  会自动全局连接——加入前先 `cmd wifi list-networks` 查同 SSID，**命中则弹窗询问用户
-  是否清除，绝不擅自删除**（保留是正当需求：用户可能就想用系统自动连、或车机热点
-  本身带流量；删除只影响「会不会全局自动连」，与本轮连接无关）。选择保留 → 照常
-  以应用专属网络连接。每个 SSID 每进程只问一次（`forgetPromptHandled`），否则配对
-  重试/端点重入会反复弹窗挡住流程；无人应答按「保留」处理（不做破坏性动作）。
-  解析用 `WifiSavedNetworks.idsOf`（纯函数，有单测：SSID 含空格/非 ASCII/同网多行
-  同 netId/畸形行都覆盖；宁可漏判不误删）。手动兜底（`manualJoinCarWifi`）会把热点
-  存回系统网络，日志与弹窗都明确写出这个代价。
-  **specifier 挂起的兜底节奏必须按「车机窗口」倒排**（2026-10-23 奥迪 3315 毫秒级
-  日志定谳）：车机从 0x4301 起 **~15s 拆 BT、~21s 后 AirPlay 服务窗关闭**（晚到即
-  7000 端口 ECONNREFUSED，BT 再健康也无法激活）——从 0x5703 起算入网预算只有
-  ~9-14s。因此 specifier 首窗只能给 5s（正常入网 0.03~3s；5s 零回调=挂起特征），
-  之后依次：快速探测（系统已自己连上则直接绑定，≤3s）→ **重发 specifier（实测
-  release→重发 1.6s 即入网，是被验证有效的恢复手段，必须紧跟探测）** 20s 窗 →
-  connect-network 深度兜底（本轮窗口必然已过，只为下一轮占位）。曾犯的错：把兜底
-  排在 20s 首窗**之后**——第 1 轮首窗没走完车机就拆链（15.2s），兜底根本轮不到执行；
-  第 2 轮 21.6s 入网时服务窗已关。**connect-network 存系统网络的清理面**：登记必须
-  在命令返回 ok 的**瞬间**（等「切网+bind 成功」才登记的话，取消/超时/bind 失败三条
-  路径都会遗留）；清理挂 disconnect 与推流 onEnded **两端**（车机拆链是最常见的
-  离场方式）；该 SSID 本轮之前已保存（用户选过「保留」）的不登记不删。
-  **bindCurrentWifi 的 onLost 必须转发 onNetworkLost**（兜底入网成主路径后，不转发
-  则熄火后英雄卡停在「已连接」、会话拖到心跳超时才死）。
-  **WEP 无法用 specifier 表达**（无对应 Builder API）→ `JoinResult.Unsupported`，
-  走旧的 `connect-network` 兜底路径（`legacyJoinCarWifi`）。
-  **PR17（BMW 带来的三个命令行坑，与 specifier 主线并存的知识）**：① `cmd wifi
-  connect-network` 的 exit=0 **不代表已连上**（只把连接投给 WifiService）→ 必须轮询
-  `cmd wifi status` 等 SSID 变更（我们的深度兜底已按此实现）；② NSD 注册没有 Network
-  参数，mDNS 广播跟随**进程默认网络**——绑定了车机热点后必须 `bindProcessToNetwork`，
-  否则广播从蜂窝出去车机永远发现不了；③ `cmd wifi set-wifi-watchdog-enabled` 这条命令
-  **不存在**（AOSP 是 `set-wifi-watchdog`，仅 root），别照抄。另见 `docs/WIFI-JOIN.md`。
-  specifier 在 **Android 12/12L 仍需位置权限 + 位置服务**（13+ 由 NEARBY_WIFI_DEVICES
-  接管）：缺权限时 `requestNetwork` 直接失败、现象只是「未能加入车机热点」，很难自查，
-  故在连接前置检查拦截（`ensureWifiLocationReady`）；manifest 里 FINE/COARSE 必须成对
-  声明，否则 lint `CoarseFineLocation` 直接失败。`onLost` 必须处理（热点消失/熄火），
-  否则英雄卡会在「已连接」与失败间静默摇摆（`WifiCarPlayConnector.onNetworkLost`）。
-- **目标车机选择（多台车机场景，2026-10-16）**：用户可能配对多台 CarPlay 车机
-  （真车 Audi + 测试台 DiPlay）。未指定目标时出站客户端逐个尝试全部候选、入站
-  服务端来者不拒——连到哪台取决于谁先应答；选定目标后**出站只连该设备、入站
-  拒绝其它设备**（`TargetDevicePrefs` 存地址+名称快照，地址大小写不敏感比对；
-  `targetProvider` 动态读取，选择立即生效、无需重连）。实测证据：目标=Audi 时
-  日志只出现「连接 Audi_MMI_6318 失败」并且 DiPlay 的周期回连被
-  「忽略非目标设备连入」拒绝；切回「自动」后 DiPlay 立刻恢复连入。
-  注意：选择列表**只列已配对设备**（无线 CarPlay 前置是系统级蓝牙配对，未配对
-  设备无法建 iAP2 会话，故不做蓝牙扫描发现新设备）；目标从系统配对列表消失时
-  UI 提示「需重选」。`btnPickTarget` 在「蓝牙配对」标题右侧（仅已配对>0 时显示；
-  最初放行尾与右侧徽标拥挤，2026-10-16 移入标题行）。
-- **推流中的冗余端点/凭据必须忽略**：接收端控制器（DiPlay 实测）在我们配对推流**之后**
-  才完成它本轮的 RFCOMM 连接并重发一整套 0x5703/0x4301；若照常当新会话处理，
-  `retireSession()` 会把健康会话拆掉（编码器 stop 竞态，日志表现为 `Pending dequeue
-  output buffer request cancelled`），接收端视为 session ended 再重连——形成「连上后
-  自动断开」循环（2026-10-15）。防护在 `SessionController.onCarPlayEndpoint` /
-  `onWifiCredentials`：`videoSender.isRunning` 时直接忽略/只刷新密码缓存；真断连时
-  推流自行终止，下一个端点自然接续。会话中的冗余 0x5703 还会连带触发 WiFi 重绑 +
-  ctrl mDNS force 重注册，都会扰动推流，一并拦下。
-- **0x4301 是活事件，不是「该车机不发」**（2026-10-18，Audi MMI 9310 用户日志定谳）：
-  这台车识别帧明确声明 `车机发送清单=0x4301 0xea03`，但 0x4301 在 Phase 1 结束后
-  **2 分 35 秒**（配对 120s 窗口都已耗尽、mDNS 也始终没发现 `_airplay._tcp`）才到达；
-  车机等到 15 秒无人连入 AirPlay 就自己拆掉 RFCOMM——用户看到的是「连上后自动断开」。
-  旧实现有两处会吞掉它：`pumpIncomingForever` 把所有消息当 keep-alive 只记长度，
-  且同 ID 连续到达会被限流 `continue`。现行三层修复：
-  ① `Iap2SenderSession` 在保活泵里先于限流识别 0x4301 → `parseStartSession`（用缓存的
-  0x5703）→ `onEndpointUpdate` 回调，并由 BT client/server 透传到
-  `SessionController.onLateEndpoint`；② `onLateEndpoint` 按状态分流：推流中忽略（防上面
-  的拆会话循环）/ 配对进行中 → `AirPlayClient.updateEndpoint` 热更新（关旧 socket，下一轮
-  重连新地址）/ 交接尚未建 client → 暂存进 `pendingEndpointUpdate`，建 client 时 `drain`
-  / 上一轮已失败 → 用新端点重走一轮 `onCarPlayEndpoint`；③ `AirPlayClient` 配对循环每轮
-  重试前调用 `endpointRefresher` 再读一次 mDNS 缓存，网关兜底地址连不通时能及时切换。
-  **新增生命周期消息（0x5702/0x6800/0x4301 等）时，先判断「它晚到会怎样」**——保活泵里
-  必须按消息 ID 分流，不能只当日志。另：`resolveEndpointHost` 的等待窗口只有 3s，
-  不能在超时日志里断言车机「不发」（MMI 9310 就是声明会发但晚到）。
-- **0x4301 的地址字段是「定长 + NUL 填充」，解析必须去掉全部尾部 NUL**（2026-10-18，
-  Audi MMI 3315 日志定谳）：车机把 IPv6 填充到 47 字节（`fe80::…` 后跟 **22 个 NUL**）、
-  IPv4 填充到 17 字节（`10.174.189.1` 后跟 **5 个 NUL**）。`asStringOrEmpty()` 原先只
-  `copyOf(size - 1)` 去掉一个，得到 `"10.174.189.1\0\0\0\0\0"`——这个字符串
-  `contains('.')=true`、`contains(':')=false`，能通过所有「是不是 IPv4」的判断，
-  但 Android 的 getaddrinfo 解不了（iOS/桌面 Java 反而容忍，极易误判为「不是这个原因」），
-  日志表现为 `Unable to resolve host "10.174.189.1": No address associated with hostname`。
-  典型症状链：SRP 配对靠 mDNS 刷新后的干净地址**侥幸成功** → 视频数据端口与 keepAlive
-  仍用带 NUL 的旧地址 → 双双失败 → 车机 ~10s 后拆会话（用户看到「连上就断」）。
-  教训：**协议字段里的 NUL 填充一律 `rstrip(0)`**，不要假设只有一个终止符。
-  另外两处配套收口：① `SessionController.appendLog` 把 `\u0000` 换成可见的 `␀` 再写
-  文件——否则导出的日志是二进制文件，用户反馈时打不开（本次日志 216 个 NUL，直接
-  无法读取）；② 视频/音频/keepAlive 的 host 一律取 `client.currentEndpoint`（配对期间
-  mDNS 刷新过的真实连接地址），不要用解析阶段的 `effectiveEndpoint` 旧值。
-  单测 `nulPaddedAddressesAreStrippedCompletely` 用真实填充宽度锁住这一行为。
-- **回退（应用侧 PUBLIC 屏）形态也必须建地图屏**（2026-10-20 华为 Mate30Pro/EMUI12
-  实测）：EMUI 对 shell 侧 `createVirtualDisplay` **静默返回 null**（不抛异常）——受信
-  创建整体失败落回退分支，而回退分支历史上只建 dock/app/appHi 三屏、无地图，仪表盘
-  永远没有地图 tile（日志特征：`三屏创建(回退)` + 每轮 `地图屏未创建`）。修复后回退
-  分支同样建地图屏；**resize 分流**：受信形态走 shell `svc.resizeDisplay`，回退形态
-  必须用应用侧 `VirtualDisplay.resize()`（shell 对他人创建的 display 无 resize 权限，
-  token 属主校验）。诊断约定：受信创建失败要逐屏留痕（哪块屏 -1），不能只留「回退」。
-- **UserService 虚拟屏跨版本残留：三层收口**（2026-10-16 定谳，「重启后检测到残留屏、
-  点清理却释放 0/N」根因）：Shizuku 按「组件+进程名+版本(APK lastUpdateTime)」复用常驻
-  shell 进程——重装 APK 起新进程，旧进程 `am force-stop` 杀不掉（实测）、Shizuku 也不
-  回收；而虚拟屏**只有创建它的进程能释放**（`releaseDisplay` 只查本进程 map，跨进程返回
-  false）。判定进程版本看 `/proc/<pid>/maps` 的 base.apk 路径（`==deleted==` 即旧版本）。
-  三层收口（缺一有洞）：① `CarInputServiceImpl` 自清——周期性比对 lastUpdateTime，
-  过期自尽（重装后 ≤15s 旧进程退出、屏随之释放，实测 5s）；② `CarInputClient.
-  reapStaleUserServices`——绑定成功即枚举 `:car_input` 杀掉非当前绑定 pid（覆盖无自清
-  逻辑的历史旧进程，实测「已回收 1/1」）；③ 启动检测到残留先自动清理一轮，清不掉的
-  才弹窗。**今后任何「进程持有的资源」（虚拟屏等）都必须考虑跨版本残留的释放路径**：
-  进程回收是唯一兜底，`force-stop` 不可依赖。
-- **启动残留清理必须与「强制横屏复原」同条件触发**（2026-10-16）：`AppOrientationCompat.
-  resetAll` 挂在「检测到残留屏」这一条件上（`MainActivity.refreshShellState` 的
-  startupCheck 分支）——残留屏是「会话异常退出」的判据，会话末未执行的复原与它同源。
-  两条约束：① 复原必须在残留清理**之前**执行（清理会让残留清单变空）；② 预绑定
-  UserService（会触发旧进程回收）必须放在残留扫描**之后**，否则回收先让屏消失 →
-  残留清单变空 → 复原被跳过（2026-10-16 差点引入）。测试方式：写
-  `shared_prefs/app_orientation.xml` 造 `force_<pkg>=true`，建会话后 force-stop 应用，
-  重启应见 `ORIENTATION: 残留会话的横屏覆盖已复原 N 个`。
-- **系统侧 compat 覆盖的读法（应用横屏面板）**：事实源是 `dumpsys platform_compat`
-  （该 ROM 无 `cmd platform_compat`；全量 30ms/36KB，`grep` 到两个 ChangeId 后约 3KB，
-  面板打开时查一次、行绑定只做内存查表，绝不可每行一次）。**必须同时解析
-  `packageOverrides` 与 `rawOverrides`**：已卸载应用的覆盖只存在于 rawOverrides——
-  packageOverrides 按「已安装包」解析，包不存在时条目消失（2026-10-16 实测：给未安装
-  包写的覆盖只在 rawOverrides 可见，只读前者会让「列表外残留」横幅永远空着）。
-  rawOverrides 里还有 `force_xxx/组件` 形式的历史脏键（旧版本偏好键格式泄漏），
-  一并按「列表外残留」清理。UI 三层：行内小字（勾选开+系统开=灰字正常；勾选关+系统开=
-  **红色**「系统残留·点击清除」，弹窗提示会重启应用）、面板顶部列表外残留横幅（批量清）、
-  会话期 applyAll/resetAll 常规收口。
-- **`am compat enable/disable` 会立即杀掉目标应用**（兼容覆盖只能在新进程生效；
-  2026-10-15 实测：执行后 pid 当场消失，用户返回时按新配置重启）。给「应用横屏」
-  这类开关做交互时不要再设计「查活/询问是否重启」流程——问出问题时应用已经被
-  系统杀了，pidof 是在与击杀竞态（提示时对时错）。会话建立时的 `applyAll` 批量
-  写入同样会杀掉正在运行的名单内应用（含手机侧实例），属已知代价。
-- **「强制横屏」需要 Android 14+（AOSP 标准 ChangeId，SDK 门槛）**（2026-10-18 定谳，
-  「车机设置→应用横屏」勾选报「写入失败」的根因）：两个 ChangeId
-  （`265451093` OVERRIDE_UNDEFINED_ORIENTATION_TO_NOSENSOR /
-  `265464455` OVERRIDE_ANY_ORIENTATION）**是 AOSP 标准项，自 Android 14 / SDK 34
-  起定义**在 `android.content.pm.ActivityInfo`（`@ChangeId @Disabled @Overridable`），
-  由 `LetterboxUiController` 消费；Android 16 起重构到
-  `AppCompatOrientationOverrides`。**Android 13 及更早的 ActivityInfo 里一个
-  orientation 类 ChangeId 都没有**（实测 A13=0 个、A14=9 个）——这是硬版本门槛。
-  **实测对照（同一操作、同一个包 `com.autonavi.minimap`）**：
-  - 荣耀 Magic7 Pro（Android 17 / SDK 37）：注册 392 个 ChangeId，含这两个 →
-    写入成功，`packageOverrides` 里可见 `com.autonavi.minimap=true`；
-  - 红米 K40（Android 13 / SDK 33）：只注册 173 个，两个都不在表内 → 必失败。
-  **与 Shizuku 无关**（adb shell 与 UserService 同为 uid 2000，结果一致），
-  换 Shizuku 版本或重试都无效。
-  次要因素：即便 ChangeId 已注册，user build 也只允许改 debuggable 应用
-  （`Cannot override a change on a non-debuggable app and user build.`）。
-  另注意「给未安装的包写入会假成功」（只落 rawOverrides、不做 debuggable 校验），
-  所以**用包名试探得出的结论会自相矛盾**，必须以 `dumpsys` 的 name 字段为准。
-  代码侧：`AppOrientationCompat.MIN_SUPPORTED_SDK = 34` 先做零成本版本判定，
-  SDK ≥ 34 再用 `changeIdsRegistered()` 跑一次 dumpsys 复核（约 30ms，进程内缓存，
-  两个 ID 必须**各自**带 `name=`——只注册一个时用整段 `grep name=` 会误判）；
-  `WriteResult.UNSUPPORTED`（永久：偏好**不落盘**，否则下次连接白跑 applyAll
-  且 UI 与系统脱节）vs `FAILED`（Shizuku 临时故障，保留用户意愿待重试）；
-  **写入入队点在配对起步（端点处理）而非 attach**（2026-10-23）：`am compat enable`
-  会杀名单内应用，必须先于任何应用启动完成——配对阶段有几十秒空窗让写入自然排空，
-  attach 只 `awaitPending()` drain（~0ms）。别在 attach 里同步跑 applyAll：屏幕口
-  keepAlive 帧自 attach 返回后才起发，attach 每阻塞 1s 都吃掉「RECORD→首条
-  keepAlive」的 ~10s 拆链预算；`awaitPending` 超时（6s）**必须留日志**——静默失效
-  会让「先写覆盖再拉应用」的保证悄悄作废；
-  `applyAll` 探测失败即整体跳过，不再逐应用空跑 2×4s 的 shell 往返；
-  面板顶部显示黄色横幅并整列置灰。
-  **查证方法教训**：gitiles 的 `?format=TEXT` 单文件抓取失败时会返回空/错误页，
-  grep 不到不代表不存在——要校验字节数，或直接下 `+archive/.../<dir>.tar.gz`
-  整目录再搜（本结论最初就是被一次静默失败的抓取误导成「OEM 定制项」）。
-- **应用先运行、后写入覆盖 → 旧窗口仍 letterbox（需手动重启）**（2026-10-18 真机定谳）：
-  `am compat enable` 确实杀掉进程，但系统恢复任务时 ActivityRecord 可能仍按**旧配置**
-  重建（`displayChangedWithoutRestart=true`），表现为 `overrideOrientation=PORTRAIT`、
-  `isLetterboxRunning=true`、`letterboxReason=FIXED_ORIENTATION`，而
-  `platform_compat` 里该包明明是 `true`。只有 force-stop 后重新 `am start` 才生效
-  （实测重启后同一屏变 `NOSENSOR`、`areBoundsLetterboxed=false`）。
-  **确定性复现（不用跟任务时序碰运气）**：`am compat enable/disable --no-kill ...`
-  写覆盖但不杀进程，此时把应用拉到虚拟屏就是纯净的「旧窗口 + 新覆盖」态。
-  `--no-kill` 走 `setOverridesForTest`，只用于复现/排查，产品路径仍用常规写入。
-  现行处理在 `LetterboxHintController`：事件驱动探测（连接建立/应用启动/地图全屏/重启后）
-  → 解析 `dumpsys activity activities` 的 `bounds=`（内窗）与 `mMaxBounds=`（外框）
-  算黑边 → 黑边够宽才在**左侧**画提示卡（`OverlayCard` 走合成器 2D 纹理层，
-  左侧不够宽退右侧，两侧都放不下就不显示）→ 「强制重启」按钮 force-stop + 原屏重启。
-  **补写自愈**：偏好开着但系统侧覆盖缺失时（会话写入失败/被外部清掉），先补写覆盖
-  并自动把应用拉回原屏（`am compat` 会杀进程，补写后不重启就是把用户打回桌面还不给
-  提示——2026-10-18 头条实测踩到）；重启后仍竖屏才给「仍然竖屏」终态卡。
-  探测必须传 `displayIdHint`（launchApp/地图启动确知的目标屏）：不传时按合成器活动屏
-  推断，而切屏要等目标屏出首帧（最长 2s），探测早于切换完成会看错屏、读空结果。
-- **免责声明（对外分享的启动门）**：`legal/DisclaimerPrefs.CURRENT_VERSION` 用**版本号**
-  而非布尔记录接受状态——**改 `DisclaimerContent` 文案必须同步 +1**，否则老用户不会重新
-  确认；布尔值只能靠卸载重装才会再弹。强制形态三条约束同时成立才放行「接受」：
-  10 秒倒计时、内容需滚动时已滑到底、（由 UI 保证）未点「放弃使用」；三者是**并列**关系，
-  滑到底不能跳过倒计时。「放弃使用」立即可点（拒绝不该被阻拦）并 `finishAndRemoveTask()`。
-  判定「内容是否可滚动」必须等布局完成（`scroll.height > 0`）：布局未完成时
-  `canScrollVertically` 恒为 false，会被误判成「内容不足一屏」从而永久放行（真机踩到）。
-  倒计时存**绝对截止时刻**（`elapsedRealtime`）经 `onSaveInstanceState` 透传，旋转重建
-  后继续剩余时间而不是重新等 10 秒。强制弹窗 `setCancelable(false)` +
-  `setCanceledOnTouchOutside(false)`；底部菜单入口只读（无倒计时/无滚动要求）。
-- **媒体卡片**：元数据切歌是分阶段的（歌名先到、封面/时长滞后），空结果需短退避重试
-  而非固化缓存；播放位置用「锚点 + 速度」外推，UI 每秒自刷新。
-- **日志导出落 `下载/CarDeck/`，不能落应用私有目录**（2026-10-18）：用户要能自己找到
-  并转发给开发者。实现走 `MediaStore.Downloads`（无需存储权限、文件管理器可见、
-  微信/分享面板能直接选到）；`filesDir` 与 `Android/data/<pkg>` 在 Android 11+ 的
-  系统文件管理器里直接被屏蔽，导出等于没导。导出弹窗必须用 `DarkMessageDialog`
-  列出**绝对路径 + 大小**，snack 两秒就消失、用户看不到（本次需求即为此）。
-  **默认只导本次进程启动后的日志**（历史轮次动辄几百 KB、淹没关键行）：
-  `SenderApp.onCreate` 用 `DebugFileLog.markSessionStart` 写一条
-  `SESSION_MARKER` 进文件，导出时 `lastIndexOf` 截取最后一条之后的内容；
-  长按导出按钮走 `Scope.ALL` 取全量。标记**必须写在文件里**而不是只记内存偏移
-  ——2MB 截断会让偏移失效；截断后也要立刻补写一条标记，否则导出退化为全量。
-  无标记（旧版本文件）时回退全文——全量比空好。
-- **荣耀 ROM 打开目录要用显式组件**（2026-10-18 实测）：`ACTION_VIEW` +
-  `vnd.android.document/directory` 走隐式 intent 会被 resolver 乱匹配（实测弹出
-  「网易云音乐」当默认项）；而 `am start` 同样的 intent 却正确落到 DocumentsUI。
-  解法：优先显式 `ComponentName("com.android.documentsui",
-  "com.android.documentsui.files.FilesActivity")` + `document/primary%3ADownload%2FCarDeck`，
-  失败再退隐式/存储根/文字指引。**凡是「唤起系统 UI」的功能都不要只写隐式 intent**。
-- **「音乐在播但卡片显示媒体信息未连接」= 没拿到通知使用权**（2026-10-18 定谳）：
-  `MediaSessionManager.getActiveSessions()` 在**未授权时仍返回会话**——`PlaybackState`
-  正常（`playing=true` 照常翻转），但 `metadata` 恒为 null，于是歌名/歌手全空。
-  这个组合极易误判成 metadata 解析 bug，实际是权限问题（`dumpsys media_session`
-  里能看到完整 `metadata: description=歌名, 歌手`，我们却读到 null，就是判据）。
-  授权要点（`media/NotificationAccess`）：
-  - **不能只在 onCreate 试一次**：那次若 Shizuku 未就绪就永久跳过（手机重启后
-    Shizuku 未运行、或改包名后首次启动尚未授权 Shizuku），用户只会看到空卡片。
-    现在三个时机都补（幂等，已授权直接返回）：App 启动、Shizuku 授权成功、
-    **会话建立后**（`VirtualLauncher.attach`，此时 Shizuku 必然可用）。
-  - **`cmd notification allow_listener` 的 exitCode 不可作判据**，且**立即复核也不可靠**：
-    settings 写入有延迟，实测命令成功（结果=0）后马上读仍是旧值。必须短重试
-    （4 次 × 250ms）确认，否则会误报「未授予」。
-  - 判定「是否已授权」要**按条目精确比对** `enabled_notification_listeners`
-    的 `:` 分隔列表，不能用 `contains(包名)`——旧包名/同前缀应用的条目会造成误判。
-  - 改包名后 Shizuku 侧授权状态需要**重启 Shizuku 服务**才干净（实测：新包反复
-    点「请求授权」无响应，在 Shizuku 里「停止」再「启动」后一次成功）。
-  - 卡片文案要区分三种空：授权缺失（显示「未授予通知使用权」）、有会话但暂停、
-    完全无会话（后两者都是「未在播放」）。
-- **远程调试桥：remote flavor 与外层 cardeck-bridge 仓库**（2026-10-20 落地，设计全文
-  `docs/REMOTE-DEBUG-DESIGN.md`）：bridge 维度 flavor（standard=日常/发布，包名不变；
-  remote=`.rd` 后缀、调试桥代码只在 `app/src/remote/`、依赖走 `remoteDebugImplementation`
-  ——一行不进 standard 产物）。**构建任务名已 flavor 化**（assembleStandardDebug /
-  lintStandardDebug / testStandardDebugUnitTest，pre-commit 钩子已同步）。App 与业务的
-  耦合面仅两处：`DebugFileLog.tap`（main 侧日志序号+钩子）与 `BridgeCommands`（白名单
-  命令，只调 SessionController 公开 API）。服务端在外层独立仓库 `../cardeck-bridge`
-  （MIT，Node/TS，WS+MCP 单进程；`.npmrc` 固定公有源防公司源污染）。硬约定：
-  ① remote 变体的 Shizuku/通知使用权需单独授权（新包名）；② 重装前必须先
-  `SessionController.disconnect` 释放虚拟屏（否则安装确认弹窗落车机侧没人点得到）；
-  ③ 命令白名单扩充走 `BridgeCommands` 单点评审，禁止任意 shell。
-  ④ **差分更新**（2026-10-24 实测省 72%~97% 流量）：块差分协议与三重校验详见
-     `docs/REMOTE-DEBUG-DESIGN.md`；**头部 u64 一律大端**（设备端 readLong 只读
-     大端，LE + 头缓冲写短曾是「差分首跳静默回退全量」的真凶）；设备端任一校验
-     失败无条件回退全量。
-  ⑤ **`.rd` 包必须开悬浮窗权限**：安装确认 Intent 从后台 Receiver 拉起会被荣耀
-     静默拦截（豁免条件=SYSTEM_ALERT_WINDOW），断连提示/复现引导也依赖它；
-     安装确认另有前台 Activity 转发兜底（InstallReceiver → BridgeSetupActivity）。
-  ⑥ remote 变体禁自动暗幕（`ScreenDimmer.autoDimAllowed=false`，排障要看屏幕），
-     常亮与手动假息屏保留。
-- **远程调试桥真机联调五雷**（2026-10-21 全链路打通时逐一定谳，含组件命名/网络/安装三族）：
-  ① **`.rd` 包下自启组件必须写「applicationId/绝对类名」**：`am -n` 只认带斜杠的规范，
-  相对类名按 applicationId 展开成不存在的 `…rd.launcher.DockActivity`、纯类名直接
-  `Bad component name`——两形态都让 dock/grid 启动失败、车机黑屏 0fps（standard 包
-  applicationId==命名空间从不暴露）。组件名一律 `X::class.java.name` 拼接，勿用
-  `context.packageName + 相对路径`。
-  ② **车机会话期间进程网络被绑到车机热点（无互联网）**，调试桥 WS/APK 下载在
-  「加入热点」毫秒级断掉——`InternetRoute`（remote）跟踪蜂窝网络兜底，socket/DNS
-  显式走蜂窝（`Network.socketFactory`/`getAllByName`）；但**默认网络 VALIDATED 时优先
-  默认**（室内 WiFi 环境强走蜂窝反而断流）。
-  ③ **WS 死连接**：蜂窝/NAT 静默断链无 FIN，读线程永久阻塞、重连循环卡死（实测断后
-  4 分钟不重连、桥侧设备假在线）——25s 心跳 ping + 75s soTimeout 必备。
-  ④ **握手协议由设备侧驱动**：先发 hello（含配对码）服务端才回 welcome，等 welcome
-  再发 hello = 互等死锁。
-  ⑤ **桥的 stdin 必须接 FIFO 而非 /dev/null**，否则 MCP（stdio）无法接收指令，
-  notify/cmd 全部不可用；`~/bin/cardeck-debug-up.sh` 已固化该模式。
-- **Honor 推送安装（PackageInstaller）的坑，四条全踩**（2026-10-21）：
-  ① 会话必须 `createSession` 拿 id 再 `openSession`——直接 `openSession(0)` 抛
-  「Caller has no access to session 0」；② 状态接收器在 manifest 里**必须带
-  intent-filter**（自定义 action 无过滤器 = 广播永远投递不到，PENDING_USER_ACTION
-  无人拉起、会话永挂 Active，还会堵死后续安装——App 启动时 `abandonStaleSessions`
-  自愈清理）；③ **相同 versionCode 的推送安装 Honor 直接「假成功」**（显示安装成功
-  但包不动，adb 路径无此行为）——**推送新包必须升 versionCode**（本项目由
-  appVersionName 推导，改版本号即可）；④ `adb install -r` 装的字节相同包在
-  PackageInstaller 眼里也不算数，测试推送闭环时**不要先 adb 装同一个文件**。
-  安装确认/续接询问用 DarkMessageDialog 正规弹窗（悬浮窗会被忽略，用户实测），
-  前台无 Activity 时带参拉起 BridgeSetupActivity 由它弹；调试包 manifest 开
-  `usesCleartextTraffic`（桥可能是纯 HTTP 部署）。
-- **仪表盘分屏拖拽（2026-10-22 落地）的四个跨会话结论**：
-  ① **视觉与触达分层**：中缝视觉宽（`DASH_GAP_PX=24`）与把手触达宽
-  （`DASH_HANDLE_TOUCH_PX=60`）是两个常量——把手/粘性路由域比缝宽、两侧压在
-  卡片上（地图侧溢出段被 tile 盖住**不可见但可触摸**：触摸路由与 GL 合成本就是
-  两层）。一体宽 44px 的首版被用户反馈「中缝太宽」。
-  ② **拖动中只改绘制矩形、松手才 resize**：composer `tileEdgeOverride` 只改 SPLIT
-  目标矩形（纹理整幅 UV 拉伸），commit 才走 `resizeMapDisplay`（真实 resize 触发
-  地图应用配置变更）。**限位钳制必须按比例域换算边界**——按位置域 [边距, 边距+可用]
-  钳等于允许比例 [0,1]，用户实测能拉到 0。
-  ③ **快拖防断流要粘性路由**：把手落后手指时坐标会越出命中域，TouchRouter 按坐标
-  逐帧改判会跨屏重注（掐断拖拽+误触地图）；按下命中把手条即整流固定路由应用屏
-  （`dashHandleHit` + `splitHandlePressed`，同 overlay 卡手势独占模式）。
-  ④ 车机虚拟屏持有焦点时，**`am start` 不带 `--display` 会落到聚焦的虚拟屏**
-  （用户车机画面闪出调试 UI 实测）——会话中启动手机侧 Activity 必须显式
-  `--display 0`；无线 adb 的**流式安装协议会静默挂起**（push 76MB/s 证明传输无碍），
-  大包改走 `adb push + pm install`。
-  几何推导集中在 `VirtualLauncher.dashSplitGeom` 纯函数（`DashSplitMathTest` 钉死
-  四方一致性），改分屏相关代码勿在四处重新裸算。
-- **BT 断链僵尸轮次 + specifier 永久挂起（2026-10-22 奥迪 3315 真机定谳）**：车机 15s
-  AirPlay 看门狗（15.07s 实测，与 sysdiagnose 互证）拆链后**立即回连重发端点**，而我们的
-  「sessionStarting 互斥」只认标志不认轮次存活性——WiFi 加入卡死（120s 窗）的僵尸轮次把
-  车机的新端点堵在门外，全程只剩 keep-alive。三处修复缺一不可：① `onSenderLinkClosed`
-  （保活泵退出回调）：未推流即释放互斥+置取消（卡住的配对线程 ≤200ms 退场），**不停 BT
-  监听**；② 新轮次起步清 `connectCancelled`（用户取消路径会停 BT 组件、被既有守卫拦，
-  走到起步处说明组件在跑）；③ WiFi 加入 20s+20s 分段重发——「系统已保存该 SSID +
-  Android 16」组合下 `WifiNetworkSpecifier` 请求**永久 pending 且零回调**（三条日志路径
-  全静默），120s 干等毫无意义；加入失败且系统已连着目标 SSID 时直接 `bindCurrentWifi`
-  （「保留系统网络」的近路）。另：首连 15s 预算里弹窗 1.7s + MFi 20B 优先白等 6s 是加重
-  因素（记忆生效后仅首次付费）。判读特征：日志出现「已有会话在处理中，忽略本次端点」
-  后再无连接动作、只有 `ff 55 02 00 ee 10` 心跳 = 本病。
-- **真机 iPhone sysdiagnose 对照（2026-10-21，docs/PROTOCOL-NOTES.md §13）**：两车三份
-  抓包（iOS 18，`/usr/bin/log show --archive` 读 unified log）定了四条铁律：
-  ① **奥迪 MMI 3315_5GHz 首连 403 是车机固有状态**——真 iPhone 在 pair-verify 通过后
-  照样被 MFi 段 403 拒，车机 18~20s **自动重邀、第二次即成**；正确恢复 = 保持 BT、
-  原流程退避重试（已落地：`pairingForbidden` 禁断-BT-hack、禁明文降级、403 退避 5s）。
-  ② 探歌类车机**只认 iAP2 配供应链带出的入网**：手动/系统保存过车机热点 = 永远无
-  邀请无 mDNS（同 SSID 清理弹窗对此车是关键）；双频 SSID 必须用 0x5703 指定的那个。
-  ③ 该奥迪成功会话 **iAPChannel 协商 = 0**（真 iPhone 未启 WiFi 隧道）——「MIB3 必须
-  建隧道」结论存疑，动隧道前先真车 A/B。
-  ④ 两车成功路径全是 **IPv6 link-local :7000** + pair-verify + MFi（标准 MODERN 形态，
-  无特殊协议）；SETUP 应答可无 streamID（我们只读 dataPort 天然兼容）。
-- **车机画像（ReceiverProfile）：版本/能力信号统一收口**（2026-10-20）：`iap2/ReceiverProfile`
-  纯函数聚合三处信号——0x1D01 身份+收/发双清单、mDNS features/srcvers——产出
-  era（三时代）/wifiGen（新旧 WiFi 协议）判定，**依据随日志输出**（`PROFILE:` 行，
-  判错可回溯）。两个接线点：`Iap2SenderSession.logIdentification`（BT 侧）与
-  `SessionController.onCarPlayEndpoint` 端点诊断后（mDNS 侧）。硬约束：
-  ① **按能力分支，不按版本号/品牌硬编码**（srcvers 只做先验，清单与实测行为才是
-  分派依据——HID 描述符教训的推广）；② **「清单未声明」不等于「不支持」**：奥迪
-  稀疏清单（2+5 项）不列 0x57xx 但旧协议实测工作——wifiGen=NEW 要求清单完整
-  （合计 ≥10 项，iD9 形态）仍无 0x5703/0x5702，稀疏清单判 UNKNOWN 走旧协议
-  （0x5703 有超时兜底）；③ identityKey 存原文（与 0x1D01 逐字一致），持久化键的
-  清洗由 MfiLengthMemory.receiverKey 负责——后续 Memory 并表共用此键。
-  **链路代际（LinkGeneration，2026-10-23；当日二次定谳后仅存日志意义）**：
-  `linkGenerationOf`——DELPHI 制造 + AUDI 型号 + 双清单合计 1~9 项（三条件同时命中）
-  → CLASSIC_MIB3，否则 EVENT_LINK。**marker 协商已全代际统一**（见 MIB3 条目二次
-  定谳），代际仅用于日志与未来分派。教训：当天下出的「CLASSIC 忽略 marker」分派
-  当晚即被车主日志证伪——单一车辆的现象归因（「协商挂起 UI」）在拿到反例日志前
-  不要固化成分派逻辑。判定与 wifiGen 相互独立（BMW iD9：wifiGen=NEW 跳 0x5702，
-  两维互不干扰；§9h 的 SYN|ACK 修复在 Iap2LinkEngine）。判定纯函数有单测
-  （`ReceiverProfileTest` 五条）。代际缓存随 disconnect 清零。
-- **能力清单只能证明「有」，不能证明「没有」——绝不可当硬门禁**（2026-10-22 奥迪
-  3315 真车定谳，0.1.13 回归的根因）：8b64147 把 WiFi 凭据分派写成「清单没声明
-  0x5702 就跳过旧协议」，而奥迪的可收清单只有 5 项（`0x4e0c 0x4e09 0x4300 0xea00
-  0xea01`）不含 0x5702 → 整轮**一次 0x5702 都没发** → 车机 AirPlay 服务**始终没起来**
-  （45 次连接全部 `ECONNREFUSED`、`_airplay._tcp` 也没广播），4 轮会话每轮 8 秒自拆。
-  同一台车同一热点在旧版本（无脑发 0x5702）下的对照：`0x5702 → 0x5703` 应答
-  **122/136/166/166/198/246/266/368ms**，入网 30ms 后端口 7000 即可连通。
-  两条铁证说明「未声明 ≠ 不支持」：① 同日日志里 0x4e0d/0x4e0b/0x4e0e 三条**不在**
-  清单里，车机逐条 ACK 到位（seq 107→ack=107、110→ack=110、113→ack=113）；
-  ② catplay `catplay_carplay_rx_gadget` 与 xcertplay `Iap2IdentificationClient` 扮演
-  车机时都把 0x5702 列进无线清单（`WIRELESS_PHONE_MESSAGES = [0x4e0d, 0x4e0e, 0x5702]`），
-  说明规范要求声明、但现实车机常漏写。
-  **现行分派**：只认 `ReceiverProfile.wifiGen`——`NEW`（两清单合计 ≥10 项仍无 0x57xx，
-  BMW iD9 形态）才跳过 0x5702；`LEGACY` 与 `UNKNOWN`（稀疏/缺声明）**一律发**。
-  0x5703 等待窗口收到 **1.5s**（奥迪实测有 4 倍余量），超时只降级不拆链。
-  单测 `Iap2SenderSessionTest.sparseDeclarationsStillSendWifiRequest`（奥迪 3315 形态
-  必须发）与 `fullDeclarationsWithoutOldProtocolSkipWifiRequest`（宝马 iD9 形态不发）
-  钉死两个方向，**改这段先看这两条**。推广：任何「按清单能力分支」的地方，都要给出
-  「清单不完整时走保守路径」的分支，不能把缺席当成否证。
-- **无新凭据时不要拆链**（2026-10-22）：`Iap2SenderSession` 在「本轮既没 0x5703、
-  8 秒内也没 0x4301」时，只要 `knownCarSsid()` 能给出已知热点（`boundCarSsid` 或
-  `lastCarWifiSsid`），就合成 `airPlayPort=0` 的端点继续走 mDNS/网关，**不抛异常**。
-  奥迪日志里手机第 2 轮起就在车机热点上，却因「无凭据」每轮 8 秒自杀，把车机侧
-  邀请窗口反复清零——而真 iPhone 实录里车机**入网后约 21 秒**才发 ctrl 邀请
-  （`StartSessionHost`，奥迪 sysdiagnose 2026-10-21 14:23:02 入网 → 14:23:23 邀请），
-  每轮重启等于永远等不到。配套：0x4301 路径现在也写 `lastWifiPsk`/`lastCarWifiSsid`
-  （此前只在 0x5703 路径写，导致手动兜底按钮误报「尚未拿到热点密码」）。
-- **ctrl 广播端口必须固定**（2026-10-22）：Android NSD 没有 JmDNS 的 `reannounce()`，
-  重发公告只能注销+重注册；旧实现连带 `stop()` 一起做，每次 `ServerSocket(0)` 换端口
-  （奥迪日志实测 43857→33383→33125→38151→40697→38015），中间还有最长 1.2s 服务空窗。
-  依赖 ctrl 邀请的车机（xcertplay 车机侧每会话 7 次 ×1.5s 探测）会按缓存端口连到已关闭
-  的 socket。现改为：`unregisterServiceOnly()` 只换 mDNS 注册，socket 与 accept 线程
-  在整个 advertiser 生命周期内复用（`acceptRunning` 独立于 `registered`）。
-- **CarPlay 长连接要显式设 TCP keepalive**（2026-10-22，参照 DiPlay `TcpLiveness`）：
-  内核默认 keepalive 要 **2 小时**才开始探测；车机熄火/手机走出热点时链路常**不发 RST**，
-  控制通道读线程会一直挂在 `read()` 上（画面冻结、看门狗不触发）。`net/TcpLiveness`
-  统一设 idle=10s / interval=3s / count=3 + `TCP_USER_TIMEOUT=20s`（19s 判死刻意大于
-  车机 15s 看门狗），已接控制通道、事件通道、视频数据口三处。**API 坑**：
-  `ParcelFileDescriptor.fromSocket` 在 API 29 前返回 socket 自身 fd 的包装，close 会把
-  原 socket 一起关掉——29+ 才用它取副本，26~28 反射 `Socket.getFileDescriptor$()`。
-- **车型重放回归（录制→重放测试）**（2026-10-20 落地）：防「改 A 车型回归 B 车型」。
-  管线：`tools/extract_car_fixtures.py` 从运行日志提取 `RAW rx/tx`（蓝牙链路）与
-  `IAPLINK rx`（隧道 CSM）成 JSONL fixture（`app/src/test/resources/carplay/fixtures/`，
-  **默认 gitignore**——含真实地址/热点名，入册需逐条评审脱敏）→
-  `replay/BtLinkReplayTest`（真实 Iap2LinkChannel+Iap2SenderSession 全栈重放）与
-  `replay/TunnelReplayTest`（VirtualIap2Link 控制会话重放）断言「录制的应答序列
-  ⊆ 回放序列（有序前缀/子序列）」。**录制即测试**：每次实车排障后跑一遍提取器，
-  fixture 库滚雪球。三条硬教训：① RAW 转储预算按字节计（已提 4096B/方向，旧日志
-  512B 连识别帧都盖不住）；② **帧长完整 ≠ 字节完好**——预算截断会把不同 read 的
-  尾巴拼成「长度恰好完整」的伪帧，载荷校验和不过、引擎静默丢弃，提取器必须按引擎
-  同款校验（帧头 9B 求和=0、载荷+尾校验求和=0）逐帧验证后再裁剪；③ 断言分级
-  （`rxHasIdent`）：识别帧幸存才做全量断言，否则只断言链路层（SYN/采纳/0x1D00），
-  隧道层用有序子序列（放行有意新增如 MIB3 突发，捕捉少答/乱序）。
-- **协议差异以日志为准**：测试台（DiPlay）与真车（奥迪 MIB3）行为多处相反（MFi 挑战
-  32B/20B、0x4301 有无、ctrl 邀请死锁等），细节见 `docs/PROTOCOL-NOTES.md` §9，
-  改协议代码前先对照。**0x5702 的外部佐证**在 §5b（catplay / xcertplay /
-  amineross-showcase / wiomoc-iap2 四个独立车机实现全部声明它）、**0.1.13 奥迪回归的
-  完整证据链与判读要点**在 §9j。
-- **老车机（CarPlay 210.81 / 奥迪 4xxx 固件）必须按 catplay 的「三时代」分类处理**
-  （2026-10-19 定谳，`docs/PROTOCOL-NOTES.md` §9f）：该代是 **pre-HomeKit** 接收端
-  （`_airplay._tcp` features 无 bit38 `HK_PAIRING_AND_ENCRYPT`），只接受
-  `et=NONE` 明文控制会话 + **AES-128-CTR 零密钥**屏幕流，`pair-setup` 必然失败。
-  六处硬约束：① bplist **根对象必须在字节 8**（210.81 不读 trailer 的 topObject，
-  我们的编码器默认根在末尾——已统一 `makeRootFirst`）；② 初始 SETUP 用相对 URI
-  `/setup`；③ 未配对会话显式带 `et=1`，事件通道明文；④ 屏幕帧未配对走 AES-128-CTR
-  （密钥流**跨帧连续**，每帧新建实例 = 第二帧起全乱码）；⑤ 控制密文帧 MTU 1440 →
-  单帧明文上限 **1422**（旧 0x4000 会被判 PayloadTooBig）；⑥ **不要用
-  `contains('.')` 判「有没有地址」**——奥迪 4xxx 常只发 IPv6 link-local，判成无地址
-  就会退到「网关:7000」兜底并永远连不上（统一走 `net/EndpointHosts`，IPv4 → 全局
-  IPv6 → 链路本地 IPv6，且视频/音频/事件通道复用配对真正连通的 `activeHost`）。
-  TXT features 缺失一律按「未知」保持旧路径，不能误判成「不支持配对」。
-- **屏幕流 VideoConfig 帧头必须带「加密标志 + 画布宽高」**（2026-10-19 奥迪 4851
-  实车定谳，`docs/PROTOCOL-NOTES.md` §9g）：车友反馈「app 显示已连接、车机没反应」，
-  日志里会话/触摸/心跳全健康、零错误。根因是我们只写了 `body_size`+`opcode`，而
-  catplay `ScreenFrame::config` 还写：`small_param[1] |= ScreenFlag::Encrypted(0x04)`
-  （**偏移 6**，声明后续帧是密文）、`params[1]`（**偏移 16**）= 宽高两个 **f32 LE**、
-  `params[0]`（偏移 8..16）留 0。Audi/DELPHI 按这些头字段建解码器，缺了就**整屏黑但
-  会话照旧、触摸照常**；DiPlay/WinPlay 只读 body 与 avcC，**测试台永远发现不了**。
-  因此凡是「车机屏黑但 app 显示已连接」都先核 `VIDEO: ✓ VideoConfig … flags=` 这行
-  日志（会同时打印头部前 24 字节 hex）。新增屏幕流头字段时同理：先用 catplay
-  `screen_frame_ext.rs` 对照，别只对着测试台验证。
-- **iAP2 协商：SYN|ACK 必须用新序号，且每条 SYN 都要回**（2026-10-19 BMW 87866
-  实车定谳，`docs/PROTOCOL-NOTES.md` §9h）：14 轮会话全部卡在链路层（`iap2 link
-  ready` 0 次），车机发 133 条 SYN、回 0 条 ACK。两个根因：① `sentSequence` 只在
-  发数据帧时自增，导致 SYN 与 SYN|ACK 同为 seq=99，对端按 `peerSeq+1` 校验后判重复
-  丢弃（catplay 用 `take_own_seq()`）；② 只有首次采纳时回显，而 BMW **每轮重试都用
-  新序号重开协商**，其余 SYN 只拿到裸 ACK 永远等不到回显。现状：每条**纯 SYN**
-  （`control and ACK == 0`）都回一帧 SYN|ACK，同一 SYN 的重发字节级幂等（不推进
-  序号）。两条踩坑：**裸 ACK 会与 SYN|ACK 撞号**（故主机路径只回 SYN|ACK，Audi
-  帧序随之从「裸 ACK+SYN|ACK」变为单帧，需复测）；**不能对所有带 SYN 位的帧都回**
-  （会与对端的 SYN|ACK 形成无限乒乓，单测曾因此空转 55 秒，只有 `jstack` 能看出）。
-- **车机如何识别我们的字段，一律不许"照 catplay 抄"**（2026-10-19 奥迪 0.1.7 回归
-  定谳，`docs/PROTOCOL-NOTES.md` §9i）：把 ctrl TXT 的 `srcvers` 从 `950.7.1` 改成
-  catplay 的 `566.25.21`、实例名 `sender` → `iPhone` 之后，同一台 Audi MMI 3315
-  从「0x4300 后 0.65s 下发 0x4301」变成**连 `GET /ctrl-int/1/connect` 都不发**，
-  `_airplay._tcp` 与 0x4301 双零、网关 `:7000` 空转 54s（`ECONNREFUSED`）。
-  iAP2 全通、车机还在发 0xAE00，极易误判成网络问题。已回退并加测试
-  `CarPlayCtrlAdvertiserTest` 钉死。**同一类字段**：`sourceVersion`、`deviceID`、
-  服务名、`model`、TXT `id`——改前必须真车 A/B 验证，且日志必须能直接看到取值。
-  配套：`_device-info._tcp` 已移除（Android `NsdServiceInfo` 不接受 port=0，
-  每次都报 `The port is missing`，属未验证收益的噪音）。
-- **0x4300/0x4E0E 的蓝牙标识必须在会话启动时就拿到真实 MAC**（2026-10-19 奥迪
-  0.1.7 日志）：整轮都是占位 `02:00:00:00:00:00`。根因是 `DeviceIdentity` 的 10 秒
-  静默窗口撞上「BT 会话在 Shizuku 刚就绪的同一毫秒构造」——首次失败后 10 秒内全返回
-  占位值。`BtSession` 现改为 `forceRetry = true` 并打印解析结果。奥迪会用它与 RFCOMM
-  对端核对，占位值导致静默丢弃。排查时**先看 `设备状态问候 … mac=` 这行**。
-- **AirPlay 会话级 SETUP 的 `deviceID` 必须是本机真实蓝牙 MAC**（2026-10-19
-  WinPlay 实测）：接收端可以按「用户选中的 iPhone 蓝牙地址」过滤会话，对不上即回
-  **403**，状态行是它特有的 `403 OK`（WinPlay 的 STATUS_TEXT 表没有 403，回退成
-  OK——看到这个组合优先怀疑设备过滤）。此前用 catplay 的写死假值
-  `ff:ee:dd:cc:bb:aa`——Audi/DiPlay 不校验，WinPlay 必拒；表象是「连上后约 45s
-  自动断开」（接收端等视频超时后自己拆链）。现统一走 `DeviceIdentity`（与
-  0x4300/0x4E0E 同源），占位值 `02:00:00:00:00:00` 只作 Shizuku 未就绪兜底，
-  403 日志会打印该值供用户到接收端对照。**SETUP 非 200 要主动 close 控制通道**，
-  别静默等接收端拆链——否则用户只看到「自动断开」，排查从零开始。
-- **会话存活靠三条相互独立的心跳，缺一整轮 10 秒后被车机拆**（2026-10-19 奥迪
-  MMI 3315 两轮实测，时序逐毫秒重合）：
-  ① UDP keepAlive 4B ping → keepAlivePort；**间隔必须远小于车机看门狗**——catplay
-  取的 10s 与看门狗等长，`Thread.sleep` 抖动让心跳晚到 1ms 即超时（现取 5s）；
-  ② RTSP `POST /feedback` 空体，1s；
-  ③ **屏幕数据口内的 keepAlive 帧**（128B 明文头，opcode=2；`/info` 的
-  `keepAliveSendStatsAsBody=true` 时 opcode=5 带 bplist 统计体），1s，**视频持续
-  推流时也照发**——它不是视频流量的备份。只有 ①② 时现象是「推流正常、RECORD 后
-  10.2s 整轮 reset」，日志里视频/feedback/事件通道全都健康，极易误判为网络问题。
-  **纠偏（2026-10-19 晚）**：三条心跳齐发时 MMI 3315 **仍**在 ~10s 被拆——该车的
-  10s 拆链另有主因（缺 WiFi 隧道，见下条）；心跳是必要条件，不是充分条件。
-  keepAlive 帧不加密（catplay 只加密 opcode=VideoFrame），不消耗 ChaCha 帧 nonce。
-- **MIB3 需要第二条 iAP2 链路（WiFi 隧道），只回 ACK 会被 ~10s 拆链**（2026-10-19
-  定谳，当晚日志 + AADisplay Frida 对照；**2026-10-23 二次定谳：本条成立**——当天
-  早些时候「CLASSIC_MIB3 忽略 marker 永不协商」的修正被车主 0.1.17 日志证伪：marker
-  是车机在等会话表，1Hz 无限重发，不回应则 RECORD 后 ~10s 拆链（0.1.9=10.17s、
-  0.1.17=10.18s），「0.1.9 忽略 marker 照常进入」系误传。marker 升级协商已全代际
-  统一。当年「协商挂起车机 UI」的真因见下条 modesChanged）：AirPlay 会话建立后，手机必须在屏幕流
-  SETUP 成功后**主动经控制通道** POST /command（iAPSendMessage 信封）发一次 DETECT，
-  车机回 SYN（事件通道）→ 手机 SYN|ACK（控制通道）→ 链路 NORMAL 后重跑控制会话
-  （0x1D00→0x1D01→0x1D02+0xAA00→0xAA06→0xAA02 挑战【长度按车机记忆，隧道独立键，
-  冷启动 20B 优先；同车蓝牙/隧道偏好可能不同——3315 蓝牙认 32B 而 Frida 隧道 20B】
-  →0xAA03→0xAA05→突发
-  0x4E0C/0xA100/0x4E0A/0x4E0B/0x4E09/0xFFFA/0xFFF0→应答订阅 0x5000/0x4157/0x4154/
-  0x4170，0xFFFB 只链路 ACK）。实现：`airplay/VirtualIap2Link.kt`（三形态合一：
-  DiPlay 隧道/MIB3/旧回显），协议细节与 Frida 逐字节常量见 `docs/PROTOCOL-NOTES.md`
-  §12。硬约束：① 手机→车机链路帧**只能**走控制通道 POST（事件通道出站 MIB3 不读）；
-  ② DETECT 必须在屏幕 SETUP 之后发一次（早发被冲掉，之后车机 marker 一律忽略）；
-  ③ 回显 LSP 声明自己的 maxOutgoing=0x7F（原样回显对端表=自己限死在小窗口，突发
-  积压）；④ 0xFFFA/0xFFF0/0x4158/0x5001 用逐字节常量，**勿重新编码**；⑤ 参考仓库
-  `reference/AADisplay` 是 GPL-3.0：只看协议事实，代码不抄。
-- **MIB3 切屏靠 modesChanged 资源重申，不是协商本身**（2026-10-23 双代理对照
-  AADisplay 定谳）：082446（0.1.14）协商/MFi/突发/订阅全部成功、会话健康 35s+，
-  车机却不切 CarPlay 画面——第二控制会话把车机资源仲裁重置，会话早期那份
-  modesChanged 已失效。AADisplay r17 长播验证时序：auth+burst 后 **+1.5s 首发、
-  +4/+12/+30s 重申**；声明落在 0xAA00/0xAA05 进行中会与 iAP POST 抢控制通道、
-  奥迪 ~12s 死。实现：`VirtualIap2Link.onControlSessionComplete` →
-  `SessionController.scheduleModesReclaim`。0.1.12「出画面 3 秒断」= 协商砸进
-  刚起步的 HMI，同源不同症。配套两课：**拆链归因守卫**——MIB3 布防了但控制会话
-  没完成就被拆 = 链路看门狗形态，严禁记音频档位不兼容（否则 media 通路被误拉黑、
-  永远没声）；**sendRawCsmLocked 日志取消息号在 frame[4..5]**（[2..3] 是长度——
-  曾把 0xFFFA 打成 0x32 误导排查一整轮）。
-- **MFi 挑战长度按车机持久化，不要全局写死某一档**（2026-10-19 奥迪 MMI 3315 实测）：
-  20B 挑战在该车静默 **6.0 秒**无应答，32B 才在 0.64 秒回签名——只靠「真车都 20B
-  优先」的基线，每次连接都白等 6 秒。而各接收端偏好相反：DiPlay 只认 32B（长度不符
-  直接断链）、MMI 6318 认 20B（32B 曾 0.4s 拆链）、MMI 3315 认 32B。
-  `MfiLengthMemory` 按 0x1D01 的 name+model+manufacturer 生成稳定 key，持久化
-  成功/静默/被拒三种结局；`orderAttempts`（纯函数）把**上次成功的长度排第一**，静默
-  与被拒只降级、不丢弃（固件可能变，全被拒时照常全试，防永久卡死）；已知静默过的
-  档位重试窗口压到 1.5s。**记忆是跨进程的**——旧实现只在进程内记，App 重启即丢。
-- **音频通道（车机侧声音）三条硬约束**（2026-10-17 奥迪联网实测打通，此前从无声音）：
-  ① **会话建立顺序必须是 屏幕SETUP → 连数据端口 → RECORD → 视频起流 → 音频SETUP →
-  补发RECORD**：车机对「屏幕流 SETUP 后约 2s 内未激活」有看门狗，而音频 SETUP 本身
-  要 2.0~2.7s（车机侧音频通路初始化），排在 RECORD 前必然把激活拖过看门狗——日志特征
-  是 `音频 SETUP 往返 20xxms` 与 `EVENT 读取结束 - Connection reset` 同一毫秒、5 次
-  实测全复现。音频流在 RECORD 之后加入时必须**补发一次 RECORD**才纳入会话。
-  ② **audioType 必须用 `media`**（媒体音频专用通路）：车机 /info 的 audioFormats 里
-  type=100 分档声明（奥迪有 compatibility/alert/default/media/telephony/speechRecognition
-  六档，**每档位图不同**）；往 compatibility 推媒体流时车机接受 SETUP、给 dataPort、
-  照收 UDP 包，**但不接入播放通路**（表现：手机静音成功、采集非零、包持续发送、无声）。
-  必须**全量解析 audioFormats 逐档选**，不能只看前两档（旧日志 take(200) 截断曾导致
-  误判「只有 compatibility」）。具体选择交给 `AirPlayClient.negotiateAudio()`：优先
-  media 档 + PCM48k 立体声（bit15），退 44.1k（bit11），延迟取该档 audioLatencies 的
-  outputLatencyMicros，无 /info 时回退协议基线（media/48k/250ms）。
-  ③ **RTP 参数按 catplay 真车值**：SSRC=**0**（随机 SSRC 会被当未知流）、每包 **352**
-  样本帧（AirPlay 标准 SPF）、timestamp 按帧递增、PT=100、大端 s16、AAD=头 4..12、
-  尾 8B 小端 nonce。改这些值等于改线上格式，必须对照 catplay `rtp_recorder.rs` /
-  `rtp_cipher_chacha.rs`。
-  诊断三件套（无声时按序看）：`AUDIO: 采集样本 非零X% 峰值=N`（0%=没采到：应用禁止
-  捕获或音频走了蓝牙）、`音频协商 → audioType=?`（选错通路）、车机 `/feedback` 里该
-  connId 的 sampleTime 是否推进。
-- **音乐卡「无法读取播放信息」= 通知监听器「有授权、无绑定」**（2026-10-19 实测）：
-  `settings get secure enabled_notification_listeners` 里能看到本组件、
-  `MediaListenerService.onListenerConnected` 却从未被调用——此时 `dumpsys notification`
-  的 **Live notification listeners** 段里没有本组件，`getActiveSessions()` 仍返回会话
-  （播放状态可见）但 `metadata` 恒为 null，卡片就显示「无法读取播放信息」。
-  **授权列表 ≠ 已绑定**：重装 APK 后列表项还在，绑定可能丢失。实测对照——App 进程
-  不运行时静置 10s 不会自愈；启动 App 后 1s 内恢复，说明必须由我们主动重绑。
-  自愈实现见 `NotificationAccess.rebindIfNotConnected`：仅当本进程尚未确认连上
-  （`serviceConnected` 为 false，由 onListenerConnected 置位）时读一次
-  `dumpsys notification --noredact`，**只认 Live 段**，缺失则 `disallow_listener`
-  + `allow_listener` 触发系统重新绑定并短轮询确认。别用「在 enabled 列表里」当已授权
-  判据——那正是这个 bug 的误判来源。
-  另：监听器断开/销毁时必须 `MediaSessionsState.publish(null)`，否则卡片会保留旧歌名，
-  出现「正在播放 + 未在播放」这类自相矛盾的残留状态（布局静态小标题也不能写死
-  「正在播放」，已改为中性的「媒体」）。
-- **RTSP 控制通道必须异步读**（2026-10-17）：一条连接一把锁 + 同步读响应的实现，
-  会让任何慢请求（奥迪音频 SETUP 2s+）期间 feedback 心跳停摆；车机对 feedback 有
-  ~3s 看门狗，断供即拆会话。现为独立读线程收包解密 + 按 CSeq 投递，写侧只串行化
-  「分配 CSeq + 加密写」；`soTimeout=0`（超时由待响应表的 poll 控制）。重连时旧 socket
-  必须关（防两个读线程抢包），cipher 由空转非空的瞬间要丢弃明文残渣（否则密文帧
-  边界错位、后续应答全解不出）。
-- **HID 设备的能力一律按「设备描述符」判定，不按车机型号/uuid/报文长度写死**
-  （2026-10-17：车机媒体键「收到但不切歌」+ 触摸多车机兼容的教训）：
-  ① **媒体键（Consumer Control）**走 `hidSendReport`，1 字节报告、**字节值是 Usage
-  数组下标**（HID Array 语义，`LogicalMax` = 数组长度-1），**不是 Usage ID**。
-  奥迪按下「下一首」实测收 0x05 → usages[5]=0xB5；早期把 0x05 直接当 Usage ID →
-  无对应键（表现为「有反应但不切歌」）。映射由 `ConsumerKeys.parseDescriptor()`
-  解析描述符的 Usage 顺序得到，再按 `[KEYCODE_MEDIA_PLAY/PAUSE/NEXT/PREVIOUS/...]`
-  派发（`AudioManager.dispatchMediaKeyEvent`，与桌面音乐卡同一路径）。
-  ② **触摸**同样按描述符判格式：Digitizer(0x0D) 页 + X/Y 16bit 才是触摸设备；
-  单指 Collection（奥迪 5 字节 `[tip][X u16LE][Y u16LE]`）vs 多槽（DiPlay 12 字节
-  `[槽][down][X][Y]×2`）按「Contact Identifier(0x09 0x22) 出现次数」区分。
-  **不能用报文长度或 uuid 判**：DiPlay 的 knob(4B)/telephony(1B) 与媒体键长度重叠，
-  只靠长度会把 telephony 的 usage 0xB3 当成「快进」误发。描述符缺失时才回退长度判据。
-  ③ 判定实现均有单测钉死语义（`ConsumerKeysTest` / `TouchReportsTest`，含奥迪与
-  DiPlay 两套真实描述符），改这些解析器先看测试。
-- **风格**：Kotlin，中文注释（注释写「为什么/实测依据」而非复述代码）；UI 文案俄文。
-  `reference/` 下是 GPL 参考仓库（gitignore，勿复制代码入本项目、勿外传）。
+- **Поворот домашней страницы: объявить, что configChanges не перестраивается + двойные столбцы горизонтального экрана** (18 октября 2026 г.): домашняя страница на мобильной стороне
+  Консоли с отслеживанием состояния (положение прокрутки, сложенные карты, заполненные SSID, отображаемые всплывающие окна) будут потеряны при перестройке системы.
+  Итак, `MainActivity` объявляет `orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden`.
+  **Цена заключается в том, что `layout-land/` не вступит в силу**, а горизонтальное расположение экрана можно вырезать только вручную в `onConfigurationChanged`:
+  `applyContentLayout(landscape)` Переместите карту героя **из ScrollView** на горизонтальном экране и прикрепите ее к `contentArea`.
+  Левый край зафиксирован (правый столбец `mainScroll` уступает место левому отступу), а вертикальный экран перемещается обратно к `contentRow` — —
+  Если карточка героя осталась в том же ScrollView, сдвиг правого столбца уберет ее (фактическая обратная связь с пользователем).
+  После перемещения родительского контейнера тип макетаParams изменится (LinearLayout ⇄ FrameLayout) и его необходимо перестроить целиком;
+  Высота экрана по горизонтали должна быть `WRAP_CONTENT` (MATCH_PARENT в FrameLayout переместит кнопку к нижнему краю карточки).
+  **onCreate также необходимо вызывать один раз** — запуск в ландшафтном режиме не вызовет onConfigurationChanged.
+  Высота экрана по горизонтали составляет всего ~300dp, а фактический бюджет: верхняя панель 60 + волновое поле 70 + статус 40 + субтитры 20 +
+  Интервал 18 + Кнопка 52 + Отступ 24 ≈ 284dp, ровно столько, чтобы соответствовать «Не подключено + Начать соединение»; после того, как волновой ящик опущен
+  Диск необходимо одновременно сжимать до 44dp (иначе диск 74dp заполнит кадр и дуга полностью выдавится из видимой области), тег CARPLAY
+  Скрыть в ландшафтном режиме. `SignalWavesView` нажмите **min(коэффициент ширины, коэффициент высоты)** для масштабирования (изначально нажимайте только ширину, и она переполнится при сокращении),
+  `hubPlate`/`hubCaption` использует гравитацию для центрирования вместо фиксации поля borderTop (последнее рассчитывается как 176dp, и оно будет смещено, если оно слишком короткое).
+  **Не читайте ширину карты героя как `contentArea.width`**: в момент вращения это все еще значение измерения в старом направлении (вертикальный экран 1168 →
+  На горизонтальном экране осталось всего 537 карт персонажей (подзаголовок вытянут в три строки), поэтому его нужно проверить с помощью `ширина экрана — отступы страницы`.
+  Размер всплывающего окна равен `ui/PanelWindow` (ширина экрана 92% + необязательное соотношение высоты), что позволяет поддерживать «Отображение».
+  Список слабых ссылок, `onConfigurationChanged` настраивает `resizeShowing(this)` на перерасчет - если не пересчитывается
+  Всплывающее окно сохранит ширину вертикального экрана и будет занимать только среднюю половину горизонтального экрана.
+- **Тема**: `Bg.run("name") { }` (util/Bg.kt, кэшированный пул) для кратковременных одноразовых задач; долгосрочный цикл
+  Потоки (композиция GL, устройство чтения/стимуляции ссылок, цикл принятия, сторожевой таймер и т. д.) остаются независимыми. Поток — обязателен.
+  Именование, прерывание и удержание жизненного цикла не собираются в пул. Основной поток запрещает ввод/декодирование (обложки и т. д. проходят через выделенных исполнителей).
+- **Поток пользовательского интерфейса абсолютно запрещает вызовы `Shell.exec`/Shizuku** (устранение неполадок системы 18 октября 2026 г., два реальных машинных сообщения ANR).
+  Общая основная причина): каждый `Shell.exec` — это `newProcess` + ожидание процесса, обычно ~100 мс, верхний предел тайм-аута.
+  До нескольких секунд; 3 экрана в `detach()` × (set+get) = 6 прямых ANR, флажок горизонтального экрана `setEnabled`
+  2 (тайм-аут по 4 секунды) и в худшем случае 8 секунд достаточно для ANR. **Добавлена защита времени выполнения**: обнаружен основной поток `Shell.exec`.
+  Накопить `mainThreadViolations` при вызове и записать файл журнала.
+  (`SHELL: ⚠ Главный поток вызывает оболочку (N-й раз) cmd=…`), подключенный к `SessionController.ensure`.
+  Появление этого лога означает, что новый код убрал UI-поток и необходимо изменить `Bg.run`/асинхронную упаковку.
+  Заключение расследования (полная проверка 18 октября 2026 г.): `MainActivity` (refreshShellState/resetShellState/
+  ReleaseDisplays/авторизация уведомлений), `ScreenDimmer`, `SessionController` (autoJoinCarWifi/
+  ShellWifiStatus, вызывается только Bg), `DeviceIdentity.bluetoothMac` (все вызывающие абоненты находятся в фоновом режиме),
+  `VirtualLauncher.launchApp` (все три точки вызова заключены в Bg) верны; на этот раз были отремонтированы две вещи:
+  `VirtualLauncher.detach` и `AppOrientationCompat.setEnabled` (последний добавляет
+  `setEnabledAsync` предназначен для использования пользовательского интерфейса, порядок подключения обеспечивает внутренняя сериализация исполнителя).
+  Также обратите внимание, что `BtProfiles.proxy()` использует `getProfileProxy`, и его **обратный вызов осуществляется через обработчик основного потока** — —
+  Вызов основного потока должен дождаться тайм-аута 1,2 с и вернуть ноль (добавлены явные средства защиты основного потока и журналы сигналов тревоги).
+  Этот вид API «блокировки и ожидания обратного вызова основного потока» можно вызывать только в фоновом режиме.
+- **Шизуку не готова и должна быть жестко заблокирована для подключения** (2026-10-18 Пользовательский тест: вы все равно можете нажать на Шизуку после остановки вручную)
+  «Начать соединение»): создание виртуального экрана, сенсорное внедрение и считывание состояния окна/дисплея в режиме невидимого экрана выполняются Shizuku.
+  Shell, если его отпустить, когда он не готов, то он дойдёт только до полуживого состояния "Bluetooth подключен, чёрный экран на машине + все касания потеряны".
+  Точки перехвата устанавливаются на двух путях: `ensureShizukuReady` (CTA впереди, ранжируется перед Bluetooth) и
+  Начиная с `startConnectionNow` (прикрытие для путей задержки, таких как обратные вызовы авторизации). Копия руководства для трех штатов
+  `ShizukuGate.guidanceOf` дает **разные** действия (не установлено = нет перехода, только описание; не работает = открыто
+  приложение Шизуку; Несанкционировано = запросить авторизацию и автоматически продолжить), поскольку слово «не готов» не может направлять пользователя.
+  **Контрольный список подготовки подключения учитывает Shizuku как элемент 1** (`readyCount` теперь x/4), саму строку состояния можно щелкнуть для загрузки.
+  Когда результат авторизации определяется `Shizuku.OnRequestPermissionResultListener`: предоставлено, статус обновляется и
+  Автоматически продолжать, если установлен `pendingShizukuThenConnect`, и прослушиватель должен выйти из системы при уничтожении действия.
+  Все всплывающие окна с подсказками находятся в `ui/DarkMessageDialog` - голый `AlertDialog.Builder.setMessage` находится в
+  `Theme.AppCompat.DayNight` имеет **светлый цвет**, который отделен от полностью темного пользовательского интерфейса (в тот же день был опубликован скриншот реальной машины).
+  Этот компонент поддерживает 1–2 операции по горизонтали вправо, 3 или более **вертикальное расположение с одинаковой шириной** (горизонтальное расположение на узком экране будет перегружено; вертикальное расположение является второстепенным).
+  Кнопки также должны находиться в нижней части капсулы, иначе только основная кнопка будет сплошной и на всю ширину, а вес будет несбалансированным); `Emphasis` различает основные операции
+  (непрерывный зеленый)/текстовая кнопка/опасная операция (темно-красный); `dismissOnClick=false` может оставить всплывающее окно и повторить попытку.
+  Унифицировано: загрузка Shizuku, выбор звука, отмена соединения, отключение, Bluetooth не включен, подключение к точке доступа,
 
-## 知识沉淀约定
+Остаточный виртуальный экран, разрешения плавающего окна, остаток горизонтального экрана (баннер вне списка + очистка встроенного).
+- **Три набора систем координат**: касание автомобиля-машины = система координат просмотра уведомлений (например, 1160×540); потоковая передача/виртуальный экран = масштабированный размер
+  (например, 1450×674). `TouchRouter.setCoordinateScale` преобразуется при установлении сеанса и меняет маршрутизацию касания.
+  Не разрушайте этот слой отображения. Координаты экрана карты = отображать сам контент (после динамического изменения размера).
+- **Размер дока должен быть пропорционален разрешению холста** (17.10.2026 Исправлена ошибка «Текст/значок в док-станции на мобильном телефоне с высоким разрешением».
+  «Кажется меньше»): все размеры док-станции взяты из эскизного проекта `design/launcher-proto.html` (базовое полотно
+  1160×540@420 точек на дюйм, стыковка 48dp=126 пикселей, часы 22 пикселя). **плотность экрана док-станции определяется SessionController
+  Выдается по короткой стороне полотна в равных пропорциях** (коэффициент 420 по эталонному уровню Audi ровно равно).
+  1.0 поведение полностью соответствует старой версии; тестовый стенд 2320×1080 (2×) с плотностью 840, док-бар 252px, текст/
+  Синхронизация иконок ×2, занимающих постоянные 23,3% короткой стороны холста. было записано на уровне «420×zoom%», и превосходное разрешение было пристыковано к машине.
+  По сравнению с холстом он уменьшен вдвое и кажется меньше (плотность экрана приложения рассчитывается адаптивно, поэтому меньше кажется только док-станция). Сопровождающее соглашение:
+  ① макет дока (`activity_dock_sidebar/bar.xml`) **все используют dp** (= дизайн пикселей ÷ 2,625),
+  Запрещено перезаписывать px; ② Размер шрифта `DockActivity`. Нажмите «Design px × designScale», чтобы установить его в PX.
+  (designScale = DensityDpi/420; sp не нужен — док-станция представляет собой холст для дизайна на уровне пикселей и не масштабируется со шрифтами мобильного телефона);
+  ③ Физические величины пикселей, такие как радиус размытия, также умножаются на DesignScale; ④ Ход/шаг `fitClockText` также умножается на
+  масштабирование designScale. При изменении обзора дока сначала убедитесь, что эти три места соответствуют плотности.
+- **Адаптируемый номер строки сетки рабочего стола на вертикальном экране** (17 октября 2026 г. Исправлено «Ячейки вертикального экрана занимают слишком большой диапазон»: включено пользователем.
+  Скриншот «Показать границу макета» открыт — исправлены 3 линии для растягивания сетки на тонкие и высокие полосы примерно 1:2,5, а значок занимает только 30%.
+  Большая пустая рамка): `GridActivity.computeCellMetrics()` в соответствии с **Целевым соотношением сторон сетки 1,25** Адаптивно
+  Количество строк (`usableH / (Ширина квадрата × 1.25)`, ограничено 3–6 строками) — спецификация CarPlay для горизонтального экрана по-прежнему рассчитывает 3 строки,
+  Поведение точно такое же, как и в старой версии; книжная ориентация (например, экран приложения 648×1241) насчитывает 6 строк (выровнена по главному экрану iPhone в книжной ориентации).
+  Внешний вид 4×6), сетка сходится к ~154×193. Емкость подкачки = `COLUMNS × rows` (поле времени выполнения,
+  Не возвращайтесь к константе). Навыки проверки пользовательского интерфейса: снимок экрана под опцией мобильного разработчика «Показать границы макета», ячейка
+  Красная рамка — это живая граница; после изменения размера сначала рассчитайте `usableH/(Ширина квадрата×1.25)`, а затем сверьте высоту с красной рамкой на скриншоте.
+- **Размер потока должен быть четным числом** (H.264 4:2:0): нечетная высота приведет к тому, что кодер перейдет в состояние ошибки в первом кадре и
+  Был поглощен тишиной. После расчета масштабирования в SessionController они выравниваются равномерно (в VideoSender есть другая оболочка).
+- **Изменение размера виртуального экрана должно быть синхронизировано с пользователем**: `VirtualDisplay.resize`
+  `SurfaceTexture.setDefaultBufferSize(новый размер)`, иначе проекция рисует новый контент в левый верхний угол старого буфера.
+  (Содержимое сдвинуто влево, а ширина имеет только пропорциональное значение).
+- **Приложение на виртуальном экране не может открыть клавиатуру: две независимые причины, обе из которых необходимо устранить** (17 октября 2026 г., Dingji, сторона автомобиля)
+  Причина, по которой нет клавиатуры при нажатии на поле поиска «Настройки»; это реализовано и проверено на реальных машинах - машина и машина отображают клавиатуру и нажимают кнопку
+  введите текст в поле поиска):
+  **① Частный экран отклоняет сторонние окна IME**: `createVirtualDisplay` не декларирует
+  Экран `VIRTUAL_DISPLAY_FLAG_PUBLIC` с `FLAG_PRIVATE` (владелец = идентификатор оболочки 2000) и
+  Ворота доступа `WMS.addWindow` `displayContent.hasAccess(session.mUid)` → `Display.hasAccess`
+  Для частных экранов разрешено присутствие только владельца/системы/корня/UID - окно клавиатуры ** метода ввода (uid 10xxx) блокируется
+  `ADD_INVALID_DISPLAY(-9)` отклоняет**, `SoftInputWindow.show()` входит после захвата
+  `REJECTED_AT_LEAST_ONCE` **Никогда не повторять** (отображается как сторона службы IME `mViewsCreated/mWindowVisible=
+  true` Но WM Не в InputMethod окно、`mImeWindow` (постоянный ноль). Исправлено: добавлены флаги доверенного экрана.
+  `VIRTUAL_DISPLAY_FLAG_PUBLIC` (public API = 1; доступ только к расширенному окну, «по умолчанию на общедоступном экране используется автоматическое зеркалирование»
+  Вступает в силу только тогда, когда OWN_CONTENT_ONLY не объявлен, мы его объявили и на него это не повлияет; экран док-станции остается закрытым).
+  **② Стратегия отображения IME по умолчанию — FALLBACK**: `VIRTUAL_DISPLAY_FLAG_TRUSTED` гарантирует только надежность, **виртуальный экран
+  Стратегия отображения IME по умолчанию — `DISPLAY_IME_POLICY_FALLBACK_DISPLAY`** (`dumpsys window displays`
+  На этом экране SettingsEntry `mShouldShowIme=null` является значением по умолчанию) — — IMMS.
+  `computeImeDisplayIdForTarget` всегда будет возвращаться к экрану по умолчанию для нелокальных политик, а запросы клавиатуры будут перенаправляться на
+  **Главный экран мобильного устройства**. Исправлено: после создания доверенного экрана отражение оболочки вызывает IWindowManager.setDisplayImePolicy(id,
+  ЛОКАЛЬНЫЙ)`——**LOCAL Значения должны считываться рефлекторно во время выполнения. `android.view.WindowManager.DISPLAY_IME_POLICY_LOCAL`
+  Вместо жесткого кодирования** (собственное ПЗУ имеет риск волшебного изменения значения перечисления, запросил пользователь 17.10.2026; AOSP = 0, невозможно выполнить обратное чтение до 0).
+  и вести журнал). Агент IWindowManager переходит на `ServiceManager.getService("window")` +
+  `IWindowManager$Stub.asInterface` отражение (`WindowManagerGlobal.getWindowManagerService`
+  Это убьет процесс на этом ПЗУ, не используйте его); требуется `INTERNAL_SYSTEM_WINDOW`, эта машина
+  `com.android.shell` предоставлен, а `wm`/`cmd window` не имеет соответствующей команды. Политика по экземпляру дисплея
+  (uniqueId включает генерацию) записи и виртуальные экраны перестраиваются каждый сеанс, поэтому их необходимо сбросить с помощью createDisplay (idempotent);
+  Может быть установлено только для доверенных экранов (в противном случае WMS выдаст SecurityException).
+  Оба из них необходимо исправить: только установить политику → токен перемещается на виртуальный экран, но окно отклоняется частным шлюзом (фактический тест
 
-- **随时补录**：工作中遇到值得记录的点——性能实测结论、踩坑、设计决策、已知问题与
-  放弃方向——应随手补录到本文件对应章节，后续根据实际情况再调整组织结构。
-- **取舍**：一次性的调试细节留在代码注释里；**跨会话仍有价值的**（会改变后续做法的
-  结论、复发即踩的坑）才沉淀到本文件。判断标准：未来会话在不了解它的情况下大概率
-  重犯或重查一遍。
+`imeDisplayId=299` и `mImeWindow=null`, шоу застряло
+  `PHASE_SERVER_SET_REMOTE_TARGET_IME_VISIBILITY(49)`); выпускайте только PUBLIC без установки политики → клавиатура
+  Все еще на экране телефона. **Инструмент диагностики**: рефлексивное чтение `WindowManager` всех полей IME_POLICY + стратегия пошагового чтения.
+  (`/data/local/tmp/const.jar ImeConst <ids...>`); `dumpsys` См. `mViewsCreated` с
+  Оба `mImeWindow` верны? Изменить файл: `CarInputServiceImpl.createDisplay`.
+- **Виртуальный экран должен «игнорировать направление, запрошенное приложением»** (18 октября 2026 г., Dingji, основная причина того, что заголовки поворачивают весь экран):
+  Приложения с вертикальным экраном (Toutiao и т. д.) будут запрашивать портрет на горизонтальном виртуальном экране, и система будет поворачивать весь виртуальный экран по запросу.
+  —— `dumpsys display` можно рассматривать как `rotation 0→3` и `real 2251x1152→1152x2251`. Последствия представляют собой ряд:
+  Синтезатор отображает весь кадр → соотношение экрана ненормальное; `TouchRouter` преобразует координаты в соответствии с неповернутым размером → нажмите дрейф,
+  На цель нельзя нажать; при возврате на рабочий стол все еще находится во вращающемся состоянии → «Разрешение рабочего стола также изменилось».
+  Исправлено: выполнить **app/appHi/map Three screens** после установления сеанса.
+  Установите обратно значение false, когда `cmd window set-ignore-orientation-request -d <id> true`, `detach`
+  (Должно быть до освобождения виртуального экрана, иначе идентификатор станет недействительным, и настройка останется уникальной до следующего сеанса).
+  **Подводные камни**: Эта команда принимает только `true|1|false|0`, о `reset` будет сообщено.
+  `Error: expecting true, 1, false, 0, but we get reset` и **записывает только stderr**——
+  А `Shell.exec` не читает stderr, поэтому старый код молчаливо недействителен в течение целого периода времени (политика направления никогда не вступает в силу).
+  Теперь `setIgnoreOrientationRequest()` записывается и считывается для проверки. Если это не удастся, оно будет напечатано.
+  `⚠ Экран приложения игнорирует запрос направления, не удалось`. **Добавлено, что любую операцию записи оболочки необходимо считывать для подтверждения**,
+  Особенно такие команды, как `cmd window` со строгой проверкой параметров.
+- **Соглашение о координатах рисования GL**: вершина DualDisplayComposer/обрезанная y — это **координата GL (нижняя часть).
+  Начало координат, растет вверх)**, координаты касания/потока — это верхнее начало координат — два набора расположены в противоположных направлениях, и при их смешивании могут возникнуть ошибки. закругленные углы
+  Прямоугольник отсечения (uClipRect) должен передаваться напрямую в той же системе координат, что и вершина; его необходимо перевернуть на экранные координаты + плитку во всю высоту
+  Симметрично перекрывающийся, но не отображавшийся в течение длительного времени, тайл половинной высоты (вертикальный экран) был отброшен (основная причина того, что карта карты была невидимой,
+  14 октября 2026 г.). Когда видимость некоторых областей ненормальная, приоритет отдается проверке соответствия системы координат между вершинами области и отсечения.
+- **Ритм кадрирования** В цикле синтеза DualDisplayComposer: появляются новые кадры, которые регулируются `1000/targetFps`,
+  Для неподвижного изображения гарантируется такт длительностью 33 мс (отказ кодера = изображение на принимающей стороне зависает); «новые кадры» учитываются и будут отрисованы
+  Ввод выходного экрана (док + экран активного приложения + карта, когда плитка видна).
+- **Разбор карты по умолчанию запрещает обратную связь** (18 октября 2026 г., основная причина «Карта карты не отображается после удаления и переустановки»):
+  `DefaultMapPrefs.resolve()` вызывался обратно, когда "не установлена карта по умолчанию"
+  `VirtualLauncher.defaultMapComponent()`, который просто переключается обратно на `resolve()`——
+  Бесконечная рекурсия → `StackOverflowError`. Условием триггера является **предпочтение пустое** (удалить и переустановить/очистить данные).
+  состояние после переустановки), поэтому симптом "черный экран при первом подключении к карте карты после переустановки, повторный выбор карты по умолчанию в настройках автомобиля"
+  Просто выздоравливайте». Исключение также было поглощено в logcat перехватом `Bg.run` (шифрование HKS этой машины не может быть прочитано).
+  Файловый журнал совершенно бесшумный — его легко принять за проблему с виртуальным экраном/композитором.
+  Текущая ситуация: Логика синтаксического анализа сосредоточена в чистой функции `resolveDefaultMap()` (явный приоритет → сканирование приоритетов),
+  Одиночный тест `DefaultMapPrefsTest` охватывает 5 путей (включая «повторный анализ должен быть прекращен»).
+  **Не вводите межобъектную интермодуляцию при изменении кода, связанного с картой по умолчанию**; `VirtualLauncher.defaultMapComponent`
+  Допускается только одностороннее транспонирование `DefaultMapPrefs`.
+- **Обработчик жизненного цикла сеанса**: принудительное покрытие горизонтального экрана (AppOrientationCompat) при подключении applyAll,
+  При retireSession/onEnded, resetAll — вновь добавленные записи на системном уровне (settings/cmd) закрываются в этом режиме.
+- **Влияние экрана блокировки/неактивного экрана на виртуальный экран: два независимых пути токена + исключение ALWAYS_UNLOCKED** (23 октября 2026 г.)
+  Проверка реальной машины Honor Magic7 Pro, ремонт флага реализован, ссылка на автомобиль готова для проверки автомобиля):
+  Зависание/черный экран после нажатия кнопки питания на телефоне вызвано наложением двух путей сна системы: ① **токен сна клавиатуры**
+  (KeyguardController отправляет токены на каждый экран, когда экран заблокирован → активность приостанавливается); ② **Сон без дисплея
+  токен** (виртуальный экран PUBLIC не имеет `FLAG_NEVER_BLANK` - AOSP оборудует непубличные экраны только тогда, когда система выключает экран
+  Состояние питания виртуального экрана соответствует основному экрану и меняется на ВЫКЛ/ДОЗИ → WM отправляет токен). Исправлено: `CarInputServiceImpl.
+  createDisplay` Добавить на экран **`VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED` (@hide, 1<<12)**——
+  `setKeyguardShown` напрямую игнорирует экран с этим флагом (даже блокировка PIN-кода не затрагивается), и заблокированный экран больше не будет отправляться.
+  жетон клавиатуры; **Необходимо объявить `VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP` (1<<11)** одновременно,
+  В противном случае флаг будет снят системой (в документе четко указано, что «он действителен только для виртуальных экранов, не входящих в группу дисплеев по умолчанию». В реальном тестировании он не используется.
+  Создание прошло успешно, но display.flags считывается без этого бита). Разрешение `ADD_ALWAYS_UNLOCKED_DISPLAY`/
+  `ADD_TRUSTED_DISPLAY` был протестирован оболочкой (пакет dumpsys com.android.shell);
+  При переходе на более раннюю версию удаляются повторные попытки отклонения ПЗУ (встроенная резервная функция createDisplay). Реальная проверка устройства: после блокировки экрана флажком
+  Без токена защиты клавиатуры, когда экран включен (все еще заблокирован PIN-кодом), он автоматически просыпается, активность возобновляется и восстанавливается кадр экрана.
+  **Поддержка познания**: ① Если экран находится в **состоянии отключения экрана**, он будет рожден с токеном отключения дисплея (спящий режим) и созданием интерактивного состояния.
+  Просыпается сразу после рождения – создание экрана продукта происходит при работе пользователя с мобильным телефоном, такой проблемы нет; ② Во время истинного сна системы (нажмите кнопку питания)
+  Поверхность окна будет удалена, перевешивание поверхности в этом ПЗУ нестабильно после пробуждения (активно, ВОЗОБНОВЛЕНО, но mHasSurface=
+  false, полагаясь на последующее устойчивое состояние перезапуска экрана/активности) - поэтому сценарий «нажмите кнопку питания» по-прежнему требует сотрудничества со стороны продукта:
+
+Загрузитесь, используя «привязку экрана» вместо кнопки питания.
+  **"Основной экран при подключении" (PR17, объединено 24 октября 2026 г.) по умолчанию отключен** (Настройки → Дисплей, требования пользователя):
+  Отключение питания осуществляется темным экраном (`enterDimNow`, то же, что и ручной путь ложного экрана) - фактическое измерение сенсорной микросхемы после выключения панели.
+  Он по-прежнему работает (честь: касайтесь пользовательского интерфейса напрямую, когда экран черный) и просыпается, когда вы нажимаете на темный экран; темный экран также является карманным щитом от случайного прикосновения.
+  **Нажмите кнопку питания = настоящий сон = риск замерзания автомобиля** (отслаивание клавиатуры/поверхности, это ПЗУ нестабильно),
+  Правильная поза — нажимать на темный экран и не нажимать кнопку питания; путь понижения версии (темный экран недоступен) можно сохранить только нажатием кнопки питания, если питание отключено.
+  **Реализован истинный и фальшивый экран (проверка реальной машины 23 октября 2026 г.)**: `ICarInput.setScreenPower(on)` находится в
+  Отражение `SurfaceControl.setDisplayPowerMode(token, POWER_MODE_OFF/NORMAL)` в UserService
+  (Требуется ACCESS_SURFACE_FLINGER, уже имеющийся в оболочке). Система остается интерактивной → виртуальный экран не оказывает никакого влияния
+  (`dumpsys power` mWakefulness всегда в режиме бодрствования), физическая панель действительно выключена (
+  Головку `dumpsys SurfaceFlinger` `powerMode=Off/On/Doze` можно проверить напрямую). Экран темный
+  Но **без блокировки экрана, без сна**, пробуждение с помощью сенсорного датчика, завершение сеанса/переключение темного экрана/отсоединение трехходового закрывающегося порта для восстановления питания,
+  Трансляция SCREEN_OFF (настоящий сон) очищает флаг `panelOffByUs`, чтобы вернуть панель в систему.
+  **Вход для получения токенов будет перенесен вместе с версией системы. Фактический тест Honor A17 проходит только ③**: ①
+  `SurfaceControl.getPhysicalDisplayIds/getPhysicalDisplayToken` (Android 11~14,
+  Собственный NoSuchMethodException) → ② `android.hardware.display.DisplayControl` (частичный
+  Новая система, родное ClassNotFoundException) → ③ `SurfaceControl.getInternalDisplayToken`
+  (Доступно изначально). Когда все три ветки терпят неудачу, setScreenPower возвращает false, и темный экран автоматически возвращается в состояние чистой маски.
+  **Примечание**. Можно ли разбудить панель физическим прикосновением после отключения питания, на реальной машине не проверено (на стенде используются события инъекции) ——
+  Если цифровой мертвый экран не подхватывается, путь пробуждения = кнопка питания (возврат после истинного сна).
+  **Темный экран остается, роль меняется**: ①Понижение версии при сбое setScreenPower (старое ПЗУ/Shizuku не готово)
+  Методы; ② Случайный сенсорный экран во время ожидания экрана — если при выключенной панели нет кликабельной маски, прикосновение к карману приведет к щелчку по стойке регистрации.
+  Приложение (например, «отключить»). Когда панель выключена, темный экран невидим и не влияет на внешний вид.
+  **Закрытие жизненного цикла (ошибка проверена пользователями 23 октября 2026 г.)**: SCREEN_OFF при нажатии кнопки питания на экране ложного сна для перехода в настоящий сон.
+  Необходимо убрать метку панели, убрать темный экран и одновременно остановить таймер - иначе темный экран все равно будет на экране блокировки после разблокировки, поэтому нужно нажать еще
+  прежде чем исчезнуть; USER_PRESENT (разблокировка) изменяет время — разблокировка по отпечатку пальца/лицу не генерирует события касания экрана, проверьте
+  Если вы не можете получить его и не компенсируете его, автоматический экран отдыха остановится после разблокировки.
+  Диагноз: `dumpsys window displays` Посмотрите на каждый экран `mSleeping`/`mAllSleepTokens`;
+  `dumpsys display` Просмотр виртуального экрана `state`; Проверка обратного считывания экрана UserService распечатана в
+  `/data/local/tmp/carinput_svc.log` (включая запись токена и результат setScreenPower).
+- **Темный экран/всегда включен должен управляться сеансом и не может быть запущен приложением** (пользовательское тестирование 19 октября 2026 г.)
+  "Сессия была отключена, а темный экран все еще активируется через некоторое время"): `ScreenDimmer.attach` изначально
+  `schedule()` 45-секундный таймер, а отключенный со стороны автомобиля `VideoSender.onEnded` - не проходит
+  `retireSession`**, `VirtualLauncher` по-прежнему висят, а таймер срабатывает как обычно. Условия для автоматического затемнения теперь созданы.
+  `enabled && sessionActive && attached` (чистая функция `shouldAutoDim`, с одиночным тестом):
+  Сеанс начинается (`attach` устанавливается после успеха в onSurfaceReady `VideoSender.start`) перед планированием и
+  Измените тайм-аут экрана на «Никогда», `onEnded`/`retireSession` и `detach()` должны снять флаг
+  (В противном случае при следующем запуске будет использовано значение true). Ручной «экран ложного интереса» `enterDimNow` может следовать по пути `force` без ограничений.
+  **Критерии**: любые побочные эффекты пользовательского интерфейса/системы, которые «должны вступать в силу только во время сеанса», должны быть отключены одновременно.
+  Оба конца «Push-поток начался успешно» и «onEnded» — только висящий один конец неизбежно пропустит путь, по которому автомобиль и машина автоматически разъединятся.
+- **Реальный экран мобильного телефона (физическая панель выключена) + виртуальный экран всегда включен независимо** (23 октября 2026 г., подробнее см.
+  `docs/PHONE-SCREEN-OFF.md`): При нажатии кнопки питания произойдет «блокировка экрана + сон» (черный экран/пропущенная рамка). Правильный метод
+  Держите систему логически «включенной и разблокированной» и отключайте только физическую панель на уровне SurfaceFlinger (происхождение scrcpy `-S`):
+  Дополнительная информация для доверенного экрана `VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP(1<<11)` +
+  `VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED(1<<12)`, затем настройте токен физического главного экрана.
+  `SurfaceControl.setDisplayPowerMode(0)`. **Хотя док-экран является «ненадежным», на нем должна быть та же пара флагов**
+  (тот же трехуровневый даунгрейд) - иначе попадает в группу отображения по умолчанию. При выключении физического экрана вся группа гаснет, а сторона автомобиля ведет себя как
+  «Экран приложения нормальный, панель док-станции вся черная, и оно восстанавливается после разблокировки» (фактическое тестирование 23 октября 2026 г.; AOSP доступен только на `AUTO_MIRROR`
+  Когда ясно `OWN_DISPLAY_GROUP`, док-станция не объявляет PUBLIC, поэтому флаг зарезервирован). Четыре жестких ограничения: ① `ALWAYS_UNLOCKED` требует
+  `ADD_ALWAYS_UNLOCKED_DISPLAY`, **некоторые ПЗУ не поддерживают оболочку** и вызывают SecurityException
+  Вывешивание на весь экран → `createDisplay` требует трёх уровней понижения (группа + разблокировка → группа → базовые флаги);
+  ② **SDK 34+ удален `SurfaceControl.getPhysicalDisplayIds/getPhysicalDisplayToken`**,
+  Должен загружаться через `ClassLoaderFactory` + `SYSTEMSERVERCLASSPATH`
+  `com.android.server.display.DisplayControl` и `Runtime.loadLibrary0(cls,"android_servers")`,
+  В противном случае JNI не регистрируется (так же, как scrcpy); ③ Время: `enterPhoneScreenOff()` после успешного нажатия,
+  `onEnded` переходит в `restorePhoneScreen(sleep=true)` (остается черным, прямой KEYCODE_SLEEP),
+
+`retireSession`/Ручное отключение установлено на ложь (панель загорается); ④ **Должно быть три уровня восстановления** (окончание сеанса /
+  Срок действия UserService истекает до совершения самоубийства/при следующем запуске приложения) - иначе приложение вылетит и телефон останется с черным экраном
+  (Двойное нажатие кнопки питания может спасти его, но не полагайтесь на это). **Переключатель пользователя**: Настройки → Дисплей → «Экран ответа при подключении»
+  (по умолчанию включено, `DisplayPrefs.screenOffOnConnect`, клавиша `screen_off_on_connect`); после закрытия
+  Оставьте только темную занавеску. Включите сеанс через `SessionController.applyScreenOffPreference` **Отменить немедленно**
+  (Экраном автомобиля можно управлять, следующего подключения ждать не нужно). Панель «Дисплей» настроена с помощью ScrollView — в области содержимого автомобиля есть только
+  Высота ~200dp, 4 абзаца контента без прокрутки обрежут последний абзац.
+- **Автоматическое соединение при посадке в машину (пробуждение по трансляции ACL, 23 октября 2026 г., подробности см. в `docs/AUTO-CONNECT.md`)**:
+  `bt/CarBluetoothReceiver` слушает `ACTION_ACL_CONNECTED/DISCONNECTED` с помощью **списка статического приемника**
+  —— Эти двое находятся в [списке неявных широковещательных исключений ](https://developer.android.com/develop/background-work/background-tasks/broadcasts/broadcast-exceptions)
+  Здесь процесс можно запустить в холодном состоянии, даже если он убит. Три неопровержимых факта: ① **Список исключений из фонового режима FGS для Android 12+ отсутствует.
+  «Bluetooth Broadcast»**, этот проект может называться `startForegroundService`, поскольку он содержит `SYSTEM_ALERT_WINDOW`.
+  (Требуется темный экран/сенсорный датчик, targetSdk 34 проверяет только наличие разрешений); пользователь будет заблокирован, если плавающее окно не будет предоставлено.
+  При блокировке `ForegroundServiceStartNotAllowedException` ресивер только записывает логи и не вылетает;
+  ② FGS должен использовать тип `connectedDevice` (2 параметра `startForeground` будут использовать mediaProjection,
+  Проверка Android 14 AppOps PROJECT_MEDIA приводит к сбою напрямую); ③ Сначала необходимо выполнить процесс холодного запуска.
+  `SessionController.ensure(applicationContext)`, затем `startConnection(...)` — клиент BT /
+  Разъемы WiFi встроены в `ensureSessionObjects`, и NullPointer будет пропущен.
+  Автоматическое подключение **со звуком**: положитесь на `audio/SilentProjectionActivity`, чтобы бесшумно управлять MediaProjection——
+  `appops set <pkg> PROJECT_MEDIA allow` позволяет SystemUI напрямую возвращать RESULT_OK (та же модель, что и Tasker,
+  Операция приложения является **постоянной**, очищается `appops set … default`, когда она не нужна), а затем подтягивается оболочкой `am start`.
+  1×1 прозрачный, трамплин `exported`, `noHistory` (только оболочка START_ACTIVITIES_FROM_BACKGROUND,
+  START_ANY_ACTIVITY нет, поэтому его необходимо экспортировать). **Железное правило Android 14**: сначала получите авторизацию
+  `upgradeToProjection()` Добавьте mediaProjection к типу FGS, чтобы получился `getMediaProjection`;
+  И когда `startForeground` повторяется в `onStartCommand`, `mediaProjection != null` должен продолжаться.
+  Принесите этот тип (иначе тип будет удален и проекция остановлена). **Переключатель**: Настройки → Дисплей → «Автоматически подключаться при посадке в машину»
+  (`AutoConnectPrefs`, включено по умолчанию; та же панель, что и «Настоящий экран при подключении»).
+  Выйдите из машины и пройдите `ACTION_AUTO_STOP_SESSION` → `disconnect()`; намерение доставляется с помощью `startService`
+  (Когда служба запущена, процесс уже находится в состоянии приоритетной службы и на него не распространяются ограничения на фоновый запуск).
+- **Автомобильный HID: мультимедийные клавиши на рулевом колесе + ручка iDrive** (23 октября 2026 г., подробности см. в `docs/HID-KNOB.md`):
+  hidDevices `/info` **прошёл весь uuid и отправил hidSetInputMode** — не изменяйте, чтобы угадать устройство по uuid/имени
+  (Audi отправляет `"0"/"1"`, DiPlay отправляет целые числа), **дескриптор — единственный стабильный сигнал**. Страница потребителя (0x0C) →
+  `ConsumerKeys` (Две семантики Массив/Переменная разделены, и если вы смешаете их вместе, вы не сможете нажать на одну клавишу) →
+  `AudioManager.dispatchMediaKeyEvent` Глобальный медиа-ключ; для страницы общего рабочего стола (0x01)
+  Колесо(0x38)/Шляпа(0x39) → `HidNavigation` → `ICarInput.keyEvent(displayId, DPAD_*)`
+  Внедрить в виртуальный экран (KeyEvent также переходит к `setDisplayId`; не удается вернуться к `input -d`). **DPAD не может распространяться по всему миру**
+  (Он перейдет на главный экран телефона), а целевой экран — `VirtualLauncher.activeAppDisplayId()`. Выделение фокуса = Ячейка сетки
+  `isFocusable=true` + `foreground=focus_ring` (передний план не закрывает фон);
+  **Док — это независимый дисплей, DPAD не занимает несколько экранов**. Клавишный переключатель калибровки: Настройки → Дисплей → «Исходный журнал HID»
+  (`DisplayPrefs.hidRawLog` → `HidNavigation.rawLogEnabled`, лог-строка `HID-RAW: uuid=… bytes=…`).
+- **Отмена соединения должна быть прервана на протяжении всего процесса**: `sessionStarting` Сброс флага взаимного исключения зависит от потока процесса сопряжения
+  Перейти к наконец — поток может быть заблокирован в режиме непрерывного ожидания (без тайм-аута соединения, ожидание mDNS,
+  Цикл чтения BT Keep-Alive), любое застревание сделает отмену «недействительной» (карта героя постоянно «подключается»).
+  Комплект защиты из трех частей (фактический бой 15 октября 2026 г.): активно отсоединяйте и закрывайте сокет сеанса BT при отключении/отмене.
+  (**Выполняется только в состоянии пользовательского терминала, см. следующую статью**), флаг AirPlayClient.cancelled позволяет досрочно завершить цикл повторной попытки сопряжения,
+  cancelConnecting Force `sessionStarting.set(false)` (явная отмена пользователем означает принудительную разблокировку).
+  **При добавлении любой точки длительного ожидания вы должны ответить на команду connectCancelled**, а путь отмены должен быть проверен в сценарии «отмена сразу после инициации».
+- **Подключение осуществляется по трем основным причинам (фактическое измерение Audi, количественная оценка журнала от 18 октября 2026 г.)**: Из «Приглашение к управлению автомобилем/машиной/анализ конечных точек».
+  В 4,9 с RECORD `/info` ~ 3,0 с — это инициализация сеанса на стороне автомобиля и машины (возвращаемое значение такое же, как и второй элемент управления автомобиля и машины)
+  Приглашение приходит за ту же миллисекунду - не отвечает, пока окно не будет готово, кошачьи игры тоже должны ждать, **не оптимизируется**);
+  Две вещи, которые можно сохранить в вашем собственном коде, были удалены из критического пути:
+
+① `AppOrientationCompat.resetAll` из `retireSession` (6 применений × 2 раза `am compat`
+     ≈1,6 с, исходная синхронизация выполнялась до сопряжения);
+  ② `applyAll` при прикреплении виртуального экрана (≈2,0 с, изначально задержка первого кадра).
+  Оба заменяются на один и тот же **однопоточный исполнитель** для асинхронного выполнения (`applyAllAsync`/`resetAllAsync`, последовательная гарантия).
+  «Сначала восстановите предыдущую сессию, затем запишите эту сессию»). **Обратите внимание на побочные эффекты асинхронизации**: `am compat enable`
+  Целевое приложение будет немедленно закрыто, а щелчок значка на рабочем столе может произойти до завершения записи — `VirtualLauncher.launchApp`
+  Сначала необходимо очистить очередь `AppOrientationCompat.awaitPending()`, иначе приложение будет уничтожено сразу после запуска.
+  Еще одна большая потеря — это гонка по тайм-ауту привязки Wi-Fi: старый `latch.await(5s)` будет
+  ~116 мс до прибытия onAvailable, решение не принимается, и весь раунд прекращается (фактическое время, затраченное на отказ, составляет 20:02:09.352 →
+  20:02:09.467 успешно), пользователь тщетно ждет раунда переподключения BT (+13 с). Текущее окно составляет 15 секунд, и ожидание шардинга можно отменить;
+  Сторожевой таймер 5s `WifiCarPlayConnector` только подсказывает и не меняет решения.
+- **Очередь приема iAP2: область временного хранения и новые кадры должны быть разделены** (18 октября 2026 г., основная причина блокировки обновления журнала в реальном времени):
+  В течение периода ожидания `expectOrNull` поместит нецелевые кадры в `pendingFrames` «для последующего использования», и
+  `recvFrame` получает приоритет от `pendingFrames` — старая реализация разделяет очередь приоритетов и используется тот же кадр.
+  Несколько раз вынимайте → записывайте → возвращайте данные обратно, чтобы сформировать живую блокировку, регистрируйте ~ 1000 строк в секунду до истечения времени ожидания (сценарий триггера: автомобиль, машина
+  При подъёме `0x5000 StartNowPlayingUpdates` и `0x5703` прибывают рядом; пропустить 2 секунды
+  После того, как StartHID ничего не ждет, он попадает сразу в следующий период ожидания). Модификация: `recvFrame` (общее, приоритетное временное хранилище) и
+  `recvNewFrame` (только чтение новых кадров) отделяется, `expectOrNull` принимает только последний, и сначала проверяет, есть ли такой в области временного хранения.
+  Целевой кадр; буферная зона плюс 256 верхний предел. Регрессионный тест `Iap2SenderSessionTest` вставлен в имитационную последовательность.
+  Late 0x5000 — Устранить ошибку восстановления или таймаута. Кроме того, `pumpIncomingForever` для того же идентификатора сообщения
+  Для непрерывных поступлений реализовано регулирование (файлы журналов размером более 2 МБ будут удалены, а обновление экрана означает потерю полезного контекста).
+- **Время подключения: сначала транслируется возможность, по приглашению, не вслепую и т. д.** (18 октября 2026 г., сравните с процессом подключения Catplay):
+  Порядок отправителя Catplay: «Резидентная трансляция CarPlayCtrlServer `_carplay-ctrl._tcp` (каждые 1 с).
+  Force_announce) → Приглашение от машины `GET /ctrl-int/1/connect` → Создать AirPlay сразу после получения приглашения",
+  На протяжении всего процесса нет фиксированного сна. В нашем старом процессе есть три ожидания вслепую, и общее время, затрачиваемое на каждый раунд, составляет 5–13 секунд:
+  1) Трансляция ctrl не будет выпущена до 0x5703 (машина, естественно, найдет мобильный телефон на шаг позже) → изменено на `startConnection`
+     Сразу же выпущен, 0x5703/ выполняет перерегистрацию `ensureForNetwork` только после привязки сети;
+  2) Исправлено время ожидания 1,6 с после передачи конечной точки «Приглашение прибыло» → изменение на `awaitCtrlInvite` (управляется событием подсчета приглашений,
+     Force_announce недоступен в течение 2 секунд, но гарантированно действует в течение 4 секунд; `_airplay._tcp` найден и тоже выпущен);
+  3) Ждать StartHID 2 с + ждать 0x4301 10 с безоговорочно → сначала прочитать параметр 6 0x1D01 (автомобиль заявляет, что может отправлять
+     список сообщений), пропустить, если не объявлено (Audi объявляет только 0x5703/0xea03, что является источником этих двух пустых ожиданий),
+     Консервативное окно нажимается, когда список не указан (0x4301 получил 3 из 10).
+  В комплекте: резидентное средство обнаружения `_airplay._tcp` (подключение к сети означает фоновое обнаружение, проверку кеша при необходимости вместо проверки сейчас и повторных попыток в течение 3×6 с);
+  Разрешение конечной точки перемещается после приглашения (служба автомобилей и машин часто подключается к сети после приглашения), и поток обратного вызова сети больше не занят;
+  Перед привязкой Wi-Fi убедитесь, что SSID уже является точкой доступа автомобиля (`bindCurrentWifi` только нажимает запрос на транспортировку,
+  **Не проверяйте SSID**, он будет привязан к старой сети при переключении сети); Выпуск+перепривязка `bindCurrentWifi` будет
+  Отмените привязку сети процессов, поэтому после привязки к одной и той же точке доступа выберите быстрый путь и используйте блокировки для сериализации двух путей привязки.
+  **Примечание**: первая регистрация после завершения трансляции может привести к тому, что Шизуку не готова → Идентификатор TXT записывается как заполнитель MAC,
+  Автомобиль и машина соответствуют мобильному телефону в соответствии с этим идентификатором (заполнитель = никогда не приглашать). `DeviceIdentity.bluetoothMac(forceRetry)`
+  + `CarPlayCtrlAdvertiser.repairPlaceholderMac` (повторять каждые 2 секунды, в случае успеха перерегистрироваться) является обязательным.
+- **Сеанс управления BT не должен отключаться во время сопряжения/потоковой передачи** (16 октября 2026 г., основная причина цикла «подключено примерно на 3 секунды, а затем отключено»):
+  DiPlay до того, как туннель Wi-Fi iAP2 будет готов (канал AirPlay никогда не доставлялся на `disableBluetooth`,
+  `handoffRequested=false`) Когда RFCOMM отключен, он оценивается как `wireless bring-up failed` →
+  `closeWirelessStack` демонтирует весь беспроводной стек (сервис Bonjour/hotspot/AirPlay), а также удаляет установленные и даже
+  Сеанс потоковой передачи AirPlay удаляется вместе** (Журнал: сторона DiPlay `RFCOMM reader FAILED` →
+  `bring-up failed`; сторона мобильного телефона ок. +0,4 секунды спустя `TUNNEL/EVENT Конец чтения - Connection reset`,
+  `Push-трансляция прервана`). Непрерывно выключайте один раз и перестраивайте стек в течение 30–40 секунд, образуя цикл соединение → отключение → реконструкция → повторное подключение.
+  Раньше в `retireSession()` отсоединение было ошибкой (оно будет выполняться один раз в начале каждого раунда жеребьёвки); теперь это только в
+  `disconnect()` (окончательное состояние отключения/отмены пользователя) отсоединиться. **При изменении логики списания сеанса сначала убедитесь, что нет новых дополнений.
+  Путь для отключения RFCOMM на полпути**; «Второй этап взлома» `SessionController.kt:876` (сопряжение не удалось
+  Намеренное отключение BT и повторная попытка) неизбежно приведет к полной перестройке стека DiPlay, стоимость которой известна.
+- **Bluetooth только создает пару, а не соединяется** (18 октября 2026 г., пользователь фактически протестировал Audi MIB3): мобильный телефон и автомобиль подключены к Bluetooth.
+  В состоянии **подключено** (HFP/A2DP в сети) автомобиль **не открывает окно службы iAP2 беспроводной системы CarPlay**
+  ——Выполняется `BT-C: Соединение не удалось（Автомобиль не готов или его нет в окне беспроводного сопряжения）`, повторяя каждые 3 секунды, пока система не
+  Отключитесь самостоятельно перед повторным подключением. Настоящая беспроводная система CarPlay для iPhone использует только сопряжение на системном уровне + iAP2 RFCOMM
+  (Независимый сервис SDP), звук передается по Wi-Fi через AirPlay, эти профили звука/вызовов можно отключить.
+  Реализация (`bt/BtProfiles`): проверьте состояние файла конфигурации целевого адреса перед отправкой соединения iAP2. Если соединение есть, сначала отключите его.
+  (Обратный вызов об успешном сопряжении также прерывается дважды: сразу + через 1,5 с между ними часто происходит поперечное соединение автомобиля и машины).
+
+**Отключение выполняется только для устройств, для которых «подтверждено предоставление службы iAP2 (SDP...caff) или выбранных пользователем целей»** (20 октября 2026 г.)
+  Узкий, `Iap2BluetoothClient.awaitIap2Service`): Кандидаты в автоматический режим = все сопряженные устройства,
+  Наушники/часы не поддерживают эту услугу и отключаются, когда не могут подключиться. HFP/A2DP (отключение на уровне устройства также повлияет на другие онлайн-сервисы).
+  оборудование). SDP обнаруживает сначала чтение системного кэша uuids, его отсутствие, а затем выборку UuidsWithSdp и т. д. ACTION_UUID
+  (окно 2,5 с) вывод кэшируется по адресу до тех пор, пока клиент не остановится, и сбрасывается при вызове start().
+  **Учитывайте ограничения API**: `BluetoothHeadset/A2dp/LeAudio.disconnect(BluetoothDevice)`
+  **@SystemApi** (не отображается во время компиляции, во время выполнения требуется только `BLUETOOTH_CONNECT`), может вызываться только рефлекторно;
+  Для запроса используйте общедоступный `getProfileProxy` + `connectedDevices` (требуется главный Looper). **Не** помещайте этот абзац
+  Перейдите в Shizuku UserService (раньше пробовал, но не работает): UserService
+  `BluetoothManager.getAdapter()` возвращает значение null (контекст приложения бесхозного Looper), и запрос всегда
+  «Не подключен», наоборот, скрывает истинный статус. Журнал диагностики: `BT-PROFILE: Перед подключением…Статус профиля Bluetooth=`.
+- **Команда оболочки**: используйте `shellQuote` (экранированные одинарные кавычки) для параметров; используйте один раз, чтобы проверить переключатель Wi-Fi/текущий SSID
+  `cmd wifi status` (Не используйте слепое обязательное суждение «любой Wi-Fi успешен» — оно будет неверно оценено, когда телефон подключен к другому Wi-Fi).
+  **Нет точки доступа в Интернет: по умолчанию используется сеть, специфичная для приложения, и доступ к сети на системном уровне не требуется** (решено 18 октября 2026 г.):
+  `WifiNetworkSpecifier` (`WifiCarPlayConnector.joinCarPlayNetwork`) объединяет горячие точки автомобилей и машин——
+  Сеть видна только этому процессу (сторона системы `Ephemeral: true` + `OwnerUid=Это приложение`), **не входят в систему и сохранены
+  Сеть не станет сетью по умолчанию**, а другие приложения продолжат использовать 4G/5G. Фактические измерения (Honor + Redmi K40 + DiPlay):
+  У `cmd wifi list-networks` нет этого SSID (возвращает 0), `Active default network` по-прежнему является сотовым,
+  `ping baidu.com` 0 потеря пакетов во время потоковой передачи. Кстати, решены три старые проблемы: системный сторожевой таймер больше не переключается в исходное состояние.
+  Wi-Fi; может автоматически присоединиться без Шизуку; мобильные данные не будут отключены ПЗУ из-за «отсутствия подключения к Интернету».
+  **Яма миграции**: старая версия использовала `cmd wifi connect-network` для сохранения точек доступа, пока система все еще находится в системной конфигурации.
+  Будет автоматически подключаться по всему миру — перед подключением проверьте SSID с помощью `cmd wifi list-networks`. Если нажать **, появится всплывающее окно с запросом у пользователя.
+  Очистить или нет, никогда не удалять без разрешения** (Хранение является законной необходимостью: пользователи могут захотеть использовать систему для автоматического подключения или точки доступа между автомобилем и машиной).
+  Он сам передает трафик; удаление влияет только на то, «произойдет ли глобальное автоматическое соединение» и не имеет никакого отношения к текущему раунду соединения). Выберите Сохранить → Работа как обычно.
+  Подключитесь к сети конкретного приложения. Каждый SSID запрашивается только один раз для каждого процесса (`forgetPromptHandled`), в противном случае — в паре.
+  Повторная попытка/повторный вход в конечную точку приведет к повторению всплывающих окон, блокирующих процесс; ни один ответ не будет обработан как «Сохранить» (никакие деструктивные действия предприняты не будут).
+  Используйте `WifiSavedNetworks.idsOf` для анализа (чистая функция, одиночный тест: SSID содержит пробелы/не ASCII/несколько строк в одной сети)
+  Будут покрыты все строки с одинаковым netId/неправильным формированием; лучше пропустить решение, чем удалить его по ошибке). Нижняя крышка с ручным управлением (`manualJoinCarWifi`) удалит горячие точки.
+  Сохраните его обратно в системную сеть, и цена будет четко написана в журналах и всплывающих окнах.
+  **уточнение Подвешенный ритм должен быть реверсирован в соответствии с «окном автомобиля»** (23 октября 2026 г. Audi 3315 миллисекунд
+  Настройки журнала): Машина стартует с 0x4301 **~15с на демонтаж БТ, и через ~21с окно сервиса AirPlay закрывается** (опоздание означает приход
+  Порт 7000 ECONNREFUSED, BT не может быть активирован каким бы исправным он ни был) - бюджет доступа к сети начиная с 0x5703 составляет всего
+  ~9–14 с. Следовательно, первому окну спецификатора можно задать только 5 с (обычный доступ к сети 0,03–3 с; обратный вызов 5 с = функция приостановки),
+  Затем действуйте последовательно: Быстрое обнаружение (система подключена напрямую, если она подключена, ≤3 с) → ** Повторно отправить спецификатор (фактическое измерение
+  Release→Отправить повторно через 1,6 с и войти в сеть. Это проверенный и эффективный метод восстановления, за которым необходимо внимательно следить при обнаружении) ** Окно 20 секунд →
+  Connect-network выполняет глубокое погружение (окно для этого раунда должно быть пройдено и является всего лишь заполнителем для следующего раунда). Ошибки, которые я совершил: держу все в секрете
+  Ранжируется после первого окна 20с** - цепочка была удалена до завершения первого окна первого раунда (15,2с), а ход вообще не был выполнен;
+  Сервисное окно закрывалось при подключении к сети на 21,6с во втором раунде. **Сторона очистки сети системы хранения данных Connect-Network**: Требуется регистрация.
+  В **момент**, когда команда вернет «ОК» (если перед регистрацией вы дождетесь «отключения сети + успешного связывания», произойдет три сбоя отмены/тайм-аута/привязки)
+  Путь останется позади); очистка отсоединения и подача потока onEnded **оба конца** (чаще всего происходит отсоединение автомобиля и машины)
+  Метод выхода); SSID, сохраненный до этого раунда (пользователь выбрал «Сохранить»), не будет зарегистрирован и не будет удален.
+  **onLost связыванияCurrentWifi должен пересылать onNetworkLost** (после того, как сеть станет основным путем, он не будет пересылаться.
+  После выключения игры карта героя остановится на «Подключено», и сессия не завершится, пока не истечет время сердцебиения).
+  **WEP не может быть выражен с помощью спецификатора** (нет соответствующего API Builder) → `JoinResult.Unsupported`,
+  Возьмите старый обратный путь `connect-network` (`legacyJoinCarWifi`).
+  **PR17 (три ошибки командной строки, привнесенные BMW, знания, которые сосуществуют с основной строкой спецификатора)**: ① `cmd wifi
+  exit=0 of Connect-Network` **не означает подключение** (только подключение передается на WifiService) → необходимо опросить
+  `cmd wifi status` и другие изменения SSID (наши подробные сведения были реализованы в соответствии с этим); ② Регистрация НРД не имеет сети.
+  Параметры трансляции mDNS следуют за **Process Default Network** — после привязки автомобильной точки доступа она должна быть `bindProcessToNetwork`,
+  В противном случае машина никогда не сможет обнаружить трансляцию соты; ③ `cmd wifi set-wifi-watchdog-enabled` эта команда
+  **Не существует** (AOSP — `set-wifi-watchdog`, только root), не копируйте его. См. также `docs/WIFI-JOIN.md`.
+  спецификатору по-прежнему требуется разрешение на определение местоположения + службы определения местоположения на **Android 12/12L** (13+ от NEARBY_WIFI_DEVICES
+  Takeover): При отсутствии разрешения `requestNetwork` напрямую выходит из строя. Это явление просто «не удалось подключиться к автомобильной точке доступа». Самостоятельно проверить сложно.
+  Поэтому проверяйте перехват перед подключением (`ensureWifiLocationReady`); В манифесте должно быть указано FINE/COARSE.
+  иначе lint `CoarseFineLocation` завершится неудачно. `onLost` должен быть обработан (пропадает/выключается хотспот),
+  В противном случае карта героя будет молча переключаться между «подключенным» и «неудачным» (`WifiCarPlayConnector.onNetworkLost`).
+
+- **Выбор целевого автомобиля и машины (сценарии с несколькими автомобилями и машинами, 16 октября 2026 г.)**: пользователи могут объединить несколько машин CarPlay в пару.
+  (Настоящая машина Audi + испытательный стенд DiPlay). Если цель не указана, исходящий клиент пробует всех кандидатов по одному, входящий
+  Сервер принимает всех желающих – от того, к какому устройству он подключится, зависит, кто ответит первым; после выбора цели только устройство будет подключено к исходящему и входящему трафику
+  Отклонить другие устройства** (адрес хранилища `TargetDevicePrefs` + снимок имени, сравнение адресов без учета регистра;
+  `targetProvider` считывается динамически, выбор вступает в силу сразу и не требует переподключения). Измеренные доказательства: когда цель = Audi
+  В журнале отображается только «Не удалось подключить Audi_MMI_6318», а периодическое подключение DiPlay блокируется.
+  «Игнорировать подключения нецелевых устройств» отклоняется; DiPlay немедленно возобновляет соединение после переключения обратно в режим «Авто».
+  Примечание. В списке выбора **перечислены только сопряженные устройства** (беспроводная передняя панель CarPlay представляет собой сопряжение по Bluetooth на системном уровне и не сопряжена).
+  Устройство не может установить сеанс iAP2, поэтому оно не выполняет сканирование Bluetooth для обнаружения новых устройств); когда цель исчезает из списка системных сопряжений
+  В пользовательском интерфейсе отображается сообщение «требуется повторный выбор». `btnPickTarget` находится справа от заголовка «Сопряжение Bluetooth» (отображается только при сопряжении > 0;
+  Первоначально выпущенный, конец строки был заполнен логотипом справа и переместился в строку заголовка 16 октября 2026 г.).
+- **Избыточные конечные точки/учетные данные в push-сообщении следует игнорировать**: Контроллер приемника (по измерениям diPlay) после сопряжения push-уведомлений**
+  Он только что завершил текущий раунд соединения RFCOMM и повторно отправил полный набор 0x5703/0x4301; если он обрабатывается как новый сеанс, как обычно,
+  `retireSession()` разорвет работоспособный сеанс (состояние остановки кодировщика, в журнале отображается сообщение «Ожидание удаления из очереди»).
+  запрос выходного буфера отменен`), принимающая сторона считает сессию завершенной и затем повторно подключается - формируя "после подключения"
+  Цикл "Автоматическое отключение" (15.10.2026). Защита в `SessionController.onCarPlayEndpoint`/
+  `onWifiCredentials`: напрямую игнорировать/обновлять кэш паролей только при `videoSender.isRunning`; когда соединение действительно разорвано
+  Выталкивающий поток завершается сам по себе, и следующая конечная точка продолжается естественным образом. Избыточный 0x5703 в сеансе также вызовет перепривязку Wi-Fi +
+  Принудительное нажатие Ctrl mDNS и повторная регистрация нарушит поток push-уведомлений и полностью заблокируют его.
+- **0x4301 — это событие в реальном времени, а не «автомобиль не работает»** (18 октября 2026 г., определение журнала пользователя Audi MMI 9310):
+  Этот кадр идентификации автомобиля явно объявляет `Список доставки автомобиля=0x4301 0xea03`, но 0x4301 после окончания фазы 1.
+  **2 минуты и 35 секунд** (окно сопряжения 120 секунд исчерпано, а mDNS так и не нашел `_airplay._tcp`);
+  Машина ждет, пока никто не подключится к AirPlay в течение 15 секунд, а затем разбирает RFCOMM - то, что видит пользователь, "автоматически отключается после подключения".
+  В старой реализации есть две вещи, которые ее поглотят: `pumpIncomingForever` рассматривает все сообщения как поддерживающие активность и запоминает только длину,
+  Последовательные поступления с одним и тем же идентификатором будут ограничены `continue`. Текущий трехуровневый ремонт:
+  ① `Iap2SenderSession` распознается до ограничения тока в насосе поддержания активности 0x4301 → `parseStartSession` (с использованием кэшированного
+  0x5703) → обратный вызов `onEndpointUpdate` и прозрачно передается
+  `SessionController.onLateEndpoint`; ② `onLateEndpoint` разделяется по статусу: игнорируется во время нажатия (во избежание вышеуказанного
+  цикл разделенного сеанса) / выполняется сопряжение → горячее обновление `AirPlayClient.updateEndpoint` (закрытие старого сокета, следующий раунд)
+  Переподключитесь по новому адресу)/При передаче обслуживания еще не установлен клиент → временно сохраните его в `pendingEndpointUpdate`, а при сборке клиента `drain`
+  / Предыдущий раунд не удался → Используйте новую конечную точку, чтобы повторить раунд `onCarPlayEndpoint`; ③ Цикл жеребьёвки `AirPlayClient` каждый раунд.
+  Вызовите `endpointRefresher`, чтобы снова прочитать кэш mDNS перед повторной попыткой, чтобы можно было вовремя переключить адрес шлюза в случае сбоя соединения.
+  **При добавлении нового сообщения жизненного цикла (0x5702/0x6800/0x4301 и т. д.) сначала определите, «что произойдет, если оно придет с опозданием»** — Keep active pump
+  Он должен распространяться по идентификатору сообщения, а не просто в виде журнала. Также: окно ожидания `resolveEndpointHost` составляет всего 3 секунды.
+  В журнале тайм-аута нельзя утверждать, что механизм «не отправляет» (MMI 9310 — это заявление, что он отправит, но с опозданием).
+- Поле адреса **0x4301 представляет собой «фиксированную длину + заполнение NUL», и при синтаксическом анализе необходимо удалить все конечные NUL** (2026-10-18,
+  Определение журнала Audi MMI 3315): Автомобильный компьютер заполняет IPv6 до 47 байт (`fe80::…`, за которым следует **22 NUL**),
+  IPv4 дополняется до 17 байт (`10.174.189.1`, за которым следует **5 NUL**). `asStringOrEmpty()` Только изначально
+  `copyOf(size - 1)` удаляет один и получает `"10.174.189.1\0\0\0\0\0"` — эту строку
+  `contains('.')=true` и `contains(':')=false` могут выносить любые суждения о том, «является ли это IPv4».
+  Но getaddrinfo в Android не может решить эту проблему (iOS/Java для настольных компьютеров, наоборот, терпит это, и легко ошибиться, что «причина не в этом»).
+  В журнале указано `Unable to resolve host "10.174.189.1": No address associated with hostname`.
+  Типичная цепочка симптомов: соединение SRP с чистым адресом после обновления mDNS **Удачный успех** → Порт видеоданных с помощью KeepAlive
+  По-прежнему используется старый адрес с NUL → оба не удалось → машина отключит сеанс примерно через 10 секунд (пользователь увидит «подключено, а затем отключено»).
+  Урок: **Заполнение NUL в поле протокола всегда равно `rstrip(0)`**, не предполагайте, что существует только один терминатор.
+  Две другие совпадающие точки закрытия: ① `SessionController.appendLog`. Замените `\u0000` на видимый `␀` и затем напишите
+  Файл. В противном случае экспортированный журнал представляет собой двоичный файл и не может быть открыт, когда пользователи оставляют отзывы (этот журнал имеет 216 NUL, непосредственно
+  Невозможно прочитать); ② Хостом видео/аудио/keepAlive всегда является `client.currentEndpoint` (во время сопряжения
+  mDNS обновил реальный адрес подключения), не используйте старое значение `effectiveEndpoint` на этапе разрешения.
+  Одиночный тест `nulPaddedAddressesAreStrippedCompletely` фиксирует это поведение с помощью истинной ширины заполнения.
+- **В резервной форме (ПУБЛИЧНЫЙ экран на стороне приложения) также должен быть создан экран карты** (20.10.2026 Huawei Mate30Pro/EMUI12
+  Фактическое измерение): EMUI на стороне оболочки `createVirtualDisplay` **молча возвращает ноль** (исключение не создается) — доверено
+  В целом создание завершилось неудачно, и мы вернулись к ветке отката. Исторически сложилось так, что ветка отката создавала только Dock/App/AppHi с тремя экранами, без карты и панелью управления.
+  Никогда не используйте тайлы карты (характеристики журнала: `Создание трех экранов(откат)` + `Экран карты не создан` за раунд). Откат после ремонта
+  Филиал также строит экран карты; **изменение размера**: доверенный режим переходит в оболочку `svc.resizeDisplay`, резервный режим
+
+Вы должны использовать сторону приложения `VirtualDisplay.resize()` (оболочка не имеет разрешений на изменение размера дисплеев, созданных другими.
+  проверка владельца токена). Диагностическое соглашение: неспособность создать доверие должна оставлять следы на каждом экране (-1 для каждого экрана), а не просто «резервный вариант».
+- **Виртуальный экран UserService остается во всех версиях: трехуровневое закрытие** (16 октября 2026 г. Dingji, «После перезапуска обнаружен остаточный экран,
+  Нажмите «Очистить, но отпустите 0/N». Основная причина): Shizuku повторно использует резидент по «компонент + имя процесса + версия (APK LastUpdateTime)».
+  Процесс оболочки: переустановите APK, чтобы запустить новый процесс. Старый процесс `am force-stop` не может быть уничтожен (фактический тест), как и Шизуку.
+  переработка; виртуальный экран может быть освобожден только тем процессом, который его создал (`releaseDisplay` только проверяет карту этого процесса и выполняет возврат по процессам)
+  ложь). Чтобы определить версию процесса, посмотрите путь base.apk к `/proc/<pid>/maps` (`==deleted==` — старая версия).
+  Трехслойное закрытие (один отсутствует и дырка): ① `CarInputServiceImpl` самоочистка - периодическое сравнение LastUpdateTime,
+  Истек срок действия и покончил жизнь самоубийством (<15 с после переустановки, старый процесс завершается и экран освобождается, измерено 5 с); ② `CarInputClient.
+  reapStaleUserServices`——Успешная привязка означает перечисление `:car_input` Уничтожить несвязанный в данный момент pid (переопределить отсутствие самоочистки
+  Логический исторический старый процесс, фактическое измерение «переработано 1/1»); ③ Если при запуске будет обнаружен остаток, он будет автоматически удален один раз. Если его невозможно очистить,
+  Только что появился. **В будущем любые «ресурсы, принадлежащие процессу» (виртуальные экраны и т. д.) должны учитывать оставшийся путь выпуска для разных версий**:
+  Единственной гарантией является технологическая переработка, на `force-stop` нельзя положиться.
+- **Запуск остаточной очистки должен быть запущен при тех же условиях, что и «принудительное восстановление горизонтального экрана»** (2026-10-16): `AppOrientationCompat.
+  resetAll` держись「Обнаружен остаточный экран」При этом условии（`MainActivity.refreshShellState`
+  ветка startCheck) — остаточный экран является критерием «нештатного выхода из сессии», а невыполненное восстановление в конце сессии имеет тот же источник, что и оно.
+  Два ограничения: ① Восстановление должно быть выполнено до остаточной очистки** (очистка приведет к тому, что список остаточных данных станет пустым); ② Предварительная привязка
+  UserService (который вызовет перезапуск старого процесса) должен быть размещен **после остаточного сканирования**, иначе при перезапуске сначала исчезнет экран →
+  Остаточный список становится пустым → восстановление пропущено (почти введено 16 октября 2026 г.). Метод проверки: написать
+  `shared_prefs/app_orientation.xml` создает `force_<pkg>=true`, принудительно останавливает приложение после установления сеанса,
+  При перезапуске должен увидеть `ORIENTATION: Наложение ландшафта для остаточных сеансов восстановлено. N а`.
+- **Метод считывания покрытия совместимости на стороне системы (применение горизонтальной панели экрана)**: Источник факта - `dumpsys platform_compat`
+  (В этом ПЗУ нет `cmd platform_compat`; полный размер составляет 30 мс/36 КБ, а `grep` — около 3 КБ после двух ChangeIds.
+  Проверьте один раз при открытии панели, привязка строк выполняет только поиск в таблице памяти, а не один раз для каждой строки). **Необходимо анализировать одновременно
+  `packageOverrides` и `rawOverrides`**: переопределения для неустановленных приложений существуют только в rawOverrides——
+  packageOverrides анализируется в соответствии с «установленным пакетом», и запись исчезает, когда пакет не существует (фактический тест 2026-10-16: для не установленного
+  Переопределения, записанные пакетом, видны только в rawOverrides, в первом случае только для чтения баннер «Остается вне списка» навсегда останется пустым).
+  В rawOverrides также есть исторические грязные ключи в форме `force_xxx/компоненты` (утечка формата предпочтительного ключа старой версии),
+  Нажмите «Остаться вне списка», чтобы очистить список. Пользовательский интерфейс три слоя: мелкие шрифты в линию (галочка включена + система включена = серый текст является нормальным; флажок выключен + система включена =
+  **Красный** «Остатки системы · Нажмите, чтобы очистить», всплывающее окно с предложением перезапустить приложение), остаточные баннеры за пределами списка в верхней части панели (пакетная очистка),
+  Общее закрытие сеанса applyAll/resetAll.
+- **`am compat enable/disable` немедленно завершит целевое приложение** (переопределение совместимости может вступить в силу только в новых процессах;
+  15.10.2026 Фактический тест: после выполнения pid исчезает на месте и перезапускается в соответствии с новой конфигурацией, когда пользователь возвращается). Дайте "горизонтальный экран приложения"
+  При взаимодействии с этим типом переключателя не создавайте процесс «проверки/спроса о перезапуске» — к моменту задания вопроса приложение уже отключено.
+  Система убивает, а pidof конкурирует с уничтожением (в других случаях подсказка верна и неверна). Пакет `applyAll` при установлении сеанса
+  Запись также убьет запущенные приложения в списке (включая экземпляры мобильных телефонов), и цена известна.
+- **Для «Принудительного ландшафтного экрана» требуется Android 14+ (стандартный ChangeId AOSP, порог SDK)** (Решение принято 18 октября 2026 г.,
+  Основная причина «Ошибки записи», сообщаемая при проверке «Настройки автомобиля → Горизонтальный экран приложения»): два ChangeIds.
+  (`265451093` OVERRIDE_UNDEFINED_ORIENTATION_TO_NOSENSOR /
+  `265464455` OVERRIDE_ANY_ORIENTATION)** — стандартный элемент AOSP, начиная с Android 14/SDK 34.
+  Исходя из определения ** в `android.content.pm.ActivityInfo` (`@ChangeId @Disabled @Overridable`),
+  Потребляется `LetterboxUiController`; рефакторинг с Android 16
+  `AppCompatOrientationOverrides`. **Один в ActivityInfo Android 13 и более ранних версий.
+  Класс ориентации ChangeId не имеет ** (фактическое измерение: A13=0, A14=9) — это порог жесткой версии.
+  **Сравнение фактических измерений (та же операция, тот же корпус `com.autonavi.minimap`)**:
+  - Honor Magic7 Pro (Android 17/SDK 37): зарегистрировано 392 ChangeId, включая эти два →
+    Запись прошла успешно, `com.autonavi.minimap=true` можно увидеть в `packageOverrides`;
+  - Redmi K40 (Android 13/SDK 33): зарегистрировано всего 173, обоих нет в таблице → должен произойти сбой.
+  **Не связано с Shizuku** (оболочка adb и UserService имеют uid 2000, и результаты совпадают),
+  Изменение версии Шизуку или повторная попытка не имеют никакого эффекта.
+  Вторичный фактор: даже если ChangeId зарегистрирован, пользовательская сборка позволяет изменять только отлаживаемые приложения.
+  (`Cannot override a change on a non-debuggable app and user build.`).
+  Также обратите внимание, что «запись в неустановленные пакеты будет ложно успешной» (включен только rawOverrides, а отлаживаемая проверка не выполняется).
+  Таким образом, **вывод, сделанный в результате тестирования имени пакета, будет противоречивым** и должен быть основан на поле имени `dumpsys`.
+  Сторона кода: `AppOrientationCompat.MIN_SUPPORTED_SDK = 34` сначала определяет версию с нулевой стоимостью,
+  SDK ≥ 34, затем используйте `changeIdsRegistered()` для запуска проверки dumpsys (около 30 мс, внутрипроцессный кэш,
+  Каждый из двух идентификаторов должен содержать `name=` — использование всего `grep name=` при регистрации только одного приведет к неправильной оценке);
+
+`WriteResult.UNSUPPORTED` (Постоянно: Предпочтение **Не выбрасывать диск**, иначе следующее подключение будет напрасным. ApplyAll
+  И UI отключен от системы) vs `FAILED` (Шизуку временно неисправна, а пожелания пользователя сохраняются для повторной попытки);
+  **Запись точки постановки в очередь происходит в начале сопряжения (обработка конечной точки), а не присоединения** (23 октября 2026 г.): `am compat enable`
+  Приложения в списке будут уничтожены, и их необходимо завершить до запуска любого приложения — на этапе сопряжения существует окно в десятки секунд, позволяющее записи естественным образом стекать.
+  подключить только сток `awaitPending()` (~0мс). Не запускайте applyAll одновременно в Attach: порт экрана
+  Кадр KeepAlive инициируется после возврата соединения. Каждый раз, когда прикрепляешь блоки на 1 с, он съедает «ЗАПИСЬ → первый кадр».
+  «keepAlive» бюджет на удаление цепочки ~10 секунд; Тайм-аут `awaitPending` (6 с) **необходимо вести журнал** – тихий сбой
+  Это незаметно аннулирует гарантию «сначала написать покрытие, а затем удалить приложение»;
+  Если обнаружение `applyAll` не удалось, оно будет полностью пропущено, и циклический обход оболочки 2×4 больше не будет выполняться для каждого отдельного приложения;
+  В верхней части панели появится желтый баннер, а весь столбец станет серым.
+  **Уроки метода проверки**: Если одиночный файл gitiles `?format=TEXT` не удалось захватить, будет возвращена пустая страница/страница с ошибкой.
+  Если grep не работает, это не значит, что его не существует — нужно проверить количество байт или напрямую скачать `+archive/.../<dir>.tar.gz`
+  Снова выполните поиск по всему каталогу (первоначально этот вывод был ошибочно принят за «индивидуальные OEM-элементы» из-за неудачного сканирования без уведомления).
+- **Приложение сначала запускается, затем записывается и перезаписывается → старое окно остается в почтовом ящике (требуется перезапуск вручную)** (18 октября 2026 г. подтверждена реальная машина):
+  `am compat enable` завершает процесс, но когда система возобновляет выполнение задачи, ActivityRecord все еще может оставаться в **старой конфигурации**.
+  Реконструкция (`displayChangedWithoutRestart=true`), выраженная как `overrideOrientation=PORTRAIT`,
+  `isLetterboxRunning=true`, `letterboxReason=FIXED_ORIENTATION` и
+  Пакет в `platform_compat` — это, очевидно, `true`. Оно вступит в силу только после принудительной остановки и последующего перезапуска `am start`.
+  (В реальных тестах тот же экран после перезапуска меняется на `NOSENSOR` или `areBoundsLetterboxed=false`).
+  **Детерминированное воспроизведение (не нужно испытывать удачу с выбором времени выполнения задач)**: `am compat enable/disable --no-kill ...`
+  Запишите перезаписать, но не убивайте процесс. В настоящее время вывод приложения на виртуальный экран будет осуществляться в чистом состоянии «старое окно + новое наложение».
+  `--no-kill` переходит в `setOverridesForTest`, который используется только для воспроизведения/устранения неполадок. Путь к продукту по-прежнему записывается обычным способом.
+  Текущая обработка в `LetterboxHintController`: обнаружение по событиям (установление соединения/запуск приложения/карта в полноэкранном режиме/после перезагрузки)
+  → Анализ `bounds=` (внутреннее окно) и `mMaxBounds=` (внешняя рамка) `dumpsys activity activities`.
+  Вычислите черную рамку → рисуйте подсказку **слева** только тогда, когда черная рамка достаточно широкая (`OverlayCard` использует слой 2D-текстуры синтезатора,
+  Если левая сторона недостаточно широка, переместите ее к правой стороне, и она не будет отображаться, если обе стороны не могут быть размещены) → Кнопка «Принудительный перезапуск» принудительно остановить + Перезапустить исходный экран.
+  **Самовосстановление дополнительной записи**: если параметр включен, но наложение на стороне системы отсутствует (запись сеанса завершается сбоем/очищается извне), сначала выполняется перезапись.
+  И автоматически вытянуть приложение на исходный экран (`am compat` убьет процесс, и если после перезаписи не перезапустить, то вернет пользователя на рабочий стол, не отдавая его обратно.
+  Совет: фактический тест Toutiao 18 октября 2026 г.); после перезапуска экран все еще остается вертикальным до того, как будет выдана карта окончательного состояния «все еще вертикальный экран».
+  Обнаружение должно быть передано на `displayIdHint` (целевой экран, известный при запуске приложения/запуске карты): если не передано, нажмите активный экран синтезатора.
+  Предполагается, что переключение экранов требует ожидания первого кадра целевого экрана (до 2 с). Если обнаружение завершится раньше, чем завершится переключение, будет отображен неправильный экран и результат будет пустым.
+- **Отказ от ответственности (дверь активации для внешнего общего доступа)**: `legal/DisclaimerPrefs.CURRENT_VERSION` использует **номер версии**
+  Вместо статуса принятия логической записи - **Изменить копирайтинг `DisclaimerContent` необходимо синхронизировать +1**, иначе старые пользователи не будут перезаписываться.
+  Подтвердите; логическое значение появится снова только при удалении и переустановке. «Принять» выдается только тогда, когда одновременно установлены три ограничения обязательной формы:
+  10-секундный обратный отсчет, контент прокручивается вниз, когда его необходимо прокрутить, и (гарантируется пользовательским интерфейсом) кнопка «Отказаться от использования» не была нажата; эти трое находятся в **параллельных** отношениях,
+  Вы не можете пропустить обратный отсчет, проведя пальцем до конца. «Отклонить» можно нажать сразу (отклонение не должно блокироваться) и `finishAndRemoveTask()`.
+  При определении того, «можно ли содержимое прокручиваться», необходимо дождаться завершения макета (`scroll.height > 0`): когда макет не завершен.
+  `canScrollVertically` всегда является ложным и будет ошибочно оценено как «содержимое меньше одного экрана» и будет выпущено навсегда (на него наступит реальная машина).
+  Обратный отсчет сохраняет **абсолютный срок** (`elapsedRealtime`) благодаря прозрачной передаче данных и реконструкции вращения `onSaveInstanceState`.
+  а затем продолжите с оставшимся временем вместо того, чтобы ждать еще 10 секунд. Принудительное всплывающее окно `setCancelable(false)` +
+  `setCanceledOnTouchOutside(false)`; Пункт нижнего меню доступен только для чтения (обратный отсчет и прокрутка не требуются).
+- **Медиа-карта**: переключение метаданных выполняется поэтапно (начало идет название песни, обложка/продолжительность отстают), а пустые результаты требуют короткой задержки и повторной попытки.
+  Вместо того, чтобы укреплять кеш; позиция воспроизведения экстраполируется с использованием «точки привязки + скорость», а пользовательский интерфейс обновляется каждую секунду.
+- **Местоположение экспорта журнала — `Скачать/CarDeck/`, оно не может находиться в личном каталоге приложения** (18 октября 2026 г.): пользователи должны иметь возможность найти его самостоятельно.
+  и отправлено разработчикам. Внедрить `MediaStore.Downloads` (разрешение на хранение не требуется, отображается в файловом менеджере,
+  Панель WeChat/Share можно выбрать напрямую); `filesDir` и `Android/data/<pkg>` работают на Android 11+.
+  Он напрямую заблокирован в системном файловом менеджере, а экспорт означает отсутствие экспорта. Вы должны использовать `DarkMessageDialog` для экспорта всплывающих окон.
+  Укажите **абсолютный путь + размер**, закуска исчезнет через две секунды и не будет видна пользователю (на этот раз это требование).
+  **По умолчанию сохраняются только журналы после запуска этого процесса** (исторические раунды могут легко занимать сотни КБ, заглушая ключевые строки):
+  `SenderApp.onCreate` Напишите сообщение с помощью `DebugFileLog.markSessionStart`
+  `SESSION_MARKER` импортирует файл, а `lastIndexOf` перехватывает содержимое после последнего элемента при экспорте;
+  Нажмите и удерживайте кнопку экспорта, чтобы перейти к `Scope.ALL` и получить всю сумму. Отметку необходимо записать в файл, а не просто запоминать смещение памяти.
+  —— Усечение 2 МБ сделает смещение недействительным; отметку нужно писать сразу после усечения, иначе экспорт деградирует до полной суммы.
+  Вернитесь к полному тексту, когда нет тегов (файлы старой версии) — полный лучше, чем пустой.
+- **Для открытия каталога в Honor ROM необходимы явные компоненты** (фактическое измерение 18 октября 2026 г.): `ACTION_VIEW` +
+  `vnd.android.document/directory` использует неявное намерение и будет случайным образом сопоставлен сопоставителем (всплывает фактический тест).
+  «NetEase Cloud Music» является элементом по умолчанию); в то время как то же намерение `am start` правильно соответствует DocumentsUI.
+  Решение: установите приоритет явного `ComponentName("com.android.documentsui",
+  "com.android.documentsui.files.FilesActivity")` + `document/primary%3ADownload%2FCarDeck`,
+
+В случае неудачи выйдите в неявное/корневое хранилище/текстовое руководство. **Не пишите просто неявные намерения для любой функции, которая «вызывает системный пользовательский интерфейс»**.
+- **"Музыка играет, но карта показывает, что медиаинформация не подключена" = Не получил права на использование уведомлений** (18.10.2026 Дин Чен):
+  `MediaSessionManager.getActiveSessions()` возвращает сеанс, даже если **не авторизован** - `PlaybackState`
+  Обычный (`playing=true` переворачивается, как обычно), но `metadata` всегда равен нулю, поэтому название песни/исполнитель пусто.
+  Эту комбинацию легко ошибочно принять за ошибку анализа метаданных, но на самом деле это проблема с разрешениями (`dumpsys media_session`
+  Мы видим полный `metadata: description=название песни, певец`, но читаем ноль, что является критерием).
+  Точки авторизации (`media/NotificationAccess`):
+  - **Невозможно попробовать только один раз в onCreate**: если Шизуку в этот момент не готова, она будет пропущена навсегда (после перезагрузки телефона).
+    Shizuku не запущена или Shizuku не была авторизована в первый раз после смены имени пакета), пользователь увидит только пустую карточку.
+    Теперь добавлены три тайминга (идемпотентные, авторизованные для прямого возврата): запуск приложения, успешная авторизация Shizuku,
+    **После установления сеанса** (`VirtualLauncher.attach`, Шизуку в это время должна быть доступна).
+  - **Код выхода `cmd notification allow_listener` не может использоваться в качестве критерия**, и **немедленная проверка ненадежна**:
+    Есть задержка записи настроек. Фактическая измеренная команда успешна (результат = 0), и старое значение по-прежнему считывается немедленно. Требуется короткая повторная попытка
+    (4 раза по 250 мс) для подтверждения, в противном случае будет выдано ложное сообщение «Не предоставлено».
+  - Для определения того, «авторизовано ли оно», требуется **точное сравнение по позициям** `enabled_notification_listeners`
+    Разделенный список `:`, нельзя использовать `contains(имя пакета)` — записи со старым именем пакета/тот же префиксом приложения приведут к неправильной оценке.
+  - После изменения имени пакета статус авторизации на стороне Shizuku необходимо перезапустить, чтобы он был чистым (фактический тест: новые пакеты повторяются
+    При нажатии «Запросить авторизацию» ответа нет, но после «Стоп» и «Старт» в Шизуку это удается).
+  - В копии карты следует различать три типа пробелов: отсутствие авторизации (отображение «Права на использование уведомлений не предоставлены»), сеанс, но приостановлен,
+    Никаких сессий вообще (последние две "не играют").
+- **Мост удаленной отладки: удаленный вариант и внешний склад Cardeck-Bridge** (посадка 20 октября 2026 г., полный текст дизайна)
+  `docs/REMOTE-DEBUG-DESIGN.md`): вариант измерения моста (стандарт = ежедневный/выпуск, имя пакета остается неизменным);
+  суффикс Remote=`.rd`, код моста отладки есть только в `app/src/remote/`, зависит от `remoteDebugImplementation`
+  ——Одна строка не входит в стандартный товар). **Имя задачи сборки было изменено** (assembleStandardDebug/
+  lintStandardDebug/testStandardDebugUnitTest, синхронизация перехвата перед фиксацией). Приложение и бизнес
+  Всего две соединительные поверхности: `DebugFileLog.tap` (порядковый номер основного бокового журнала + крюк) и `BridgeCommands` (белый список
+  команду, настройте только общедоступный API SessionController). Сервер находится на внешнем независимом складе `../cardeck-bridge`.
+  (Единый процесс MIT, Node/TS, WS+MCP; `.npmrc` фиксированный общедоступный источник для предотвращения загрязнения источников компании). Жесткое соглашение:
+  ① Право на использование Shizuku/уведомление удаленного варианта требует отдельной авторизации (новое имя пакета); ② Перед повторной установкой необходимо сначала установить его.
+  `SessionController.disconnect` отпускает виртуальный экран (иначе никто не сможет нажать на всплывающее окно подтверждения установки на стороне машины);
+  ③ Белый список команд расширен за счет включения одноточечной проверки `BridgeCommands`, запрещающей любую оболочку.
+  ④ **Дифференциальное обновление** (24 октября 2026 г. измерено снижение трафика на 72–97 %): подробные сведения о протоколе блочной дифференциальной проверки и тройной проверке.
+     `docs/REMOTE-DEBUG-DESIGN.md`; **Заголовок u64 всегда имеет обратный порядок** (readLong на стороне устройства доступен только для чтения)
+     Большой порядок байтов, LE + короткая запись в буфер заголовка раньше были настоящим виновником «дифференциального бесшумного возврата первого прыжка к полному»); любая проверка на стороне устройства
+     Безоговорочно откатить всю сумму в случае неудачи.
+  ⑤ **Пакет `.rd` должен иметь разрешение на плавающее окно**: Подтверждение установки. Намерение будет выполнено при извлечении из фонового приемника.
+     Тихий перехват (условие исключения = SYSTEM_ALERT_WINDOW), на него также полагаются запросы на отключение/повторное появление;
+     Подтверждение установки также включает пакет пересылки внешних действий (InstallReceiver → BridgeSetupActivity).
+  ⑥ Удаленный вариант отключает автоматическое затемнение экрана (`ScreenDimmer.autoDimAllowed=false`, устранение неполадок зависит от экрана),
+     Всегда включено и ручное удержание экрана сна.
+- **Удаленная отладка моста совместной отладки реальной машины Wu Lei** (21 октября 2026 г., все ссылки будут открываться одна за другой, включая именование/сеть/установку компонентов):
+  ① **Самозапускающийся компонент пакета `.rd` должен писать «applicationId/абсолютное имя класса»**: `am -n` распознает спецификацию только с косой чертой.
+  Относительное имя класса расширяется до несуществующего `…rd.launcher.DockActivity` в соответствии с идентификатором приложения, а чистое имя класса напрямую
+  `Bad component name` — — Оба режима приводят к сбою запуска док-станции/сети, а у автомобиля и машины появляется черный экран со скоростью 0 кадров в секунду (стандартный пакет).
+  Пространство имен applicationId== никогда не раскрывается). Имена компонентов всегда представляют собой соединение `X::class.java.name`, не используйте
+  `context.packageName + относительный путь`.
+  ② **Во время сеанса «автомобиль-машина» сеть процессов привязана к точке доступа «автомобиль-машина» (без Интернета)**, мост отладки WS/APK загружается по адресу
+  «Присоединиться к точке доступа» отключается за миллисекунды - `InternetRoute` (удаленный) отслеживает сотовую сеть, сокет/DNS
+  Явно используйте сотовую связь (`Network.socketFactory`/`getAllByName`); но ** сеть по умолчанию VALIDATED имеет приоритет.
+  По умолчанию ** (в среде Wi-Fi в помещении принудительное подключение к сотовой сети приведет к отключению потока).
+  ③ **Неработающее соединение WS**: молчаливое отключение канала сотовой связи/NAT без FIN, поток чтения постоянно блокируется, а цикл повторного подключения зависает (фактическое измерение после отключения
+  Никакого повторного подключения в течение 4 минут, устройство на стороне моста находится в поддельном режиме онлайн) — пинг пульса 25 секунд + требуется 75 секунд soTimeout.
+  ④ **Протокол рукопожатия управляется стороной устройства**: сначала отправьте привет (включая код сопряжения), а затем сервер ответит: «Добро пожаловать», дождитесь приветствия.
+  Отправить привет еще раз = взаимный тупик.
+  ⑤ **Stdin моста должен быть подключен к FIFO вместо /dev/null**, иначе MCP (stdio) не сможет получать инструкции.
+  notify/cmd недоступны; `~/bin/cardeck-debug-up.sh` укрепил этот режим.
+- **Ошибки принудительной установки (PackageInstaller), все четыре игнорируются** (21 октября 2026 г.):
+  ① Сеанс должен `createSession` получить идентификатор, а затем `openSession` — — напрямую выдать `openSession(0)`.
+  «Вызывающий абонент не имеет доступа к сеансу 0»; ② Получатель статуса должен быть включен в манифест.
+
+Intent-filter** (специальное действие без фильтра = трансляция никогда не будет доставлена, PENDING_USER_ACTION
+  Никто его не подтягивает, сессия висит Active навсегда, а последующие установки он блокирует - `abandonStaleSessions` при запуске Приложения
+  Самовосстановление и очистка); ③ **Принудительная установка Honor с тем же кодом версии приведет к «фальшивому успеху»** (показывает успешную установку).
+  Но пакет не перемещается, и путь adb не имеет такого поведения) - **Код версии должен быть обновлен для отправки новых пакетов** (Этот проект спонсируется
+  получение appVersionName, просто измените номер версии); ④ `adb install -r` содержит те же байты в пакете
+  В глазах PackageInstaller это не имеет значения. При тестировании замкнутого цикла push не устанавливайте сначала тот же файл.
+  Используйте обычное всплывающее окно DarkMessageDialog для запроса подтверждения/продолжения установки (плавающее окно будет игнорироваться, фактическое тестирование пользователя),
+  Когда на переднем плане нет активности, BridgeSetupActivity запускается с параметрами; открывается манифест пакета отладки.
+  `usesCleartextTraffic` (мост может быть чисто HTTP).
+- **Четыре межсессионных вывода о перетаскивании разделенного экрана панели управления (запущено 22 октября 2026 г.)**:
+  ① **Визуальное и сенсорное наслоение**: визуальная ширина центрального шва (`DASH_GAP_PX=24`) и сенсорная ширина ручки.
+  (`DASH_HANDLE_TOUCH_PX=60`) - это две константы - домен ручки/липучки шире щели, а стороны прижаты
+  На карте (сегмент переполнения на стороне карты закрыт плиткой **Невидимый, но осязаемый**: сенсорная маршрутизация и композиция GL
+  два слоя). О первой версии с шириной цельного куска 44 пикселя пользователи сообщили, что «центральный шов слишком широк».
+  ② **Изменяйте прямоугольник рисования только во время перетаскивания, а затем изменяйте его размер после отпускания**: композитор `tileEdgeOverride` меняет только SPLIT
+  Целевой прямоугольник (текстура полностью растянута в UV), зафиксируйте `resizeMapDisplay` (триггер реального изменения размера).
+  Изменения конфигурации приложения карты). **Фиксаторы пределов должны масштабировать границы по полю масштаба** - по полю позиции [Поля, Поля+Доступно]
+  Фиксация равна допустимому коэффициенту [0,1], и фактическое измерение пользователем может привести к 0.
+  ③ **Быстрое перетаскивание для предотвращения прерывания потока требует липкой трассировки**: Когда ручка находится за пальцем, координаты выходят за пределы области попадания. TouchRouter нажимает на координаты
+  Изменение решения покадрово приведет к повторной фокусировке по экрану (отключение перетаскивания + случайное прикосновение к карте); нажмите на ручку удара, чтобы исправить экран приложения фиксированной маршрутизации
+  (`dashHandleHit` + `splitHandlePressed`, то же, что и эксклюзивный режим жестов наложенной карты).
+  ④ Когда виртуальный экран автомобиля удерживает фокус, **`am start` без `--display` перейдет на сфокусированный виртуальный экран**
+  (Фактическое испытание пользовательского интерфейса отладки, когда экран автомобиля пользователя мигает) - Активность на мобильном телефоне должна быть запущена явно во время сеанса.
+  `--display 0`; **протокол потоковой установки беспроводного adb будет зависать беззвучно** (нажатие 76 МБ/с доказывает, что передача в порядке),
+  Большой пакет изменен на `adb push + pm install`.
+  Геометрический вывод фокусируется на чистой функции `VirtualLauncher.dashSplitGeom` (`DashSplitMathTest` с привязкой
+  Четырехсторонняя согласованность), не пересчитывайте код везде при изменении кода, связанного с разделенным экраном.
+- **BT разорванная цепь зомби, круглая + спецификатор постоянно приостановлен (22 октября 2026 г., настоящая машина Dingji 3315)**: машина-машина 15 с.
+  Сторожевой таймер AirPlay (фактическое измерение 15.07 с, взаимная проверка с помощью sysdiagnose) **немедленно повторно подключается и повторно отправляет конечную точку** после отключения соединения и нашего
+  «Взаимное исключение sessionStarting» распознает только флаг, но не выживаемость раунда - Wi-Fi присоединяется к застрявшему раунду зомби (окно 120 с)
+  Новая конечная точка автомобиля блокируется снаружи двери, и во всем процессе остается только проверка активности. Необходимы три ремонта: ① `onSenderLinkClosed`.
+  (Обратный вызов выхода из режима поддержания активности насоса): Освободите мьютекс перед отправкой потока + установите и отмените (застрявший поток сопряжения завершается через ≤200 мс), ** безостановочный BT
+  Мониторинг**; ② Новый раунд начинает очищать `connectCancelled` (если пользователь отменит путь, компонент BT будет остановлен и заблокирован существующими охранниками.
+  Переход к начальной точке означает, что компонент работает); ③ Wi-Fi присоединяется к сегментированной повторной отправке 20+20 секунд — «Система сохранила SSID +
+  Запрос `WifiNetworkSpecifier` **постоянно ожидает обработки и не имеет обратного вызова** в комбинации Android 16 дюймов (три пути к журналу)
+  Полная тишина), ждать 120с бессмысленно; когда соединение не удалось и система подключена к целевому SSID, `bindCurrentWifi` будет использоваться напрямую
+  (Ярлык для «сохранения системной сети»). Также: Всплывающее окно в бюджете на первые 15с - 1,7с + приоритет MFi 20B, зря ждать 6с усугубляет
+  Фактор (первая выплата только после того, как память вступит в силу). Характеристики интерпретации: Появляется журнал «Уже обрабатывается сеанс, игнорировать эту конечную точку»
+  Никакого действия связи нет и только сердцебиение `ff 55 02 00 ee 10` = это заболевание.
+- **Сравнение реальной системной диагностики iPhone (21 октября 2026 г., docs/PROTOCOL-NOTES.md §13)**: три копии для двух автомобилей.
+  Есть четыре железных правила перехвата пакетов (iOS 18, `/usr/bin/log show --archive` читаем единый журнал):
+  ① **Audi MMI 3315_5ГГц, первое подключение 403 — это неотъемлемое состояние автомобиля** ——Настоящий iPhone после прохождения проверки пары
+  Все еще отклоненный сегментом 403 MFi, автомобиль будет автоматически повторно приглашен через 18-20 секунд, и будет выполнен второй раз**; правильное рекавери = сохранить БТ,
+  Исходный процесс прекращает работу и повторяет попытку (реализовано: `pairingForbidden` запрещает взлом BT, переход на более раннюю версию открытым текстом запрещен, 403 отсрочка 5 с).
+  ② Автомобильная машина Tange **распознает только доступ к сети, предоставляемый iAP2 с цепочкой поставок**: точка доступа автомобильной машины сохраняется вручную/системой = никогда
+  Приглашение без mDNS (то же всплывающее окно очистки SSID является ключевым для этой машины); двухдиапазонный SSID должен быть указан с 0x5703.
+  ③ Audi успешно сеанс **iAPChannel negotiation = 0** (настоящий iPhone не включает туннель Wi-Fi) - «MIB3 должен
+  Завершение «Построить туннель» сомнительно, поэтому сначала пройдите A/B, прежде чем строить туннель.
+  ④ Успешный путь для обоих транспортных средств: **IPv6 link-local:7000** + проверка пары + MFi (стандартная СОВРЕМЕННАЯ форма,
+  Никакого специального протокола); ответ SETUP не может иметь идентификатор потока (наш порт данных, доступный только для чтения, естественно, совместим).
+- **Портрет транспортного средства и машины (ReceiverProfile): унифицированный прием сигналов версии/возможностей** (20 октября 2026 г.): `iap2/ReceiverProfile`
+  Чистая функция объединяет три сигнала — идентификатор 0x1D01 + прием/отправка двойного списка, функции mDNS/srcvers — вывод
+  определение эры (три эры)/wifiGen (старый и новый протоколы Wi-Fi), **согласно выводам журнала** (строка `PROFILE:`,
+  Ошибочное суждение можно проследить). Две точки подключения: `Iap2SenderSession.logIdentification` (сторона BT) и
+  `SessionController.onCarPlayEndpoint` После диагностики конечной точки (сторона mDNS). Жесткие ограничения:
+  ① **Ветвления по возможностям, не жестко закодированные по номеру версии/бренду** (серверы выполняют только априори, список и измеренное поведение
+  Основа распространения – продвижение уроков по дескриптору HID); ② **«Не заявлено в списке» не означает «не поддерживается»**: Audi
+  Разреженный список (2+5 элементов) не включает 0x57xx, но для фактического тестирования старого протокола — wifiGen=NEW требуется полный список.
+  (Всего ≥10 элементов, форма iD9). 0x5703/0x5702 по-прежнему нет, разреженный список НЕИЗВЕСТЕН, и используется старый протокол.
+
+(0x5703 имеет гарантию тайм-аута); ③identKey хранит исходный текст (дословно идентичный 0x1D01), ключ персистентности
+  За очистку отвечает MfiLengthMemory.receiverKey — этот ключ будет использоваться при последующих слияниях памяти.
+  **LinkGeneration (23 октября 2026 г.; после второго подтверждения в тот же день остается только значение журнала)**:
+  `linkGenerationOf` —— сделано DELPHI + модель AUDI + двойной список, всего 1–9 элементов (три условия выполняются одновременно)
+  → CLASSIC_MIB3, иначе EVENT_LINK. **согласование маркеров было унифицировано для разных поколений** (см. вторичную запись MIB3).
+  (Dingji), генерация используется только для регистрации и дальнейшего распространения. Урок: сегодня выпущено сообщение «КЛАССИЧЕСКИЙ маркер игнорирования».
+  Той ночью он был сфальсифицирован в журнале владельца автомобиля - явление, приписываемое одному транспортному средству («Интерфейс приостановки переговоров») до получения журнала противоположного примера.
+  Не зацикливайтесь на логике распределения. Решение не зависит от wifiGen (BMW iD9: wifiGen=NEW переходит на 0x5702,
+  Два измерения не мешают друг другу; SYN|ACK §9h исправлен в Iap2LinkEngine). Определите, имеет ли чистая функция единственный тест
+  (`ReceiverProfileTest` пять предметов). Кэш поколений очищается при отключении.
+- **Список способностей может подтверждать только «да», а не «нет» — его нельзя использовать в качестве жесткого контроля доступа** (22 октября 2026 г., Audi
+  3315 Zhenche Dingji, основная причина регрессии 0.1.13): 8b64147 Запишите распределение учетных данных WiFi как «В списке не объявлено
+  0x5702 Просто пропустите старое соглашение», и в списке дебиторской задолженности Audi будет только 5 позиций (`0x4e0c 0x4e09 0x4300 0xea00
+  0xea01`) не содержит 0x5702 → весь раунд **один раз 0x5702 не был отправлен** → автомобильный сервис AirPlay **так и не запустился**
+  (Все 45 подключений `ECONNREFUSED` и `_airplay._tcp` также не транслировались), каждый из 4 раундов сеансов самоуничтожался за 8 секунд.
+  Сравнение той же машины и той же точки доступа под старой версией (немозговой 0x5702): ответ `0x5702 → 0x5703`
+  **122/136/166/166/198/246/266/368 мс**, порт 7000 можно подключить через 30 мс после подключения к сети.
+  Два неопровержимых доказательства, указывающих «не заявлено ≠ не поддерживается»: ① Трех записей 0x4e0d/0x4e0b/0x4e0e в журнале в один и тот же день **нет**
+  В списке транспортное средство и машина ACK поочередно (seq 107→ack=107, 110→ack=110, 113→ack=113);
+  ② Catplay `catplay_carplay_rx_gadget` и xcertplay `Iap2IdentificationClient` играют
+  При использовании автомобиля или машины 0x5702 включается в список беспроводных сетей (`WIRELESS_PHONE_MESSAGES = [0x4e0d, 0x4e0e, 0x5702]`).
+  Спецификация описания требует указания, но на самом деле для автомобилей оно часто опускается.
+  **Текущее распределение**: распознавать только `ReceiverProfile.wifiGen`——`NEW` (общее количество двух списков составляет ≥10 элементов, а 0x57xx по-прежнему отсутствует,
+  0x5702 пропускается только для формы BMW iD9); `LEGACY` и `UNKNOWN` (разреженное/отсутствующее объявление) выдаются всегда.
+  0x5703 Окно ожидания принимается в течение **1,5 с** (фактическое измерение Audi имеет запас в 4 раза), и по истечении времени ожидания оно только понижает версию, но не удаляет ссылку.
+  Одиночный тест `Iap2SenderSessionTest.sparseDeclarationsStillSendWifiRequest` (форма Audi 3315)
+  Должен быть отправлен) и `fullDeclarationsWithoutOldProtocolSkipWifiRequest` (форма BMW iD9 не поставляется)
+  Зафиксируйте два направления. **Измените этот абзац и сначала посмотрите на эти два**. Продвижение: необходимо указать любое «ветвление по списку возможностей».
+  Ветвь «идти по консервативному пути, когда список неполный» не может рассматривать отсутствие как опровержение.
+- **Не разрывать ссылку без новых учетных данных** (22 октября 2026 г.): `Iap2SenderSession` в «В этом раунде нет ни 0x5703, ни 0x5703,
+  «0x4301» в течение 8 секунд, если `knownCarSsid()` может указать известные точки доступа (`boundCarSsid` или
+  `lastCarWifiSsid`), синтезируйте конечную точку `airPlayPort=0` и продолжайте использовать mDNS/шлюз, **никаких исключений** не будет.
+  Согласно журналу Audi, мобильный телефон находился в зоне доступа автомобиля со второго круга, но каждые 8 секунд совершал самоубийство из-за «отсутствия учетных данных» и разворачивал машину боком.
+  Окно приглашения очищается неоднократно — в реальной записи iPhone приглашение с помощью Ctrl не отправляется примерно через 21 секунду после того, как автомобиль **подключается к сети**
+  (`StartSessionHost`, Audi sysdiagnose 2026-10-21 14:23:02 доступ к сети → 14:23:23 приглашение),
+  Каждый перезапуск означает отсутствие ожидания. Поддержка: путь 0x4301 теперь также записывает `lastWifiPsk`/`lastCarWifiSsid`.
+  (Раньше он был записан только в пути 0x5703, из-за чего кнопка вручную выдавала ложное сообщение «Пароль точки доступа еще не получен»).
+- **широковещательный порт ctrl должен быть исправлен** (22 октября 2026 г.): `reannounce()` для Android NSD без JmDNS,
+  Повторный выпуск объявлений возможен только путем выхода из системы + перерегистрации; старая реализация делает это вместе с `stop()`, а `ServerSocket(0)` каждый раз меняет порты
+  (Фактическое измерение журнала Audi: 43857→33383→33125→38151→40697→38015), а посередине имеется сервисное окно длительностью до 1,2 с.
+  Автомобиль, который использует приглашение ctrl (сторона автомобиля xcertplay обнаруживает 7 раз за сеанс × 1,5 с), подключится к закрытому порту в соответствии с портом кэша.
+  розетка. Теперь изменено на: `unregisterServiceOnly()` меняет только регистрацию mDNS, сокет и поток приема.
+  Мультиплексируется на протяжении всего жизненного цикла рекламодателя (`acceptRunning` не зависит от `registered`).
+- **Длительное соединение CarPlay должно явно устанавливать поддержку активности TCP** (22 октября 2026 г., см. DiPlay `TcpLiveness`):
+  Проверка активности ядра по умолчанию займет **2 часа**, чтобы начать обнаружение; когда машина глушится/телефон покидает точку доступа, ссылка часто **не отправляет RST**.
+  Поток чтения канала управления всегда будет висеть на `read()` (экран зависает и сторожевой таймер не срабатывает). `net/TcpLiveness`
+  Унифицированно задано простое=10 с/интервал=3 с/счет=3 + `TCP_USER_TIMEOUT=20s` (19 с считается фатальным и заведомо больше, чем
+  Автомобильная машина 15s сторожевой таймер) подключен к каналу управления, каналу событий и порту видеоданных. **Яма API**:
+  `ParcelFileDescriptor.fromSocket` возвращает собственный пакет fd сокета до API 29, и закрытие будет
+  Исходный сокет закрыт - используйте его только для получения копии после 29+ и отразите `Socket.getFileDescriptor$()` в 26~28.
+- **Возврат воспроизведения модели автомобиля (запись → тест воспроизведения)** (запущен 20 октября 2026 г.): предотвращение «изменения модели A и возврата к модели B».
+  Конвейер: `tools/extract_car_fixtures.py` Извлеките `RAW rx/tx` (связь Bluetooth) и
+  `IAPLINK rx`(туннель CSM) в приспособление JSONL(`app/src/test/resources/carplay/fixtures/`,
+
+**Gitignore по умолчанию**——Содержит реальный адрес/имя точки доступа, регистрацию необходимо просмотреть и снизить чувствительность по одному)→
+  `replay/BtLinkReplayTest` (настоящее полное воспроизведение стека Iap2LinkChannel+Iap2SenderSession) и
+  `replay/TunnelReplayTest` (воспроизведение сеанса управления VirtualIap2Link) утверждает «Записанная последовательность ответов».
+  ⊆ Последовательность воспроизведения (упорядоченный префикс/подпоследовательность)". **Запись и тестирование**: запускайте экстрактор каждый раз после устранения неполадок в автомобиле.
+  Библиотека приборов росла как снежный ком. Три сложных урока: ① Бюджет дампа RAW в байтах (упоминалось 4096B/направление, старый журнал
+  512B не может даже закрыть идентификационный кадр); ② **Длина кадра задана ≠ Байты не повреждены** — усечение бюджета приведет к разным операциям чтения
+  Хвост оформлен в псевдорамку «только на всю длину». Контрольная сумма полезной нагрузки не выдается, и движок автоматически отбрасывает ее. Экстрактор должен прижимать двигатель
+  Идентичная проверка (сумма заголовка кадра 9B = 0, сумма полезной нагрузки + проверка хвоста = 0) проверяется кадр за кадром перед обрезкой; ③ Классификация утверждений
+  (`rxHasIdent`): полное утверждение выполняется только в том случае, если идентификационный кадр сохраняется, в противном случае утверждается только канальный уровень (SYN/adopted/0x1D00),
+  Туннельный уровень использует упорядоченные подпоследовательности (для высвобождения намеренно добавленных пакетов, таких как MIB3, и для обнаружения недоответов/несоответствий по порядку).
+- **Различия в протоколах подлежат регистрации**: Поведение испытательного стенда (DiPlay) и реального автомобиля (Audi MIB3) во многом противоположно (MFi Challenge).
+  32B/20B, наличие или отсутствие 0x4301, взаимоблокировка приглашения ctrl и т. д.), подробности см. в разделе `docs/PROTOCOL-NOTES.md` §9.
+  Проверьте код протокола перед его изменением. **Внешнее подтверждение 0x5702** в §5b (catplay/xcertplay/
+  amineross-showcase / wiomoc-iap2 Все четыре независимых реализации автомобиля заявляют об этом), **0.1.13 Audi возвращается
+  Полная цепочка доказательств и ключевые моменты интерпретации приведены в §9j.
+- **Старые автомобильные машины (прошивка CarPlay 210.81 / Audi 4xxx) должны быть обработаны в соответствии с классификацией Catplay «Три Эры»**
+  (19 октября 2026 г. Dingji, `docs/PROTOCOL-NOTES.md` §9f): Это поколение ресиверов **pre-HomeKit**.
+  (`_airplay._tcp` не имеет бита 38 `HK_PAIRING_AND_ENCRYPT`), принимается только
+  Сеанс управления открытым текстом `et=NONE` + поток экрана **AES-128-CTR нулевой ключ**, `pair-setup` должен завершиться сбоем.
+  Шесть жестких ограничений: ① Корневой объект bplist должен находиться в байте 8** (210.81). TopObject трейлера не читается.
+  Корень нашего кодировщика по умолчанию находится в конце — унифицированный `makeRootFirst`); ② При первоначальной настройке SETUP используется относительный URI.
+  `/setup`; ③ Непарный сеанс явно содержит `et=1`, а канал событий представляет собой обычный текст; ④ Рамка экрана не сопряжена и проходит через AES-128-CTR.
+  (Ключевой поток **непрерывный во всех кадрах**, новый экземпляр для каждого кадра = все искаженные символы, начиная со второго кадра); ⑤ Кадр управляющего зашифрованного текста MTU 1440 →
+  Верхний предел открытого текста для одного кадра **1422** (старый 0x4000 будет приговорен к PayloadTooBig); ⑥ ** Не используйте
+  `contains('.')` определяет "есть ли адрес" **——Audi 4xxx часто отправляет только IPv6 link-local, и определяется, что адреса нет
+  Он вернется к «Шлюзу: 7000» и никогда не сможет подключиться (все идет к `net/EndpointHosts`, IPv4 → Global).
+  IPv6 → IPv6 с собственным каналом связи с мультиплексированием каналов видео/аудио/событий в сочетании с полностью подключенным `activeHost`).
+  Если функции TXT отсутствуют, всегда нажимайте «Неизвестно», чтобы сохранить старый путь. Это нельзя ошибочно принять за «Сопряжение не поддерживается».
+- **Заголовок кадра VideoConfig потока экрана должен содержать «флаг шифрования + ширину и высоту холста»** (19 октября 2026 г., Audi 4851)
+  Реальный автомобиль Dingji, `docs/PROTOCOL-NOTES.md` §9g): Гонщики сообщили, что «приложение показывает, что оно подключено, но машина не отвечает».
+  Все сеансы/касания/пульсы в журнале работоспособны и не содержат ошибок. Основная причина в том, что мы написали только `body_size`+`opcode`, и
+  кошачья игра `ScreenFrame::config` также написал: `small_param[1] |= ScreenFlag::Encrypted(0x04)`
+  (**Смещение 6**, объявляет, что последующие кадры представляют собой зашифрованный текст), `params[1]` (**Смещение 16**) = две ширины и высоты **f32 LE**,
+  Оставьте 0 для `params[0]` (смещение 8..16). Audi/DELPHI создает декодер на основе этих полей заголовка. Если они отсутствуют, весь экран будет черным, но
+  Сессии работают как обычно, прикосновения работают как обычно **; DiPlay/WinPlay считывает только тело и avcC,** тестовый стенд его никогда не обнаружит**.
+  Поэтому, если «экран автомобиля черный, но приложение показывает, что оно подключено», сначала проверьте строку `VIDEO: ✓ VideoConfig … flags=`.
+  Журнал (первые 24 байта шестнадцатеричного заголовка будут напечатаны одновременно). То же самое относится и к добавлению нового поля заголовка потока экрана: сначала используйте catplay.
+  Сравнение `screen_frame_ext.rs`, не просто проверяйте его на испытательном стенде.
+- **Согласование iAP2: SYN|ACK должен использовать новый порядковый номер, и каждый SYN должен быть возвращен** (19 октября 2026 г., BMW 87866)
+  Реальный автомобиль Dingmo, `docs/PROTOCOL-NOTES.md` §9h): Все 14 сеансов зависают на канальном уровне (ссылка `iap2
+  Ready` 0 раз），Автомобильные машинные волосы 133 Статья SYN、возвращение 0 Статья ACK。две основные причины：① `sentSequence` только в
+  Оно увеличивается при отправке кадра данных, в результате чего SYN и SYN|ACK имеют значение seq=99. Узел проверяет его с помощью `peerSeq+1` и определяет, что это дубликат.
+  Выброшено (в кошачьей игре используется `take_own_seq()`); ② Он повторяется только при первом использовании, а BMW ** используется при каждой повторной попытке.
+  Согласование возобновляется для нового серийного номера **, а оставшиеся SYN получают только голые ACK и никогда не ждут ответа. Текущий статус: каждое сообщение имеет статус** Pure SYN**.
+  (`control and ACK == 0`) все возвращают кадр SYN|ACK, а повторная передача того же SYN идемпотентна на уровне байтов (без продвижения).
+  серийный номер). Две ловушки: **Голый ACK будет конфликтовать с SYN|ACK** (поэтому путь хоста возвращает только SYN|ACK, Audi
+  Затем последовательность кадров меняется с «голого ACK+SYN|ACK» на одиночный кадр и требует повторной проверки); **Невозможно вернуть все кадры с битами SYN**
+  (Это сформирует бесконечный пинг-понг с SYN|ACK противоположного конца. В результате одиночный тест простаивал в течение 55 секунд, и только `jstack` мог его видеть).
+- **Как машина распознает наши поля, "копировать их из кэтплея" нельзя** (возвращается Audi 0.1.7 19.10.2026)
+  Dingji, `docs/PROTOCOL-NOTES.md` §9i): Измените Ctrl TXT для `srcvers` с `950.7.1` на
+  После `566.25.21` Catplay, название экземпляра `sender` → `iPhone`, тот же Audi MMI 3315.
+  От «0x4301 отправляется через 0,65 с после 0x4300» до **даже `GET /ctrl-int/1/connect` не отправляется**,
+  `_airplay._tcp` с двойным нулем 0x4301, шлюз `:7000` простаивает в течение 54 секунд (`ECONNREFUSED`).
+  Компьютеры с полным доступом iAP2 и автомобильные компьютеры по-прежнему отправляют код 0xAE00, что легко ошибочно принять за сетевую проблему. Отменено и протестировано
+  `CarPlayCtrlAdvertiserTest` Распятый. **Поля одного типа**: `sourceVersion`, `deviceID`,
+  Имя службы, `model`, TXT `id` — перед изменением требуется проверка A/B реального автомобиля, а значение должно быть непосредственно видно в журнале.
+
+Пакет: `_device-info._tcp` удален (Android `NsdServiceInfo` не принимает порт=0,
+  Он каждый раз сообщает `The port is missing`, что является шумом непроверенных доходов).
+- **Идентификатор Bluetooth 0x4300/0x4E0E должен получить реальный MAC-адрес при запуске сеанса** (2026-10-19 Audi
+  Журнал 0.1.7): Весь раунд является заполнителем `02:00:00:00:00:00`. Основная причина - 10 секунд `DeviceIdentity`
+  Бесшумное появление окна «Сеанс BT был создан в ту же миллисекунду, когда Шизуку был только что готов» — все вернулось в течение 10 секунд после первого сбоя
+  значение заполнителя. `BtSession` теперь меняется на `forceRetry = true`, и результат анализа распечатывается. Audi будет использовать его с RFCOMM
+  Проверенное одноранговым узлом значение заполнителя вызывает автоматическое отбрасывание. При устранении неполадок сначала посмотрите на строку `Приветствие о состоянии устройства … mac=`**.
+- **НАСТРОЙКА `deviceID` на уровне сеанса AirPlay должна быть реальным MAC-адресом Bluetooth этого устройства** (19 октября 2026 г.)
+  Фактический тест WinPlay): принимающая сторона может фильтровать сеанс в соответствии с «адресом iPhone Bluetooth, выбранным пользователем», и возвращать его, если он не может совпасть.
+  **403**, строка состояния имеет уникальный номер `403 OK` (таблица STATUS_TEXT WinPlay не имеет 403, и она возвращается к
+  ОК – эта комбинация дает приоритет фильтрации подозрительных устройств). Раньше я использовал Catplay для написания мертвых фальшивых значений.
+  `ff:ee:dd:cc:bb:aa` ——Audi/DiPlay не проверяет, и WinPlay будет отклонен; симптом "примерно через 45 секунд после подключения"
+  Автоматически отключаться» (принимающая сторона ждет истечения времени ожидания видео и отключается). Теперь используйте `DeviceIdentity` (с
+  0x4300/0x4E0E (того же происхождения), значение занятости `02:00:00:00:00:00` предназначено только для Шизуку, не готового к покрытию,
+  Журнал 403 напечатает это значение, чтобы пользователи могли его проверить на принимающей стороне. **НАСТРОЙКА не равна 200 для активного закрытия канала управления**,
+  Не ждите молча, пока принимающая сторона отключится — в противном случае пользователь увидит только «Автоматическое отключение», и устранение неполадок начнется с нуля.
+- **Выживание сеанса зависит от трех независимых пульсов. Если целый круг отсутствует в течение 10 секунд, он будет удален автомобилем** (2026-10-19 Audi
+  MMI 3315 два цикла реальных измерений, время перекрывается миллисекунда за миллисекундой):
+  ① UDP KeepAlive 4B пинг → KeepAlivePort; **Интервал должен быть намного меньше, чем у сторожевого пса машина-машина**——кошачья игра
+  Взятые 10 секунд имеют ту же длину, что и сторожевой таймер. Джиттер `Thread.sleep` приводит к задержке пульса на 1 мс, что означает таймаут (теперь он составляет 5 с);
+  ② Пустое тело RTSP `POST /feedback`, 1 с;
+  ③ **Кадр KeepAlive в порту данных экрана** (текстовый заголовок 128B, код операции = 2; `/info`
+  При `keepAliveSendStatsAsBody=true` код операции=5 со статистикой bplist), 1 с, **продолжительность видео
+  Также send** при нажатии - это не бэкап видеотрафика. Когда происходит только ①②, явление такое: «Поток выталкивания нормальный, но после ЗАПИСИ
+  «Полный цикл сброса 10,2 секунды», все каналы видео/обратной связи/событий в журнале исправны, и это легко ошибочно принять за сетевую проблему.
+  **Исправление (ночь 19 октября 2026 г.)**: Когда одновременно возникали три пульса, MMI 3315 **все еще** разбирался примерно за 10 с - автомобиль
+  Есть еще одна основная причина отключения через 10 секунд (отсутствие WiFi-туннеля, см. следующую статью); сердцебиение является необходимым, но не достаточным условием.
+  Кадр KeepAlive не шифруется (catplay шифрует только код операции = VideoFrame) и не использует одноразовый номер кадра ChaCha.
+- **MIB3 требует второго канала iAP2 (туннель Wi-Fi), и только возврат ACK будет отключен примерно через 10 секунд** (19 октября 2026 г.)
+  Динджи, дневник той ночи + сравнение AADisplay с Фридой; **23 октября 2026 г. Второй Динцзи: эта статья установлена** - в тот же день
+  Более раннее исправление «CLASSIC_MIB3 игнорирует маркер и никогда не согласовывает» было сфальсифицировано в журнале владельца 0.1.17: маркер
+  Транспортное средство ожидает сеансового стола. Он будет бесконечно ретранслировать с частотой 1 Гц. Если ответа нет, соединение будет разорвано примерно через 10 с после ЗАПИСИ (0.1.9=10,17 с,
+  0.1.17=10.18с), «0.1.9 Игнорировать маркер и вводить как обычно» — дезинформация. переговоры по обновлению маркера были завершены между поколениями
+  единство. Настоящая причина «переговоров о приостановке работы автомобильного пользовательского интерфейса» показана ниже (режимы изменены): после установления сеанса AirPlay телефон должен воспроизводить потоковую передачу на экране.
+  После успешной настройки **активно отправьте DETECT через канал управления** команду POST / (конверт iAPSendMessage),
+  Автомобиль и машина возвращают SYN (канал событий) → SYN|ACK мобильного телефона (канал управления) → повторно запускают сеанс управления после соединения НОРМАЛЬНЫЙ
+  (0x1D00→0x1D01→0x1D02+0xAA00→0xAA06→0xAA02 Вызов [длина в соответствии с памятью автомобиля, независимый от туннеля ключ,
+  Холодный старт 20В, приоритет; Настройки Bluetooth/туннеля в одном автомобиле могут различаться — 3315 Bluetooth распознает 32B, а Frida Tunnel 20B]
+  →0xAA03→0xAA05→Всплеск
+  0x4E0C/0xA100/0x4E0A/0x4E0B/0x4E09/0xFFFA/0xFFF0→Подписка на ответ 0x5000/0x4157/0x4154/
+  0x4170, 0xFFFB только подтверждение связи). Реализация: `airplay/VirtualIap2Link.kt` (три формы в одной:
+  Туннель DiPlay/MIB3/старое эхо), подробности протокола и побайтовые константы Frida см. `docs/PROTOCOL-NOTES.md`
+  §12. Жесткие ограничения: ① Кадр связи мобильного телефона → автомобиля может проходить только через канал управления POST (исходящий MIB3 канала событий не считывается);
+  ② DETECT необходимо отправить один раз после экрана SETUP (ранняя отправка будет смыта, а последующие маркеры транспортных средств и машин будут игнорироваться);
+  ③ Отобразить LSP и объявить свой собственный maxOutgoing=0x7F (отобразить таблицу одноранговых узлов в том виде, в каком она есть = она ограничена небольшим окном, внезапно
+  Отставание); ④ 0xFFFA/0xFFF0/0x4158/0x5001 Использовать побайтовые константы, **Не перекодировать**; ⑤ Справочный склад
+  `reference/AADisplay` — это GPL-3.0: смотрите только на факты соглашения и не копируйте код.
+- **Переключение экрана MIB3 зависит от ресурса modeChanged, а не от самого согласования** (23 октября 2026 г., сравнение двух агентов)
+  AADisplay (по умолчанию): 082446 (0.1.14) согласование/MFi/пакетная передача/подписка все успешно, сеанс работоспособен 35 с+,
+  Автомобиль не переключается на экран CarPlay — второй сеанс управления сбрасывает арбитраж ресурсов автомобиля, такой же, как и в начале сеанса.
+  Срок действия modeChanged истек. Время проверки длинной трансляции AADisplay r17: **+1,5 с после аутентификации + сначала пакетная передача,
+  +4/+12/+30 с повторения**; оператор попадает на адреса 0xAA00/0xAA05 и будет конкурировать с iAP POST за канал управления.
+  Audi ~12 умирают. Реализация: `VirtualIap2Link.onControlSessionComplete` →
+  `SessionController.scheduleModesReclaim`. 0.1.12 «Вне экрана на 3 секунды» = согласованный вход
+  Только что начавшийся HMI имеет то же происхождение, но разные симптомы. Два вспомогательных урока: **Отключить Attribution Guard** — MIB3 активирован, но контролирует сеанс.
+  Он будет удален до его завершения = режим link watchdog, категорически запрещено отмечать несовместимость аудиооборудования (иначе медиаканал будет заблокирован по ошибке,
+  Молчит навсегда); **Номер сообщения журнала sendRawCsmLocked находится в кадре [4..5]** ([2..3] — длина——
+  Однажды я пометил 0xFFFA как 0x32, чтобы ввести в заблуждение и устранить неполадки на протяжении всего раунда).
+
+- **Длина вызова MFi сохраняется в зависимости от машины, не запрограммируйте определенную передачу в глобальном масштабе** (фактическое испытание Audi MMI 3315 19 октября 2026 г.):
+  20B заявил, что машина молчала **6,0 секунды** без ответа, а 32B ответил подписью через 0,64 секунды - полагаясь только на «настоящие автомобили» 20B
+  Базовый уровень «Приоритет», каждое соединение напрасно ждет 6 секунд. Предпочтения каждой принимающей стороны противоположны: DiPlay распознает только 32B (длина не соответствует
+  Связь разорвана напрямую), MMI 6318 распознает 20В (32В отключилось за 0,4с), MMI 3315 распознает 32В.
+  `MfiLengthMemory` генерирует стабильный ключ на основе имени+модели+производителя 0x1D01 и делает его постоянным.
+  Есть три концовки: успех/молчание/отказ; `orderAttempts` (чистая функция) ранжирует **длину последнего успеха на первое место** и тишину
+  Если вас отклонят, ваша версия будет только понижена, а не удалена (прошивка может измениться, но если вас отклонят, попробуйте все как обычно, чтобы предотвратить постоянное зависание); известно, что его заставили замолчать
+  Окно повторной попытки передачи уменьшено до 1,5 с. **Память является межпроцессной** – старая реализация запоминает данные только внутри процесса и теряется при перезапуске приложения.
+- **Три жёстких ограничения на аудиоканал (звук со стороны автомобиля)** (17 октября 2026 г. был завершен интернет-тест Audi, звука до этого не было):
+  ① **Последовательность установления сеанса должна быть следующей: экран НАСТРОЙКА → порт данных → ЗАПИСЬ → потоковое видео → НАСТРОЙКА звука →
+  Переоформление ЗАПИСИ**: В автомобиле имеется сторожевой таймер «Поток экрана не активируется в течение примерно 2 с после НАСТРОЙКИ», а также сама НАСТРОЙКА звука.
+  Это занимает 2,0–2,7 с (инициализация аудиоканала на стороне автомобиля), и активацию необходимо перетащить через сторожевой таймер перед функцией ЗАПИСЬ - журнал.
+  Да, `Аудио SETUP туда и обратно 20xxms` и `EVENT Конец чтения - Connection reset` — это одна и та же миллисекунда, 5 раз.
+  Полностью воспроизводится в реальных измерениях. Если аудиопоток добавляется после RECORD, RECORD необходимо выпустить повторно, прежде чем он будет включен в сеанс.
+  ② **audioType должен использовать `media`** (выделенный медиа-аудиоканал): в аудиоформатах автомобиля/информации.
+  Объявление о связывании type=100 (Audi имеет совместимость/предупреждение/по умолчанию/медиа/телефонию/speechRecognition)
+  Шесть уровней, **Растровое изображение каждого уровня разное**); при переводе медиапотока в режим совместимости автомобиль принимает НАСТРОЙКУ и отправляет данные в порт данных.
+  Получать UDP-пакеты как обычно, **но без подключения к каналу воспроизведения** (производительность: звук на мобильном телефоне успешно отключен, сбор ненулевой, пакеты отправляются непрерывно, звука нет).
+  Аудиоформаты должны быть полностью проанализированы и выбраны файл за файлом. Вы не можете просмотреть только первые два файла (старые логи были обрезаны из-за take(200)
+  Ошибочно оценили «только совместимость»). Конкретный выбор остается за `AirPlayClient.negotiateAudio()`: приоритет
+  медиафайл + стерео PCM48k (бит 15), вернуться к 44,1k (бит 11), задержать аудиолатентность этого файла
+  outputLatencyMicros, возврат к базовому состоянию протокола (media/48k/250ms) без /info.
+  ③ **Параметры RTP в соответствии со значением реального автомобиля**: SSRC= **0** (случайный SSRC будет рассматриваться как неизвестный поток), каждый пакет **352**
+  Пример кадра (стандарт SPF AirPlay), приращение временной метки за кадром, PT=100, обратный порядок байтов s16, AAD=заголовок 4..12,
+  Tail 8B одноразовый номер с прямым порядком байтов. Изменение этих значений эквивалентно изменению онлайн-формата, который необходимо сравнить с кошачьей игрой `rtp_recorder.rs`/
+  `rtp_cipher_chacha.rs`.
+  Диагностический набор из трех частей (читать по порядку, если молчать): `AUDIO: Соберите образцы ненулевойX% пик=N` (0% = не выбрано: применение запрещено)
+  Пропадает захват или звук по Bluetooth), `аудиопереговоры → audioType=?` (выбор неправильного канала), машина-машина `/feedback`
+  Увеличено ли значение sampleTime для connId.
+- **Музыкальная карта «невозможно прочитать информацию о воспроизведении» = прослушиватель уведомлений «авторизован, не привязан»** (фактическое тестирование 19 октября 2026 г.):
+  Этот компонент можно увидеть в `settings get secure enabled_notification_listeners`,
+  `MediaListenerService.onListenerConnected` ни разу не вызывался - на данный момент `dumpsys notification`
+  В разделе **Прослушиватели живых уведомлений** этого компонента нет, `getActiveSessions()` по-прежнему возвращает сеанс.
+  (Статус воспроизведения виден) Но `metadata` всегда равен нулю, и карта отображает «Невозможно прочитать информацию о воспроизведении».
+  **Список авторизации ≠ Привязка**: элементы списка останутся на месте после переустановки APK, но привязка может быть потеряна. Сравнение фактических измерений – процесс приложения
+  Он не излечится сам, если его оставить в покое на 10 секунд, когда он не работает; если он восстанавливается в течение 1 секунды после запуска приложения, это означает, что мы должны активно его перепривязать.
+  См. `NotificationAccess.rebindIfNotConnected` для реализации самовосстановления: только если этот процесс еще не подтвердил соединение.
+  (`serviceConnected` имеет значение false, установлено onListenerConnected)
+  `dumpsys notification --noredact`, **распознает только сегмент Live**, если он отсутствует, `disallow_listener`
+  + `allow_listener` запускает перепривязку системы и короткий опрос для подтверждения. Не используйте «в списке включенных» как разрешенное.
+  Критерий - Вот откуда эта ошибка.
+  Еще одно примечание: при отключении/разрушении монитор должен быть `MediaSessionsState.publish(null)`, иначе на карте сохранится старое название песни.
+  Существуют противоречивые остаточные состояния, такие как «Воспроизводится + Не воспроизводится» (статические субтитры макета не могут быть записаны насмерть)
+  «Сейчас исполняется» изменено на нейтральное «Медиа»).
+- **Канал управления RTSP должен читаться асинхронно** (17.10.2026): одно соединение и одна блокировка + реализация синхронного ответа на чтение,
+  приведет к остановке тактового сигнала обратной связи во время любого медленного запроса (Audi audio SETUP 2s+); машина-машина имеет обратную связь
+  ~3 секунды сторожевой таймер, прервать сеанс при отключении питания. Теперь независимый поток чтения собирает и расшифровывает пакеты + доставляет согласно CSeq, а сторона записи только сериализует
+  «Выделить CSeq + зашифрованная запись»; `soTimeout=0` (тайм-аут контролируется опросом таблицы ожидающих ответов). Старая розетка при повторном подключении
+  Его необходимо отключить (чтобы два потока чтения не перехватывали пакеты). Остаток открытого текста должен быть отброшен, когда шифр переходит от простоя к непустому (в противном случае кадр зашифрованного текста
+  Несовпадение границ, последующие ответы не могут быть решены).
+- **Возможности устройства HID всегда определяются на основе «дескриптора устройства», а не модели автомобиля/uuid/длины сообщения**
+  (17.10.2026: Медиа-ключ автомобиля и машины «получил, но не вырезает песню» + урок касания совместимости нескольких автомобилей и машин):
+  ① **Медиа-ключ (Потребительский контроль)** передается в `hidSendReport`, 1-байтовый отчет, **значение байта — это использование.
+  Индекс массива **(семантика массива HID, `LogicalMax` = длина массива — 1),** не идентификатор использования**.
+  Audi нажала «Следующая песня», чтобы получить 0x05 → uses[5]=0xB5; Раньше 0x05 напрямую использовался в качестве идентификатора использования →
+  Соответствующей клавиши нет (отображается как «отвечает, но не обрезает песню»). Карта `ConsumerKeys.parseDescriptor()`
+  Проанализируйте порядок использования дескриптора, чтобы получить его, а затем нажмите `[KEYCODE_MEDIA_PLAY/PAUSE/NEXT/PREVIOUS/...]`.
+  Отправка (`AudioManager.dispatchMediaKeyEvent`, тот же путь, что и у настольной музыкальной карты).
+
+② **Touch** также определяет формат в соответствии с дескриптором: страница дигитайзера (0x0D) + X/Y 16 бит — сенсорное устройство;
+  Коллекция с одним пальцем (Audi 5 байт `[tip][X u16LE][Y u16LE]`) и многослотовая (DiPlay 12 байт)
+  `[слот][down][X][Y]×2`) отличаются «Количеством вхождений идентификатора контакта (0x09 0x22)».
+  **Невозможно оценить по длине сообщения или uuid**: ручка DiPlay(4B)/телефония(1B) совпадает с длиной мультимедийной клавиши.
+  Опираясь только на длину, использование телефонии 0xB3 будет ошибочно отправлено как «перемотка вперед». Критерий длины отменяется только тогда, когда дескриптор отсутствует.
+  ③ Все реализации определений имеют семантику фиксации единого теста (`ConsumerKeysTest` / `TouchReportsTest`, включая Audi и
+  DiPlay (два набора реальных дескрипторов), сначала измените эти парсеры, чтобы увидеть тест.
+- **Стиль**: Kotlin, русские комментарии (объясняйте «почему» и приводите результаты измерений, а не пересказывайте код); тексты пользовательского интерфейса — на русском языке.
+  Под `reference/` находится эталонное хранилище GPL (gitignore, не копируйте код в этот проект, не выкладывайте его наружу).
+
+## Соглашение об осаждении знаний
+
+- **Запись в любое время**: моменты, которые стоит записывать во время работы: выводы по результатам измерения производительности, подводные камни, проектные решения, известные проблемы и
+  Отказаться от направления – его следует добавить в соответствующую главу этого документа, а организационная структура будет скорректирована в соответствии с реальной ситуацией.
+- **Торговля**: однократные сведения об отладке оставляются в комментариях к коду; **По-прежнему ценен во время сеансов** (последующие практики будут изменены)
+  Вывод: рецидив — это ловушка), прежде чем остановиться на этом документе. Критерии суждения: Существует высокая вероятность того, что будущие разговоры будут происходить без понимания этого.
+  Повторите нарушение или проверьте еще раз.

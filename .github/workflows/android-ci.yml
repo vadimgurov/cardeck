@@ -1,32 +1,32 @@
-# 每次 push 自动构建**正式签名**的 Release APK（只放 Artifacts，不发布 GitHub Release）。
+# При каждом нажатии автоматически создается **официально подписанный** Release APK (размещаются только артефакты, а выпуск GitHub не выпускается).
 #
-# 版本号自动累计：`appVersionName` + 本次 run_number
-#   例：0.1.13 → APK 0.1.13.42（versionCode = 1_130_042），每次推送 +1，可直接覆盖安装。
-#   基础版本仍只手改 app/build.gradle.kts 的 appVersionName。
+# Номер версии накапливается автоматически: `appVersionName` + этот run_number
+#   Пример: 0.1.13 → APK 0.1.13.42 (код версии = 1_130_042), +1 за каждое нажатие, которое можно напрямую перезаписать и установить.
+#   В базовой версии по-прежнему необходимо изменить только имя appVersionName файла app/build.gradle.kts.
 #
-# 必需 Secrets（Settings → Secrets and variables → Actions）：
-#   KEYSTORE_BASE64    keystore 的 base64（单行无换行）
+# Требуемые секреты (Настройки → Секреты и переменные → Действия):
+#   KEYSTORE_BASE64 base64 хранилища ключей (одна строка без разрывов строк)
 #                      Linux/macOS: base64 -w0 keystore.jks
-#                      Windows:     [Convert]::ToBase64String([IO.File]::ReadAllBytes("keystore.jks"))
-#   KEYSTORE_PASSWORD  storePassword
-#   KEY_ALIAS          keyAlias
-#   KEY_PASSWORD       keyPassword
-# 可选：
-#   EXPECTED_CERT_SHA256  期望的签名证书 SHA-256（带不带冒号都行）——配了就会逐字比对，
-#                         防止误用别的 keystore 签出「正式版」。
+#                      Windows: [Convert]::ToBase64String([IO.File]::ReadAllBytes("keystore.jks"))
+#   KEYSTORE_PASSWORDПароль магазина
+#   KEY_ALIAS ключевой псевдоним
+#   KEY_PASSWORD ключевой пароль
+# Необязательно:
+#   EXPECTED_CERT_SHA256 Ожидаемый сертификат подписи SHA-256 (с двоеточием или без него) — в случае совпадения он будет сравниваться дословно.
+#                         Предотвратите неправильное использование других хранилищ ключей, чтобы проверить «официальную версию».
 #
-# **没有 KEYSTORE_BASE64 会直接失败**，绝不退回 debug 签名：
-# debug 证书签出去的包，日后换正式证书时所有用户必须卸载重装（AGENTS.md「签名是不可逆决定」）。
-# Gradle 侧还有第二道闸：传了 -Pcardeck.buildNumber 却没有 keystore.properties 就构建失败。
+# ** без KEYSTORE_BASE64 завершится ошибкой** и никогда не вернет подпись отладки:
+# Пакеты, подписанные с помощью отладочного сертификата, все пользователи должны удалить и переустановить при переходе на официальный сертификат в будущем (AGENTS.md «Подпись — необратимое решение»).
+# На стороне Gradle есть второй шлюз: если передан -Pcardeck.buildNumber, но нет keystore.properties, сборка завершится неудачей.
 name: Build Release APK
 
 on:
   push:
-    branches: ['**'] # 任何分支的推送都出包；tag 不触发（不需要发 Release）
+    branches: ['**'] # Пуш любой ветки будет упакован；tag Не сработало（Нет необходимости отправлять Release）
   workflow_dispatch:
 
 permissions:
-  contents: read # 只读代码，不发 Release、不写仓库
+  contents: read # код только для чтения，Не отправлено Release、Не пишите склад
 
 concurrency:
   group: build-${{ github.ref }}
@@ -34,26 +34,26 @@ concurrency:
 
 jobs:
   build:
-    name: 构建正式签名 APK
+    name: Создайте официальную подпись APK
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - name: 检出代码
+      - name: Проверить код
         uses: actions/checkout@v4
 
-      # AGP 8.7 要求 JDK 17，且与 app/build.gradle.kts 的 jvmTarget 一致
-      - name: 安装 JDK 17
+      # AGP 8.7 требует JDK 17 и соответствует jvmTarget в app/build.gradle.kts.
+      - name: Установка JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: 配置 Gradle
+      - name: Конфигурация Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # build.gradle.kts 用 rootProject.file(storeFile) 解析，所以 .jks 与
-      # keystore.properties 都放仓库根（两者都已 gitignore，不会被提交）
-      - name: 写入签名配置
+      # build.gradle.kts анализируется с помощью rootProject.file(storeFile), поэтому .jks аналогичен
+      # keystore.properties размещаются в корне хранилища (оба были gitignore и не будут отправлены)
+      - name: Написать конфигурацию подписи
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -61,16 +61,16 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -eu
-          # 四个值缺一不可；缺了直接失败（绝不退回 debug 签名）
+          # Каждая из четырех ценностей незаменима; если он отсутствует, произойдет непосредственный сбой (подпись отладки никогда не будет возвращена)
           MISSING=""
           for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!v:-}" ]; then MISSING="$MISSING $v"; fi
           done
           if [ -n "$MISSING" ]; then
-            echo "::error::缺少仓库 Secrets:$MISSING。到 ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/secrets/actions 添加（KEYSTORE_BASE64 生成：PowerShell [Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore.jks'))）。本流水线只出正式签名包，不会退回 debug 签名。"
+            echo "::error::Отсутствует склад Secrets:$MISSING。Прибытие ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/secrets/actions добавить（KEYSTORE_BASE64 генерировать：PowerShell [Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore.jks'))）。Эта сборочная линия производит только официальные пакеты для подписи.，Не будет возвращен debug подпись。"
             exit 1
           fi
-          # 允许粘贴多行 base64（Windows 复制常见），解码前先去掉换行
+          # Разрешить вставку нескольких строк base64 (обычно в копии Windows), удалите новые строки перед декодированием.
           printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > release.jks
           {
             echo "storeFile=release.jks"
@@ -78,26 +78,26 @@ jobs:
             echo "keyAlias=$KEY_ALIAS"
             echo "keyPassword=$KEY_PASSWORD"
           } > keystore.properties
-          echo "签名材料已就绪（release.jks + keystore.properties）"
+          echo "Подписные материалы готовы.（release.jks + keystore.properties）"
 
-      - name: 计算版本号
+      - name: Рассчитать номер версии
         id: version
         run: |
           set -eu
           BASE=$(sed -n 's/^val appVersionName = "\(.*\)"/\1/p' app/build.gradle.kts)
-          test -n "$BASE" || { echo "::error::无法从 app/build.gradle.kts 读取 appVersionName"; exit 1; }
+          test -n "$BASE" || { echo "::error::Невозможно получить доступ из app/build.gradle.kts читать appVersionName"; exit 1; }
           VERSION="${BASE}.${GITHUB_RUN_NUMBER}"
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
           echo "name=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "本次版本：$VERSION（versionCode = base*10000 + ${GITHUB_RUN_NUMBER}）"
+          echo "Эта версия：$VERSION（versionCode = base*10000 + ${GITHUB_RUN_NUMBER}）"
 
-      # 版本号由 build.gradle.kts 按同一规则计算（见文件里的 buildNumber），这里只传 run_number
-      - name: 构建 Release APK
+      # Номер версии рассчитывается build.gradle.kts по тем же правилам (см. buildNumber в файле), здесь передается только run_number
+      - name: строить Release APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew :app:assembleRelease "-Pcardeck.buildNumber=$BUILD_NUMBER" --stacktrace
 
-      - name: 校验签名并打包
+      - name: Проверьте подпись и пакет
         id: package
         env:
           VERSION: ${{ steps.version.outputs.name }}
@@ -105,29 +105,29 @@ jobs:
         run: |
           set -eu
           APK=app/build/outputs/apk/release/app-release.apk
-          test -f "$APK" || { echo "::error::未找到 $APK"; exit 1; }
+          test -f "$APK" || { echo "::error::не найден $APK"; exit 1; }
 
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
-          test -n "$APKSIGNER" || { echo "::error::找不到 apksigner"; exit 1; }
+          test -n "$APKSIGNER" || { echo "::error::не найден apksigner"; exit 1; }
           "$APKSIGNER" verify --print-certs "$APK" | tee certs.txt
 
-          # 配了 keystore 却仍是 debug 证书 = keystore.properties 没被读到，绝不能放出去
+          # Хранилище ключей настроено, но сертификат отладки = keystore.properties не был прочитан и не должен быть выпущен.
           if grep -q "CN=Android Debug" certs.txt; then
-            echo "::error::产物是 debug 签名——正式签名配置没有生效（检查 keystore.properties 与 storeFile 路径）"
+            echo "::error::Продукт debug подпись——Официальная конфигурация подписи не вступает в силу（Проверить keystore.properties с storeFile путь）"
             exit 1
           fi
           CERT=$(grep "certificate SHA-256 digest" certs.txt | head -n1 | sed 's/.*digest: //')
-          test -n "$CERT" || { echo "::error::读不到签名证书指纹"; exit 1; }
+          test -n "$CERT" || { echo "::error::Невозможно прочитать отпечаток сертификата подписи"; exit 1; }
 
           if [ -n "${EXPECTED_CERT:-}" ]; then
             EXPECTED=$(printf '%s' "$EXPECTED_CERT" | tr -d ': ' | tr 'A-F' 'a-f')
             ACTUAL=$(printf '%s' "$CERT" | tr -d ': ' | tr 'A-F' 'a-f')
             if [ "$EXPECTED" != "$ACTUAL" ]; then
-              echo "::error::签名证书与 EXPECTED_CERT_SHA256 不一致：期望 $EXPECTED，实际 $ACTUAL"
+              echo "::error::Подписание сертификата с EXPECTED_CERT_SHA256 непоследовательный：Ожидание $EXPECTED，фактический $ACTUAL"
               exit 1
             fi
-            echo "签名证书与 EXPECTED_CERT_SHA256 一致"
+            echo "Подписание сертификата с EXPECTED_CERT_SHA256 последовательный"
           fi
 
           NAME="CarDeck-${VERSION}-release.apk"
@@ -140,18 +140,18 @@ jobs:
             echo "cert=$CERT"
             echo "size=$SIZE"
           } >> "$GITHUB_OUTPUT"
-          echo "已生成 $NAME（$SIZE）"
+          echo "Сгенерировано $NAME（$SIZE）"
 
-      - name: 上传 APK
+      - name: загрузить APK
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.name }}
           path: ${{ steps.package.outputs.name }}
           if-no-files-found: error
           retention-days: 30
-          overwrite: 'true' # 重跑同一 run 时版本号不变，覆盖旧产物而不是失败
+          overwrite: 'true' # Повторить то же самое run Номер версии остается неизменным，Перезаписать старые артефакты вместо сбоя
 
-      - name: 写入运行摘要
+      - name: Написать отчет о пробеге
         env:
           VERSION: ${{ steps.version.outputs.name }}
           NAME: ${{ steps.package.outputs.name }}
@@ -161,26 +161,26 @@ jobs:
         run: |
           set -eu
           {
-            echo "### CarDeck ${VERSION}（正式签名）"
+            echo "### CarDeck ${VERSION}（Официальная подпись）"
             echo
-            echo "| 项 | 值 |"
+            echo "| предмет | ценность |"
             echo "|---|---|"
             echo "| APK | ${NAME} |"
-            echo "| APK 大小 | ${SIZE} |"
+            echo "| APK размер | ${SIZE} |"
             echo "| SHA-256 | ${SHA} |"
-            echo "| 签名证书 SHA-256 | ${CERT} |"
+            echo "| Сертификат подписи SHA-256 | ${CERT} |"
             echo
-            echo "安装：adb install -r ${NAME}"
+            echo "Установка：adb install -r ${NAME}"
             echo
-            echo "> Artifacts 列表里显示的体积是**压缩包**大小（dex 在 APK 内不压缩，再打包会缩到约 45%）；"
-            echo "> 解压后的 APK 体积见上表。"
+            echo "> Artifacts Объем, показанный в списке,**Сжатый пакет**размер（dex в APK Никакого сжатия внутри，При повторной упаковке он уменьшится прибл. 45%）；"
+            echo "> После декомпрессии APK См. таблицу выше для определения объема.。"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 放在出包之后：单测挂了本次运行标红，但 APK 仍可下载
-      - name: 单元测试
+      # Поместите его после выпуска пакета: одиночный тест не пройден, и этот запуск отмечен красным, но APK все равно можно загрузить.
+      - name: Модульное тестирование
         run: ./gradlew :app:testDebugUnitTest --stacktrace
 
-      - name: 上传测试报告（失败时便于定位）
+      - name: Загрузить отчет о тестировании（Легко обнаружить в случае неисправности）
         if: failure()
         uses: actions/upload-artifact@v4
         with:

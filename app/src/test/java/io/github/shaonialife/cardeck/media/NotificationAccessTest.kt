@@ -5,8 +5,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 通知使用权判定（纯函数）：系统把多个监听器用 `:` 拼成一个长串，
- * 必须按条目精确比对——用 `contains(包名)` 会被「前缀相同」的其它应用误判。
+ * Определение права на использование уведомлений (чистая функция): система объединяет несколько прослушивателей
+ * в длинную строку с помощью `:`.
+ * необходимо сравнивать точно при вводе - использование `contains(имя пакета)` будет неправильно оценено другими
+ * приложениями с «тот же префиксом».
  */
 class NotificationAccessTest {
     private val spec = "io.github.shaonialife.cardeck/io.github.shaonialife.cardeck.media.MediaListenerService"
@@ -33,17 +35,20 @@ class NotificationAccessTest {
 
     @Test
     fun doesNotMatchByPrefixOnly() {
-        // 旧包名是前缀相同的另一条授权：不能因为字符串包含就判为已授权
-        // （改包名后最容易踩的坑——旧条目还在列表里，新包其实没授权）
+        // Старое имя пакета — это еще одна авторизация с тем же префиксом: его нельзя считать авторизованным только
+        // потому, что оно содержится в строке.
+
+        // (Самая простая ошибка после смены имени пакета — старая запись все еще в списке, а новый пакет фактически не авторизован)
         val staleOldPackage =
             "io.github.shaonialife.cardeck/io.github.shaonialife.cardeck.media.OtherService"
         assertFalse(NotificationAccess.isGrantedIn(staleOldPackage, spec))
     }
 
     /**
-     * 「在授权列表里」不等于「已被系统绑定」：重装后 enabled 列表仍有本组件，
-     * 但 Live 段缺失 → metadata 恒为 null、卡片显示「无法读取播放信息」
-     * （2026-10-19 实测）。必须只认 Live 段。
+     * "В списке авторизации" не означает "привязан системой": после переустановки в списке включенных этот компонент все еще присутствует.
+     * Но сегмент Live отсутствует → метаданные всегда равны нулю, и на карте отображается сообщение «Невозможно
+     * прочитать информацию о воспроизведении».
+     * (фактическое измерение 19 октября 2026 г.). Должен быть распознан только сегмент Live.
      */
     @Test
     fun liveSectionDecidesWhetherMetadataIsReadable() {
@@ -58,7 +63,7 @@ class NotificationAccessTest {
                 ComponentInfo{android/com.android.server.SystemNotificationListener} (user -1)
               Snoozed notification listeners (0):
             """.trimIndent()
-        // 授权列表里有、Live 段没有 → 仍是未绑定（必须触发重绑）
+        // Он есть в списке авторизации, но не в сегменте Live → все еще не привязан (должна быть запущена перепривязка)
         assertFalse(NotificationAccess.isLiveIn(dump, spec))
     }
 

@@ -18,52 +18,67 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 仪表盘卡片边距（流像素）——地图 tile 与音乐卡共用的契约值，四方统一引用：
- * 本类 SPLIT 绘制矩形、VirtualLauncher 建屏 tile 尺寸、GridActivity 音乐卡布局、
- * TouchRouter tile 触摸命中域。此前 16 在四个文件各自定义/裸写、仅靠注释结盟，
- * 改一处即静默错位（触摸命中域/卡片布局/绘制矩形三者不一致，坏味道审查 P1 收敛）。
+ * Маржа карты информационной панели (потоковые пиксели) — стоимость контракта, общая для фрагмента карты и
+ * музыкальной карты, указанная одинаково всеми четырьмя сторонами:
+ * Этот класс SPLIT рисует прямоугольник, VirtualLauncher создает размер плитки экрана, макет музыкальной карты GridActivity,
+ * Плитка TouchRouter касается сенсорного поля. Раньше 16 были определены/записаны в четырех файлах и полагались
+ * только на комментарии для формирования альянсов.
+ * будет незаметно смещен после всего лишь одного изменения (поле касания/макет карты/прямоугольник рисования
+ * непоследовательны, плохой вкус обзора конвергенции P1).
  */
 const val CARD_MARGIN_PX = 16
 
 /**
- * 仪表盘分屏中缝宽（流像素）——地图 tile 与音乐卡之间**视觉**缝隙，几何契约同
- * [CARD_MARGIN_PX]：tile 内容侧边缘 = 把手中心 − DASH_GAP_PX/2，音乐卡内容侧
- * 边缘 = 把手中心 + DASH_GAP_PX/2（VirtualLauncher.dashSplitGeom 统一推导）。
+ * Ширина зазора (потоковые пиксели) на разделенном экране приборной панели — **визуальный** зазор между
+ * фрагментом карты и музыкальной карточкой, геометрический контракт тот же.
+ * [CARD_MARGIN_PX]: край стороны содержимого плитки = центр маркера — DASH_GAP_PX/2, сторона содержимого музыкальной карты
+ * Край   = центр дескриптора + DASH_GAP_PX/2 (унифицированное происхождение VirtualLauncher.dashSplitGeom).
  */
 const val DASH_GAP_PX = 24f
 
 /**
- * 分屏把手**触达**宽（流像素）：把手 View 宽度与 TouchRouter 粘性路由域按此值，
- * 比 [DASH_GAP_PX] 宽——两侧各溢出 (TOUCH−GAP)/2 压在卡片上扩大触控目标
- * （音乐卡侧把手叠在其上层；地图侧溢出段被 tile 盖住不可见但可触摸——
- * 视觉与触摸分层，2026-10-22 用户反馈「中缝太宽」的解法）。
+ * Дескриптор разделения экрана **ширина касания** (пиксели потока): дескриптор ширины просмотра и липкое поле
+ * маршрутизации TouchRouter в соответствии с этим значением,
+ * шире, чем [DASH_GAP_PX] – переполнение с обеих сторон (TOUCH-GAP)/2 Нажмите на карту, чтобы расширить сенсорную цель
+ * (Рычаг со стороны музыкальной карты расположен поверх нее; дополнительная часть со стороны карты покрыта
+ * плитками и невидима, но ее можно осязать——
+ * Визуальное и сенсорное наложение слоев, 22 октября 2026 г. Отзывы пользователей: решение «средний шов слишком широкий»).
  */
 const val DASH_HANDLE_TOUCH_PX = 60f
 
 /**
- * 双虚拟屏 GL 合成器：dock 屏 + 应用屏（原生 / 超采样两块，按活动切换）→ 拼接输出到编码器输入 Surface。
+ * синтезатор GL с двумя виртуальными экранами: док-экран + экран приложения (собственный/с суперсэмплированием,
+ * переключение в зависимости от активности) → объединение вывода с входом кодировщика Surface.
  *
- * 三路 SurfaceTexture 作为各虚拟屏的输出；GL 线程轮询新帧标志，有新帧即重绘合成画面。
- * 应用区同一时刻只画两块应用屏中的**活动**一块（[requestActiveApp] 切换；超采样屏
- * 等其画出首帧再切换，避免闪黑）。两块应用屏的内容持续消费（纹理保持最新）。
- * 输入 Surface 在 EGL/纹理就绪后经 [onSurfacesReady] 交给调用方去 createVirtualDisplay。
+ * Трехсторонняя текстура поверхности   используется в качестве вывода каждого виртуального экрана; поток GL
+ * опрашивает флаг нового кадра, и составное изображение перерисовывается, когда доступен новый кадр.
+ * Область приложения   одновременно отображает **активный** один из двух экранов приложения (переключение
+ * [requestActiveApp]; экран супервыборки).
+ * подождите, пока он отрисует первый кадр, прежде чем переключиться, чтобы избежать мигания черным цветом).
+ * Содержимое двух экранов приложений потребляется постоянно (текстуры поддерживаются в актуальном состоянии).
+ * Входная поверхность передается вызывающей стороне через [onSurfacesReady] для создания VirtualDisplay после
+ * того, как EGL/текстура готова.
  */
 class DualDisplayComposer(
     private val output: Surface,
     private val outWidth: Int,
     private val outHeight: Int,
-    /** true：dock 是底部横条（竖屏车机）；false：dock 是左侧竖条（横屏车机）。 */
+    /** true: док-станция — это нижняя горизонтальная полоса (вертикальный экран автомобиля); false: док-станция — это левая вертикальная полоса (горизонтальный экран автомобиля). */
     private val dockAtBottom: Boolean = false,
 ) {
-    /** 仪表盘↔桌面滑动进度（0=tile 原位，1=完全滑出左侧），由 GridActivity 随滑动驱动。 */
+    /** Панель мониторинга ↔ Ход перемещения рабочего стола (0 = плитка на месте, 1 = полностью выдвинута влево), управляемая GridActivity со скольжением. */
     @Volatile
     var tileSlideFraction: Float = 0f
 
     /**
-     * 地图 tile 把手侧边缘覆盖值（流像素，顶部原点；横屏=tile 右缘 x、竖屏=tile
-     * 下缘 y）。>0 时替代 SPLIT 公式值——拖动分屏把手时由 VirtualLauncher 逐帧写入，
-     * **只改绘制矩形（纹理整幅拉伸），不动 buffer、不动虚拟屏**；松手 commit 才真实
-     * resize。≤0 = 用默认中线公式。语义与 [tileSlideFraction] 同类：连续视觉态。
+     * значение покрытия бокового края маркера фрагмента карты (пиксель потока, начало координат сверху;
+     * горизонтальный экран = правый край фрагмента x, вертикальный экран = фрагмент
+     * нижний край y). Когда >0, значение формулы SPLIT заменяется - записывается VirtualLauncher кадр за кадром при
+     * перетаскивании маркера разделения экрана.
+     * **Изменяйте только рисунок прямоугольника (растягивайте всю текстуру), а не перемещайте буфер или виртуальный
+     * экран**; отпустить и совершить это будет реальностью
+     * изменить размер. ≤0 = использовать формулу осевой линии по умолчанию. Семантика такая же, как у
+     * [tileSlideFraction]: непрерывное визуальное состояние.
      */
     @Volatile
     private var tileEdgeOverride = -1f
@@ -73,8 +88,10 @@ class DualDisplayComposer(
     }
 
     /**
-     * 目标帧率（30/60，合成出帧节奏上限；「显示」设置运行中实时切换）。
-     * 有新输入帧时按 1000/targetFps 节流；静止画面保底 30fps 心跳（编码器不能断粮）。
+     * целевая частота кадров (30/60, верхний предел синтезируемого ритма кадров; настройка «Дисплей» переключается в
+     * реальном времени во время работы).
+     * регулирует частоту 1000/targetFps при появлении нового входного кадра; неподвижное изображение гарантирует
+     * частоту кадров 30 кадров в секунду (в кодировщике не может закончиться питание).
      */
     @Volatile
     var targetFps: Int = 30
@@ -85,7 +102,7 @@ class DualDisplayComposer(
 
         private const val TILE_CORNER_RADIUS = 24f
 
-        /** 2D 纹理程序用的单位纹理矩阵（Bitmap 已按目标方向摆好顶点）。 */
+        /** Единичная текстурная матрица, используемая программами 2D-текстур (растровое изображение имеет вершины, расположенные в целевом направлении). */
         private val IDENTITY_ST =
             floatArrayOf(
                 1f,
@@ -110,23 +127,23 @@ class DualDisplayComposer(
     private val running = AtomicBoolean(false)
     private var glThread: Thread? = null
 
-    /** start() 的就绪闩：GL 交付输入 Surface 后放行（注意不能等合成循环退出） */
+    /** Готовая защелка для start(): отпустите после того, как GL доставит входную поверхность (обратите внимание, что вы не можете дождаться выхода цикла композиции). */
     @Volatile
     private var startLatch: CountDownLatch? = null
 
-    /** 是否创建了超采样应用屏（start 时根据传入尺寸确定）。 */
+    /** Создан ли экран приложения суперсэмплинга (определяется на основе входящего размера при запуске). */
     @Volatile
     private var hasHiInput = false
 
-    /** 是否创建了地图屏输入（start 时根据传入尺寸确定）。 */
+    /** Создается ли ввод экрана карты (определяется на основе входящего размера при запуске). */
     @Volatile
     private var hasMapInput = false
 
-    /** 当前应用区显示的是超采样屏（true）还是原生屏（false）。触摸路由以它为准。 */
+    /** Отображает ли текущая область приложения экран с суперсэмплированием (true) или собственный экран (false). Сенсорная маршрутизация подчиняется этому принципу. */
     @Volatile
     private var activeAppHi = false
 
-    /** 待切换的目标屏（true=超采样屏；null=无待切换）；切屏等目标出帧，避免闪黑/闪旧帧。 */
+    /** Целевой экран для переключения (true=экран суперсэмплинга; null=переключать нечего); вырежьте экран и подождите, пока цель выйдет из кадра, чтобы избежать мигания черных/старых кадров. */
     @Volatile
     private var pendingTargetHi: Boolean? = null
 
@@ -137,8 +154,10 @@ class DualDisplayComposer(
     private var pendingSince = 0L
 
     /**
-     * 叠加卡片（输出画面坐标，顶部原点）。由调用方在后台线程生成位图后设置；
-     * GL 线程负责上传纹理并绘制在最上层。触控命中用同一坐标，见 [OverlayCard.contains]。
+     * Карта наложения  (координаты экрана вывода, начало координат вверху). Устанавливается вызывающей стороной
+     * после того, как растровое изображение сгенерировано фоновым потоком;
+     * Поток       GL отвечает за загрузку текстур и их отрисовку на верхнем слое. При касании используются те же
+     * координаты, см. [OverlayCard.contains].
      */
     @Volatile
     var overlayCard: OverlayCard? = null
@@ -150,21 +169,21 @@ class DualDisplayComposer(
     @Volatile
     private var overlayDirty = false
 
-    /** 已上传纹理对应的卡片（仅 GL 线程访问）。 */
+    /** Карта, соответствующая текстуре, загружена (доступна только потоку GL). */
     private var uploadedOverlay: OverlayCard? = null
 
-    /** 叠加卡片纹理（0 = 尚未创建，仅 GL 线程访问）。 */
+    /** Текстура наложенной карты (0 = еще не создана, доступна только из потока GL). */
     private var overlayTexture = 0
 
-    /** 超采样输入（GL 线程创建；start() 返回后对其他线程安全可读）。 */
+    /** Ввод с супервыборкой (создание потока GL; безопасно и доступно для чтения другими потоками после возврата start()). */
     @Volatile
     private var appHi: Input? = null
 
-    /** 原生应用屏输入（同上；requestActiveApp 读其帧号作切换判据）。 */
+    /** Ввод с экрана собственного приложения (то же, что и выше; requestActiveApp считывает номер кадра в качестве критерия переключения). */
     @Volatile
     private var appInput: Input? = null
 
-    /** 地图屏输入（GL 线程创建）。 */
+    /** Ввод экрана карты (создание потока GL). */
     @Volatile
     private var mapInput: Input? = null
 
@@ -209,10 +228,12 @@ class DualDisplayComposer(
     }
 
     /**
-     * 切换应用区显示：false=原生屏，true=超采样屏。目标屏出帧后生效（期间继续显示原
-     * 画面）：等待「目标屏帧号前进」（新应用首帧）；600ms 兜底（目标屏有历史内容时
-     * 平滑切换）；2s 超时兜底（目标屏迟迟不出帧也要把画面切过去）。
-     * 无超采样屏（未创建）时恒为原生屏。
+     * Переключить отображение области приложения: false=собственный экран, true=экран суперсэмплинга. Оно вступает в
+     * силу после того, как целевой экран выходит из кадра (исходное отображение продолжается в течение этого периода).
+     * Экран      ): дождитесь «продвижения номера кадра целевого экрана» (первый кадр нового приложения); 600 мс для
+     * сохранения (если целевой экран имеет историческое содержимое)
+     * плавное переключение); Тайм-аут 2 с (целевой экран должен быть обрезан, даже если кадр не исчез).
+     * всегда является родным экраном, когда нет экрана суперсэмплинга (не создан).
      */
     fun requestActiveApp(hi: Boolean) {
         val target = if (!hasHiInput) false else hi
@@ -222,19 +243,21 @@ class DualDisplayComposer(
         pendingSince = android.os.SystemClock.uptimeMillis()
         pendingTargetHi = target
         if (!hasHiInput) {
-            // 无超采样屏：无需等待，直接生效
+            // Нет экрана передискретизации: не нужно ждать, эффект вступает в силу сразу
             activeAppHi = false
             pendingTargetHi = null
         }
     }
 
-    /** 应用区当前活动屏（触摸路由/坐标换算以此为准）。 */
+    /** Текущий активный экран в области приложения (на этом должна основываться сенсорная маршрутизация/преобразование координат). */
     fun isActiveAppHi(): Boolean = activeAppHi
 
     /**
-     * 地图屏（tile）布局状态：HIDDEN=普通桌面；SPLIT=采样画面中央带区映射到
-     * 应用区左半（地图中心≈车辆位置，裁剪语义正确）；FULLSCREEN=整个应用区。
-     * 地图屏始终以全屏尺寸创建（应用窗口稳定，任务不迁移），分/全屏只是采样几何。
+     * Статус макета экрана карты (плитки): СКРЫТ = обычный рабочий стол; SPLIT=центральная зона экрана отбора проб отображается на
+     * Левая половина области приложения (центр карты ≈ положение автомобиля, семантика обрезки правильная); ПОЛНЫЙ
+     * ЭКРАН = вся область приложения.
+     * Экран карты       всегда создается в полноэкранном размере (окно приложения стабильно, задачи не переносятся),
+     * разделение/полный экран — это просто выборка геометрии.
      */
     enum class TileLayout { HIDDEN, SPLIT, FULLSCREEN }
 
@@ -251,15 +274,18 @@ class DualDisplayComposer(
             false
         }
 
-    /** 切换地图 tile 布局。 */
+    /** Переключить макет плитки карты. */
     fun setTileLayout(layout: TileLayout) {
         tileLayout = layout
     }
 
     /**
-     * 地图屏动态 resize 后同步消费端 buffer 尺寸。VirtualDisplay.resize 只改系统侧
-     * 显示设备——SurfaceTexture 的 defaultBufferSize 仍锁在创建时的旧尺寸，投影会把
-     * 新尺寸内容画进旧 buffer 的左上区域（tile 内容偏居左、宽度只剩比例值、右侧全黑）。
+     * Динамическое изменение размера экрана карты, а затем синхронизация размера потребительского буфера.
+     * VirtualDisplay.resize меняет только сторону системы
+     * Устройство отображения       — значение defaultBufferSize SurfaceTexture по-прежнему фиксируется в старом
+     * размере при создании, и проекция будет
+     * Содержимое нового размера отображается в верхней левой области старого буфера (содержимое плитки находится
+     * слева, ширина имеет только пропорциональное значение, а правая сторона полностью черная).
      */
     fun resizeMapInput(
         width: Int,
@@ -282,11 +308,11 @@ class DualDisplayComposer(
         @Volatile
         var hasNewFrame = false
 
-        /** 是否已产出过至少一帧（未产出的输入不参与绘制，避免空纹理） */
+        /** Был ли сгенерирован хотя бы один кадр (непроизведенный ввод не будет участвовать в отрисовке, чтобы избежать пустых текстур) */
         @Volatile
         var hasContent = false
 
-        /** 累计产出帧数（活动屏切换的「已出帧」判据）。 */
+        /** Совокупное количество созданных кадров (критерий «пройдено кадров» для активного переключения экрана). */
         @Volatile
         var frameCount = 0
     }
@@ -301,7 +327,7 @@ class DualDisplayComposer(
         mapW: Int,
         mapH: Int,
     ) {
-        // ---- EGL ----
+        // ---- ЭГЛ ----
         val display: EGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         checkEgl(display != EGL14.EGL_NO_DISPLAY, "eglGetDisplay")
         checkEgl(EGL14.eglInitialize(display, IntArray(2), 0, IntArray(2), 1), "eglInitialize")
@@ -351,7 +377,7 @@ class DualDisplayComposer(
             "eglMakeCurrent",
         )
 
-        // ---- 输入纹理 ----
+        // ----Входная текстура ----
         fun newInput(
             width: Int,
             height: Int,
@@ -373,7 +399,7 @@ class DualDisplayComposer(
         val hi = if (hasHiInput) newInput(hiW, hiH).also { appHi = it } else null
         val map = if (hasMapInput) newInput(mapW, mapH).also { mapInput = it } else null
 
-        // ---- 着色器 ----
+        // ---- Шейдер ----
         val program = buildProgram(oes = true)
         GLES20.glUseProgram(program)
         val aPos = GLES20.glGetAttribLocation(program, "aPos")
@@ -388,14 +414,14 @@ class DualDisplayComposer(
 
         val matrix = FloatArray(16)
 
-        // ---- 叠加卡片着色器（普通 2D 纹理；Bitmap 由 Canvas 预排版）----
+        // ---- Наложение шейдера карты (обычная 2D-текстура; предварительный макет растрового изображения с помощью Canvas) ----
         val overlayProgram = buildProgram(oes = false)
         val oaPos = GLES20.glGetAttribLocation(overlayProgram, "aPos")
         val oaTexCoord = GLES20.glGetAttribLocation(overlayProgram, "aTexCoord")
         val ouSTMatrix = GLES20.glGetUniformLocation(overlayProgram, "uSTMatrix")
         val ouTexture = GLES20.glGetUniformLocation(overlayProgram, "uTexture")
 
-        /** 上传/更新叠加卡片纹理（仅 GL 线程；卡片引用变化时才重新上传）。 */
+        /** Загрузка/обновление текстур наложенных карт (только поток GL; повторная загрузка при изменении ссылки на карту). */
         fun syncOverlayTexture(): OverlayCard? {
             val card =
                 overlayCard ?: run {
@@ -420,8 +446,9 @@ class DualDisplayComposer(
         }
 
         /**
-         * 绘制叠加卡片。[left]/[top]/[right]/[bottom] 是输出画面坐标（顶部原点），
-         * 这里转成 GL 底部原点；Bitmap 首行在顶部，故纹理 v 轴与顶点方向相反。
+         * рисует наложенные карты. [left]/[top]/[right]/[bottom] — координаты выходного экрана (верхнее начало координат),
+         * преобразуется здесь в нижнее начало координат GL; первая строка растрового изображения находится вверху,
+         * поэтому ось v текстуры противоположна направлению вершины.
          */
         fun drawOverlay(
             card: OverlayCard,
@@ -454,7 +481,7 @@ class DualDisplayComposer(
                     px(right),
                     py(yTop),
                 )
-            // Bitmap v=0 在顶部：底部顶点取 v=1，顶部顶点取 v=0
+            // Растровое изображение v=0 вверху: v=1 для нижней вершины, v=0 для верхней вершины
             val coords = floatBuffer(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
             GLES20.glVertexAttribPointer(oaPos, 2, GLES20.GL_FLOAT, false, 0, positions)
             GLES20.glEnableVertexAttribArray(oaPos)
@@ -462,12 +489,12 @@ class DualDisplayComposer(
             GLES20.glEnableVertexAttribArray(oaTexCoord)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GLES20.glDisable(GLES20.GL_BLEND)
-            // 恢复主着色器状态（后续帧继续用 OES 程序）
+            // Восстановить состояние основного шейдера (продолжать использовать программу OES для последующих кадров)
             GLES20.glUseProgram(program)
             GLES20.glUniform1i(uTexture, 0)
         }
 
-        /** [u0]/[u1]：横向纹理采样区间（地图分屏时采样缓冲中央带区用）。 */
+        /** [u0]/[u1]: интервал выборки текстур по горизонтали (используется для центральной зоны буфера выборки, когда карта разделена экраном). */
         fun drawInputUV(
             input: Input,
             x0: Float,
@@ -481,10 +508,12 @@ class DualDisplayComposer(
             input.surfaceTexture.getTransformMatrix(matrix)
             GLES20.glUniformMatrix4fv(uSTMatrix, 1, false, matrix, 0)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, input.texture)
-            // 圆角裁剪：shader 用 gl_FragCoord（GL 底部原点）与 uClipRect 比较，
-            // 故直接传顶点坐标（本函数 y 即 GL 坐标）。此前翻转成屏幕坐标——
-            // 全高 tile（横屏）对称区间恰好重合未暴露；竖屏半高 tile 顶点区域
-            // 与裁剪区域完全不相交，整块被 discard（「地图卡不可见」根因）
+            // Обрезка закругленных углов: шейдер использует gl_FragCoord (нижнее начало GL) для сравнения с uClipRect,
+            // Поэтому координаты вершин передаются напрямую (y этой функции — координата GL). Ранее перевернуто на экранные координаты——
+            // Симметричные интервалы полновысотного тайла (горизонтального экрана) совпадают друг с другом и не обнажены;
+            // область вершин тайла половинной высоты на вертикальном экране
+
+            // Он вообще не пересекается с областью обрезки, и весь блок отбрасывается (первопричина "карточка карты не видна")
             if (cornerRadius > 0f) {
                 GLES20.glUniform1i(uClipEnabled, 1)
                 GLES20.glUniform4f(uClipRect, x0, y0, x1, y1)
@@ -493,7 +522,9 @@ class DualDisplayComposer(
                 GLES20.glUniform1i(uClipEnabled, 0)
             }
 
-            // 像素坐标 → 裁剪坐标（GL 左下原点；纹理翻转由 uSTMatrix 处理，勿重复翻转）
+            // Координаты пикселей → координаты отсечения (начало GL внизу слева; переворот текстуры обрабатывается
+            // uSTMatrix, не переворачивайте повторно)
+
             fun px(v: Float) = v / outWidth * 2f - 1f
 
             fun py(v: Float) = v / outHeight * 2f - 1f
@@ -525,7 +556,9 @@ class DualDisplayComposer(
         ) = drawInputUV(input, x0, x1, y0, y1, u0 = 0f, u1 = 1f)
 
         fun composeFrame(fullRedraw: Boolean) {
-            // 待切应用屏：目标屏出帧即切（帧号前进 / 已有内容 600ms 兜底 / 2s 超时兜底）
+            // Экран приложения, который нужно вырезать: вырезается, как только целевой экран выходит за пределы кадра (номер
+            // кадра увеличивается / существующий контент резервное копирование 600 мс / резервное копирование по тайм-ауту 2 с)
+
             pendingTargetHi?.let { targetHi ->
                 val nowMs = android.os.SystemClock.uptimeMillis()
                 val target = if (targetHi) hi else app
@@ -541,8 +574,12 @@ class DualDisplayComposer(
             GLES20.glViewport(0, 0, outWidth, outHeight)
             GLES20.glClearColor(0.04f, 0.07f, 0.09f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            // 只对有新帧的输入 updateTexImage；已有内容的输入沿用旧纹理（画面持久）。
-            // 两块应用屏都持续消费（非活动屏也保持最新，切换时不闪旧帧）。
+            // updateTexImage только для входных данных с новыми кадрами; входные данные с существующим содержимым наследуют
+            // старую текстуру (постоянство изображения).
+
+            // Оба экрана приложений продолжают потреблять (неактивный экран тоже остается актуальным, а старые кадры при
+            // переключении не мигают).
+
             if (dock.hasNewFrame) {
                 dock.hasNewFrame = false
                 dock.hasContent = true
@@ -573,8 +610,12 @@ class DualDisplayComposer(
             }
             val activeInput = if (activeAppHi) hi else app
             if (dockAtBottom) {
-                // 竖屏：dock 横条贴底（GL 坐标 y=0 为底边），app 在其余区域；
-                // 仪表盘时地图卡叠在应用区上半（地图上/音乐下），全屏盖满应用区。
+                // Вертикальный экран: горизонтальная полоса дока прикреплена снизу (координата GL y=0 — нижний край), а
+                // приложение находится в оставшейся области;
+
+                // На приборной панели карточка с картой расположена в верхней половине области приложения (поверх карты/под
+                // музыкой), а область приложения закрывает весь экран.
+
                 if (dock.hasContent) drawInput(dock, 0f, outWidth.toFloat(), 0f, dockH.toFloat())
                 if (activeInput?.hasContent == true) {
                     drawInput(activeInput, 0f, outWidth.toFloat(), dockH.toFloat(), outHeight.toFloat())
@@ -584,9 +625,13 @@ class DualDisplayComposer(
                     if (layoutP == TileLayout.FULLSCREEN) {
                         drawInput(map!!, 0f, outWidth.toFloat(), dockH.toFloat(), outHeight.toFloat())
                     } else {
-                        // 上半卡片：左右留 16、顶留 16；pager 水平滑动 → tile 向左滑出（跟手）
-                        // tileEdgeOverride = tile 把手侧边缘（顶部原点 y，即 tile 下缘）；
-                        // GL y = outHeight − 顶部 y（底部原点换算，勿翻转——坐标系约定见类注释）
+                        // Верхняя половина карты: 16 слева и 16 сверху; пейджер скользит горизонтально → плитка скользит влево (вслед за
+                        // рукой)
+
+                        // tileEdgeOverride = боковой край маркера плитки (верхнее начало y, то есть нижний край плитки);
+                        // GL y = outHeight — Top y (преобразование нижнего начала координат, не переворачивать — см. аннотацию класса
+                        // для соглашения о системе координат)
+
                         val tileH = (outHeight - dockH) / 2f - CARD_MARGIN_PX * 1.5f
                         val handleEdge =
                             if (tileEdgeOverride > 0f) tileEdgeOverride else CARD_MARGIN_PX + tileH
@@ -595,7 +640,7 @@ class DualDisplayComposer(
                         if (nowMs - lastPortraitTileDiag > 5_000) {
                             lastPortraitTileDiag = nowMs
                             VirtualLauncher.logSink?.invoke(
-                                "COMPOSER: 竖屏 tile 绘制 tileH=$tileH handleEdge=$handleEdge " +
+                                "КОМПОЗИТОР: Рисунок тайла вертикального экрана tileH=$tileH handleEdge=$handleEdge" +
                                     "slide=$slide frames=${map!!.frameCount}",
                             )
                         }
@@ -609,12 +654,14 @@ class DualDisplayComposer(
                         )
                     }
                 } else {
-                    // 竖屏 tile 未绘制：状态节流采样（5s），排查「看不到地图卡」
+                    // Вертикальная плитка экрана не рисуется: выборка состояния регулирования (5 с), устранение неполадок «карточка
+                    // карты не видна»
+
                     val nowMs = android.os.SystemClock.uptimeMillis()
                     if (nowMs - lastPortraitTileDiag > 5_000) {
                         lastPortraitTileDiag = nowMs
                         VirtualLauncher.logSink?.invoke(
-                            "COMPOSER: 竖屏 tile 未画 layout=$layoutP " +
+                            "КОМПОЗИТОР: Вертикальная плитка экрана не рисуется макет = $layoutP" +
                                 "mapInput=${map != null} hasContent=${map?.hasContent} " +
                                 "frames=${map?.frameCount} dash=${launcherDashHint()}",
                         )
@@ -624,20 +671,26 @@ class DualDisplayComposer(
                 if (activeInput?.hasContent == true) {
                     drawInput(activeInput, dockW.toFloat(), outWidth.toFloat(), 0f, outHeight.toFloat())
                 }
-                // 地图层叠在应用区之上（HIDDEN 不画）：
-                //  FULLSCREEN=整个应用区；SPLIT=左半卡片区域。
-                //  地图屏经 VirtualLauncher 按布局动态 resize（分屏=tile 显示尺寸、
-                //  全屏=应用区尺寸），屏上地图应用 relayout——两种布局都是整幅
-                //  1:1 映射（旧的「全尺寸屏+中央带区裁剪采样」方案已移除）。
+                // Карта накладывается поверх области применения (СКРЫТО не отрисовывается):
+                //  ПОЛНЫЙ ЭКРАН = вся область приложения; SPLIT = левая половина области карты.
+                // Размер экрана карты динамически изменяется в соответствии с макетом с помощью VirtualLauncher (разделенный
+                // экран = размер отображения плитки,
+
+                //  Полный экран = размер области приложения), отображение карты приложения на экране — оба макета заполнены
+                //  Отображение 1:1 (старая схема «полноразмерный экран + выборка кадра по центральной полосе» была удалена).
                 val layout = tileLayout
                 if (map?.hasContent == true && layout != TileLayout.HIDDEN) {
                     if (layout == TileLayout.FULLSCREEN) {
                         drawInput(map!!, dockW.toFloat(), outWidth.toFloat(), 0f, outHeight.toFloat())
                     } else {
-                        // 卡片形态：四周留边 + 圆角（与音乐卡一致）。
-                        // 分屏把手拖动期间 tileEdgeOverride（tile 右缘 x）替代公式值：
-                        // 只改绘制矩形、纹理整幅拉伸（不动 buffer/虚拟屏），松手才 resize。
-                        // tileSlideFraction：随 pager 滑动把 tile 平移出/入左侧（视觉跟手）。
+                        // Форма карты: оставьте края по всему периметру + закруглите углы (как у музыкальных карт).
+                        // Значение формулы подстановки tileEdgeOverride(правый край плитки x) при перетаскивании маркера разделенного
+                        // экрана:
+
+                        // Измените только рисунок прямоугольников и растяните всю текстуру (не перемещая буфер/виртуальный экран), а
+                        // затем измените размер, когда отпустите.
+
+                        // tileSlideFraction: переместите плитку влево/влево по мере скольжения пейджера (визуальное сопровождение).
                         val half = (outWidth - dockW) / 2f
                         val tileW = half - CARD_MARGIN_PX - CARD_MARGIN_PX / 2f
                         val x1 =
@@ -657,10 +710,12 @@ class DualDisplayComposer(
                         )
                     }
                 }
-                // dock 最后绘制（最上层）：tile 滑动经过 dock 区域时从其下方穿过
+                // Док рисуется последним (верхний слой): плитка проходит под областью дока, скользя через нее.
                 if (dock.hasContent) drawInput(dock, 0f, dockW.toFloat(), 0f, outHeight.toFloat())
             }
-            // 叠加卡片最后绘制（最上层，不受分支影响）：卡片坐标为输出画面坐标（顶部原点）
+            // Наложенная карта рисуется последней (верхний слой, на который не влияют ветки): координаты карты — это
+            // координаты выходного экрана (верхнее начало координат).
+
             syncOverlayTexture()?.let { card ->
                 drawOverlay(card, card.left, card.top, card.right, card.bottom)
             }
@@ -676,7 +731,7 @@ class DualDisplayComposer(
             overlayDirty = false
         }
 
-        // 初始黑帧（只清屏，不碰空纹理）+ 交付输入 Surface + 放行 start()
+        // Исходный черный кадр (только чистый экран, не трогайте пустую текстуру) + доставьте ввод на поверхность + отпустите start()
         GLES20.glViewport(0, 0, outWidth, outHeight)
         GLES20.glClearColor(0.04f, 0.07f, 0.09f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
@@ -684,21 +739,33 @@ class DualDisplayComposer(
         onSurfacesReady?.invoke(dock.surface, app.surface, hi?.surface, map?.surface)
         startLatch?.countDown()
 
-        // ---- 合成循环 ----
-        // 有输入新帧：按目标帧率（1000/targetFps）节流合成。
-        // 无新帧（界面静止，如启动器/阅读页/地图停靠）：以 33ms 心跳重复合成最后一帧内容——
-        // 否则编码器无输入、视频流停摆，接收端画面冻结（表现为"桌面卡死/不可交互"，
-        // 2026-10-09 实测踩坑：触摸其实送到了，只是没有帧能反映出来）。
+        // ---- Синтетический цикл ----
+        // Ввод новых кадров: дросселирование композиции с целевой частотой кадров (1000/targetFps).
+        // Нет нового кадра (интерфейс остается неизменным, например, панель запуска/страница чтения/док-карта):
+        // содержимое последнего кадра многократно синтезируется с тактовым сигналом 33 мс——
+
+        // В противном случае кодер не получает входных данных, видеопоток останавливается, а принимающий конечный экран
+        // зависает (отображается как «Рабочий стол зависает/неинтерактивен»).
+
+        // 09.10.2026 Фактический тест: касание действительно было отправлено, но не было кадра, отражающего это).
         try {
             var lastComposeAt = System.currentTimeMillis()
             while (running.get()) {
-                // 快车道（60fps 节流）只由「会被画进输出画面」的输入驱动：
-                // dock + 当前活动应用屏（app/hi 二选一）+ tile 可见时的地图屏。
-                // 高德走地图屏、竖屏应用走超采样屏——只看 dock/原生屏会漏掉它们，
-                // 60fps 档被 33ms 静止心跳锁死在 30fps。
-                // 非活动屏的新帧不在判定内（画面不含它）：帧仍会在 composeFrame 里
-                // 持续消费（纹理保持最新，避免 SurfaceTexture 队列积压卡住后台应用），
-                // 但不为看不见的内容白烧 GPU/带宽。
+                // Быстрая полоса (регулирование 60 кадров в секунду) управляется только входными данными, которые будут
+                // отображаться на экране вывода:
+
+                // док-станция + текущий активный экран приложения (выберите один из приложений/привет) + экран карты, когда
+                // отображается плитка.
+
+                // Amap использует экран карты, а приложения с вертикальным экраном используют экран суперсэмплинга — просто
+                // глядя на док-станцию или собственный экран, вы их не увидите.
+
+                // Файл со скоростью 60 кадров в секунду блокируется на скорости 30 кадров в секунду с пульсом покоя 33 мс.
+                // Новый кадр неактивного экрана не учитывается при определении (экран его не содержит): кадр все равно будет в composeFrame
+                // Непрерывное использование (текстуры поддерживаются в актуальном состоянии, чтобы избежать отставания в очереди
+                // SurfaceTexture и блокировки фоновых приложений),
+
+                // Но не тратьте ресурсы графического процессора и пропускную способность на невидимый контент.
                 val hasNew =
                     overlayDirty ||
                         dock.hasNewFrame ||
@@ -745,7 +812,7 @@ class DualDisplayComposer(
         }
     }
 
-    /** [oes]=true：外部纹理采样（SurfaceTexture）；false：普通 2D 采样（壁纸位图）。 */
+    /** [oes]=true: выборка внешней текстуры (SurfaceTexture); false: обычная 2D-сэмплинг (растровое изображение обоев). */
     private fun buildProgram(oes: Boolean): Int {
         val fragment =
             if (oes) {
@@ -796,11 +863,13 @@ class DualDisplayComposer(
             val shader = GLES20.glCreateShader(type)
             GLES20.glShaderSource(shader, source)
             GLES20.glCompileShader(shader)
-            // 编译失败必须留痕并抛出：静默继续 = 黑屏无从排查（EGL 有 checkEgl，GLSL 这层此前漏了）
+            // Сбой компиляции должен оставить следы и выдать: продолжить молча = черный экран и нет возможности устранить
+            // неполадки (в EGL есть checkEgl, в GLSL этот слой раньше отсутствовал)
+
             val status = IntArray(1)
             GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0)
             if (status[0] == 0) {
-                Log.e(TAG, "GLSL 编译失败（type=$type）：${GLES20.glGetShaderInfoLog(shader)}")
+                Log.e(TAG, "Ошибка компиляции GLSL (тип = $type): ${GLES20.glGetShaderInfoLog(shader)}")
                 GLES20.glDeleteShader(shader)
                 throw IllegalStateException("GLSL compile type=$type")
             }
@@ -829,7 +898,7 @@ class DualDisplayComposer(
         stage: String,
     ) {
         if (!ok) {
-            Log.e(TAG, "EGL 失败：$stage")
+            Log.e(TAG, "EGL не удалось: $stage")
             throw IllegalStateException("EGL $stage")
         }
     }

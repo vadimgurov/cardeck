@@ -13,22 +13,26 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLSocketFactory
 
 /**
- * 最小 RFC6455 WebSocket 客户端（只为配对的调试桥服务，不追求通用）：
- * 文本帧收发、掩码、ping/pong、close、服务端分片合并。
+ * Минимальный клиент WebSocket RFC6455 (обслуживает только парный мост отладки, а не универсальный):
+ * Отправка и получение текстовых кадров, маскирование, пинг/понг, закрытие, объединение фрагментов на стороне сервера.
  *
- * 不引 okhttp/ws 依赖的原因：调试桥代码只进 remote 变体，但依赖仍会拖进构建；
- * 自家的服务端（ws 库）与已知的消息形态让 ~200 行的手写实现足够可靠。
- * wss:// 走系统默认 SSLSocketFactory（内网穿透服务如 Cloudflare Tunnel 提供有效
- * 证书）；自签/裸 IP 场景用 ws://（局域网或 http 隧道）。
+ * Причина, по которой   не импортирует зависимость okhttp/ws: код моста отладки входит только в удаленный
+ * вариант, но зависимость все равно будет перетянута в сборку;
+ * Собственный сервер   (библиотека ws) и известные формы сообщений делают реализацию рукописного ввода длиной
+ * около 200 строк достаточно надежной.
+ * wss:// использует системный SSLSocketFactory по умолчанию (службы проникновения во внутреннюю сеть, такие как
+ * Cloudflare Tunnel, обеспечивают эффективную
+ * сертификат  ); используйте ws:// (LAN или http-туннель) в сценариях самоподписанного/голого IP.
  *
- * 线程模型：每个连接一根读线程（内部），发送在任意线程串行化；连接生命周期由
- * [BridgeClient] 管理（重连退避在那里）。
+ * Модель потока  : каждое соединение имеет поток чтения (внутренний), а передача сериализуется в любом потоке;
+ * жизненный цикл соединения определяется
+ * [BridgeClient] управление (отсрочка переподключения есть).
  */
 class WsClient(
     private val url: String,
     private val listener: Listener,
-    /** 显式联网通道（蜂窝）。车机会话期间进程默认路由被绑到无互联网的车机热点，
-     *  必须从该网络建 socket + 解析 DNS 才能保持调试桥在线（见 [InternetRoute]）。 */
+    /** Явный сетевой канал (сотовый). Во время сеанса машина-машина маршрут процесса по умолчанию привязан к точке доступа машина-машина без Интернета.
+     */
     private val network: android.net.Network? = null,
 ) {
     interface Listener {
@@ -52,7 +56,7 @@ class WsClient(
 
     private val random = SecureRandom()
 
-    /** 阻塞式连接（在调用线程完成握手；失败抛 IOException）。 */
+    /** Блокирование соединения (квитирование завершается в вызывающем потоке; в случае сбоя выдается исключение IOException). */
     fun connect() {
         val secure = url.startsWith("wss://", ignoreCase = true)
         val rest = url.substring(if (secure) 6 else 5)
@@ -69,7 +73,9 @@ class WsClient(
                 ?: throw IOException("Не удалось разрешить порт: $url")
         val path = hostPortPath.second.ifBlank { "/" }
 
-        // 指定了网络时，DNS 也必须走该网络——系统默认 DNS 会落在车机热点上，解析公网域名失败
+        // Если указана сеть, DNS также должен проходить через эту сеть — DNS по умолчанию в системе будет приходиться на
+        // точку доступа автомобиля и не сможет разрешить общедоступное доменное имя.
+
         val address =
             network?.let { n -> runCatching { n.getAllByName(host).firstOrNull() }.getOrNull() }
                 ?: InetAddress.getByName(host)
@@ -89,7 +95,7 @@ class WsClient(
                 }
         val raw =
             if (secure && network != null) {
-                // 已连接的明文 socket 上叠 TLS（host 用于 SNI；autoClose 关明文层）
+                // Наложение TLS на подключенный сокет открытого текста (хост для SNI; autoClose отключает слой открытого текста)
                 (SSLSocketFactory.getDefault() as SSLSocketFactory)
                     .createSocket(plain, host, port, true)
             } else {
@@ -119,9 +125,15 @@ class WsClient(
         }
         alive = true
         listener.onOpen()
-        // 死连接检测：25s 心跳 + 75s 读超时。蜂窝/NAT 静默断链（无 FIN）时 read
-        // 永远阻塞、重连循环跟着卡死——2026-10-21 实测断后 4 分钟不重连，桥侧
-        // 设备长期「离线」。心跳周期远小于读超时，健康连接不会误杀。
+        // Обнаружение мертвого соединения: контрольное сообщение 25 секунд + тайм-аут чтения 75 секунд. читать, когда
+        // сотовая связь/NAT отключена (без FIN)
+
+        // Постоянная блокировка, цикл повторного подключения, а затем зависание - фактическое измерение отсутствия
+        // повторного подключения 21 октября 2026 г. через 4 минуты после отключения, сторона моста
+
+        // Устройство долгое время находится «оффлайн». Период контрольного сигнала намного меньше тайм-аута чтения, и
+        // работоспособные соединения не будут случайно разорваны.
+
         socket?.soTimeout = 75_000
         val heartbeat =
             HEARTBEAT.scheduleAtFixedRate(
@@ -165,7 +177,9 @@ class WsClient(
                 when (frame.opcode) {
                     OPCODE_TEXT, OPCODE_BINARY -> {
                         if (fragmentBuffer != null) {
-                            // 收到新数据帧却挂着未完成分片：丢弃旧分片重新开始
+                            // Получены новые кадры данных, но ожидаются незавершенные фрагменты: отбросьте старые фрагменты и начните
+                            // заново.
+
                             fragmentBuffer = null
                             fragmentOpcode = -1
                         }
@@ -255,7 +269,7 @@ class WsClient(
         }
     }
 
-    /** 发送文本帧（连接断开时返回 false，由上层走重连）。 */
+    /** Отправлять текстовые фреймы (возвращать false, когда соединение разрывается, и верхний уровень повторно подключается). */
     fun sendText(text: String): Boolean = sendFrame(OPCODE_TEXT, text.toByteArray(Charsets.UTF_8), mask = true)
 
     private fun sendFrame(
@@ -327,7 +341,7 @@ class WsClient(
         const val OPCODE_PING = 0x9
         const val OPCODE_PONG = 0xA
 
-        /** 心跳调度器（单线程守护：连接数量级=1，不值得按连接建线程）。 */
+        /** Планировщик Heartbeat (однопоточный демон: величина соединения = 1, не стоит создавать потоки по соединению). */
         val HEARTBEAT =
             Executors.newSingleThreadScheduledExecutor { r ->
                 Thread(r, "ws-heartbeat").apply { isDaemon = true }

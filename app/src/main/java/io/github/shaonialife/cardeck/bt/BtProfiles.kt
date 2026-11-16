@@ -11,28 +11,32 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 蓝牙「**只配对、不连接**」策略。
+ * Политика Bluetooth «**только сопряжение, без подключения**».
  *
- * 奥迪 MIB3 实测（2026-10-18，用户报告）：手机与车机处于蓝牙**已连接**状态
- * （HFP 通话 / A2DP 媒体配置文件在线）时，车机不开放无线 CarPlay 的 iAP2 服务
- * 窗口——表现为 `BT-C: 连接失败（车机未就绪或不在无线配对窗口）` 每 3 秒重试。
- * 真 iPhone 的无线 CarPlay 也不依赖这些配置文件：控制通道走 iAP2 RFCOMM（独立
- * SDP 服务），声音走 WiFi 上的 AirPlay。因此正确形态是：**系统级配对 + iAP2
- * RFCOMM，其余配置文件一律不连**。
+ * Фактическое измерение Audi MIB3 (18 октября 2026 г., отчет пользователя): мобильный телефон и автомобиль
+ * находятся в состоянии Bluetooth **подключено**.
+ * Когда   (вызов HFP/медиа-профиль A2DP онлайн), автомобиль не открывает службу iAP2 беспроводной системы CarPlay.
+ * Окно   — ведет себя так же, как `BT-C: подключитьне удалось（Автомобиль не готов или недоступенНетОкно
+ * сопряжения линий）`, повторяет попытки каждые 3 секунды.
+ * Беспроводная система CarPlay настоящего iPhone   не зависит от этих файлов конфигурации: канал управления
+ * проходит через iAP2 RFCOMM (независимый
+ * SDP), звук идет через AirPlay по Wi-Fi. Поэтому правильная форма: **Сопряжение на уровне системы + iAP2.
+ * RFCOMM, другие файлы конфигурации подключаться** не будут.
  *
- * 实现说明：`BluetoothHeadset/A2dp/LeAudio.disconnect(BluetoothDevice)` 是
- * **@SystemApi**——编译期不可见，但运行时注解只要求 `BLUETOOTH_CONNECT`
- * （本应用已持有），因此反射可调。查询状态用公开的 `getProfileProxy` +
- * `connectedDevices`（需要主 Looper，应用进程有）。
+ * Описание реализации: `BluetoothHeadset/A2dp/LeAudio.disconnect(BluetoothDevice)`
+ * **@SystemApi** — — Невидим во время компиляции, но для аннотации времени выполнения требуется только `BLUETOOTH_CONNECT`.
+ * (уже есть в этом приложении), поэтому отражение настраивается. Для запроса статуса используйте общедоступный `getProfileProxy` +
+ * `connectedDevices` (требуется основной Looper, есть в процессе приложения).
  *
- * 曾试过把这段挪到 Shizuku UserService（shell uid）执行，实测不可行：
- * UserService 里 `BluetoothManager.getAdapter()` 返回 null（无主 Looper 的应用
- * 上下文），查询恒为「未连接」，反而掩盖真实状态。故固定在应用进程内做。
+ * однажды попытался переместить этот раздел в Shizuku UserService (uid оболочки) для выполнения, но в реальном
+ * тестировании это оказалось невозможным:
+ * `BluetoothManager.getAdapter()` в   UserService возвращает ноль (применение бесхозяйного Looper
+ * контекст), запрос всегда «не подключен», что маскирует истинный статус. Таким образом, это фиксируется в процессе подачи заявки.
  */
 object BtProfiles {
     private const val TAG = "BT-PROFILE"
 
-    /** 关心的配置文件（按断开优先级排列）。 */
+    /** Соответствующие профили (упорядочены по приоритету отключения). */
     private val profiles: List<Int> =
         listOf(
             BluetoothProfile.HEADSET,
@@ -42,16 +46,16 @@ object BtProfiles {
 
     private fun profileName(profile: Int): String =
         when (profile) {
-            BluetoothProfile.HEADSET -> "通话(HFP)"
-            BluetoothProfile.A2DP -> "音频(A2DP)"
-            BluetoothProfile.LE_AUDIO -> "低功耗音频(LE)"
+            BluetoothProfile.HEADSET -> "Звонок(HFP)"
+            BluetoothProfile.A2DP -> "Аудио (A2DP)"
+            BluetoothProfile.LE_AUDIO -> "Аудио с низким энергопотреблением (LE)"
             else -> "profile#$profile"
         }
 
-    /** profile id → 已获取的代理（进程内复用；代理本身无会话状态）。 */
+    /** идентификатор профиля → Приобретенный агент (повторное использование в процессе; сам агент не имеет состояния сеанса). */
     private val proxies = HashMap<Int, BluetoothProfile>()
 
-    /** 该地址当前在线（已连接）的配置文件名称。 */
+    /** Имя профиля, который в данный момент находится в сети (подключен) по этому адресу. */
     fun connectedNames(
         context: Context,
         address: String,
@@ -69,9 +73,9 @@ object BtProfiles {
         }
 
     /**
-     * 尽力断开该设备的全部配置文件连接。
+     * пытается отключить все профили от этого устройства.
      *
-     * @return 断开前在线的配置文件（空 = 本来就没连接，无需任何动作）
+     * @return Файл конфигурации, который был в сети до отключения (пустой = изначально не подключался, никаких действий не требуется)
      */
     fun disconnect(
         context: Context,
@@ -90,15 +94,19 @@ object BtProfiles {
             proxy(context, id)?.let { disconnectProfile(it, device) }
         }
         if (!awaitDisconnected(context, address, 1_500L)) {
-            // 配置级断开未生效（个别 ROM 限流）：设备级断开兜底（@hide，同样只要求
-            // BLUETOOTH_CONNECT）。车载/耳机当前连接的设备可能被一并断开，属预期。
+            // Отключение на уровне конфигурации не действует (ограничение тока индивидуального ПЗУ): отключение на уровне
+            // устройства (@hide, также требуется только
+
+            // BLUETOOTH_CONNECT). Устройства, подключенные в данный момент к автомобилю/наушникам, также могут быть
+            // отключены, что и ожидается.
+
             runCatching { BluetoothDevice::class.java.getMethod("disconnect").invoke(device) }
             awaitDisconnected(context, address, 500L)
         }
         return before
     }
 
-    /** 断开后仍在线的配置文件（用于日志判断是否真的断开）。 */
+    /** Файл конфигурации, который все еще находится в сети после отключения (используется для журналов, чтобы определить, действительно ли он отключен). */
     fun stillConnected(
         context: Context,
         address: String,
@@ -146,7 +154,9 @@ object BtProfiles {
                         }
 
                         override fun onServiceDisconnected(id: Int) {
-                            // 蓝牙服务重启后旧代理失效：清缓存，下次重新获取
+                            // Старый прокси становится недействительным после перезапуска службы Bluetooth: очистите кеш и получите его
+                            // снова в следующий раз.
+
                             synchronized(proxies) { proxies.remove(id) }
                             latch.countDown()
                         }
@@ -157,11 +167,15 @@ object BtProfiles {
                 false
             }
         if (!requested) return null
-        // `getProfileProxy` 的回调经**主线程 Handler** 投递：若本方法跑在主线程，
-        // 回调永远无法执行 → 必然白等到超时（1.2s）并返回 null。宁可显式失败也不
-        // 静默卡顿——调用方必须转到后台线程（本对象所有入口都是后台调用）。
+        // Обратный вызов `getProfileProxy` осуществляется через **Обработчик основного потока**: если этот метод
+        // выполняется в основном потоке,
+
+        // Обратный вызов никогда не может быть выполнен → он должен дождаться таймаута (1,2 с) и вернуть ноль. Лучше
+        // явно потерпеть неудачу, чем
+
+        // Тихая задержка — вызывающий абонент должен перейти в фоновый поток (все записи этого объекта являются фоновыми вызовами).
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            Log.w(TAG, "proxy() 在主线程调用——getProfileProxy 回调会被阻塞，返回 null")
+            Log.w(TAG, "proxy() вызывается в основном потоке - обратный вызов getProfileProxy будет заблокирован и вернет ноль")
             return null
         }
         if (!latch.await(1_200, TimeUnit.MILLISECONDS)) return null
@@ -169,8 +183,8 @@ object BtProfiles {
     }
 
     /**
-     * 断开某配置文件的连接。`disconnect(BluetoothDevice)` 是 @SystemApi（编译期
-     * 不可见），反射调用；失败不抛，由调用方按最终状态判定。
+     * Отключает профиль. `disconnect(BluetoothDevice)` — это @SystemApi (время компиляции
+     * невидимый), вызов отражения; сбой не выдается, вызывающий абонент определяет в соответствии с окончательным статусом.
      */
     private fun disconnectProfile(
         proxy: BluetoothProfile,

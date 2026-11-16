@@ -14,41 +14,41 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * CarPlay 主屏视频发送端（Phase 2-C2）。
+ * Передатчик видео с главного экрана CarPlay (Фаза 2-C2).
  *
- * 线格式（对照 DiPlay ScreenStream.kt）：
- *  - 每条消息 = 128 字节头 + body；头部 = [0..3] u32LE body 长度、[4] opcode、
- *    [8..15] NTP 32.32 LE 发送时间；整头作帧加密 AAD，其余字节为零
- *  - opcode 1 = VideoConfig：明文 avcC 记录（looksLikeAvcC 判定）
- *  - opcode 0 = VideoFrame：ChaCha20-Poly1305 密封的「4 字节 BE 长度前缀 NAL 序列」，
- *    nonce = nonce64(帧计数)，计数按帧顺序从 0 递增
+ * Формат строки   (сравните DiPlay ScreenStream.kt):
+ * — каждое сообщение = 128 байт заголовок + тело; заголовок = [0..3] длина тела u32LE, [4] код операции,
+ * [8..15] NTP 32.32 LE время отправки; весь заголовок зашифрован AAD, а остальные байты равны нулю.
+ * — код операции 1 = VideoConfig: запись avcC в виде открытого текста (решение выглядит как AvcC)
+ * - код операции 0 = VideoFrame: ChaCha20-Poly1305 запечатанная «4-байтовая последовательность NAL с префиксом длины BE»,
+ * nonce = nonce64 (количество кадров), счетчик увеличивается с 0 в порядке следования кадров.
  *
- * 视频源：MediaCodec Surface 输入（H.264 硬编码），内容由画面源渲染
- * （隐形屏模式的 DualDisplayComposer 输入 Surface）。
+ * Источник видео  : ввод MediaCodec Surface (жестко закодированный H.264), контент отображается источником изображения.
+ * (поверхность ввода DualDisplayComposer в режиме невидимого экрана).
  */
 class VideoSender(
     private val host: String,
     private val dataPort: Int,
     /**
-     * 帧加密方式（catplay `ScreenFrameCodec` 三种形态）：
-     *  - ChaCha：已配对（pair-verify 派生流密钥）
-     *  - AesCtr：未配对会话（`et=NONE`，AES-128-CTR + 全零会话密钥）
+     * Метод шифрования кадра  (три формы кошачьей игры `ScreenFrameCodec`):
+     * — ChaCha: парный (ключ производного потока с проверкой пары)
+     * — AesCtr: непарный сеанс (`et=NONE`, AES-128-CTR + нулевой ключ сеанса)
      */
     private val frameCipher: StreamFrameCipher,
-    /** H.264 4:2:0 要求偶数尺寸——奇数高度会让编码器在首帧输入时进错误态（125% 缩放实测踩坑）。 */
+    /** H.264 4:2:0 требует четных размеров — нечетные высоты приведут к тому, что кодер перейдет в состояние ошибки при вводе первого кадра (масштабирование 125 % является ошибкой при реальных измерениях). */
     width: Int,
     height: Int,
-    /** 目标帧率（30/60）：编码器元数据 + 60fps 提码率；实际节奏由合成器驱动。 */
+    /** Целевая частота кадров (30/60): метаданные кодировщика + частота ускорения 60 кадров в секунду; фактический темп, управляемый синтезатором. */
     private val targetFps: Int = 30,
     private val log: (String) -> Unit,
-    /** 推流自然结束（对端断开等）时回调——CarPlay 会话真实结束的信号。 */
+    /** Обратный вызов, когда push-поток завершается естественным образом (одноранговый узел отключен и т. д.) — сигнал о том, что сеанс CarPlay действительно завершается. */
     private val onEnded: (() -> Unit)? = null,
     /**
-     * 屏幕流内 keepAlive 帧是否携带统计体（车机 /info 的 `keepAliveSendStatsAsBody`）。
-     * 奥迪 MMI 3315 声明 true → opcode=5 + bplist 统计体；否则 opcode=2 空帧。
-     * 真 iPhone/catplay 在视频持续推流时**仍然每秒发一次**——它不是视频流量的备份，
-     * 而是接收端屏幕上独立的存活信号（2026-10-19 奥迪 3315 两轮实测：缺它时
-     * RECORD 后 10.2s 整轮被 reset，视频/feedback/事件通道全都健康）。
+     * Содержит ли кадр KeepAlive в потоке экрана тело статистики (`keepAliveSendStatsAsBody` автомобиля/информации).
+     * Audi MMI 3315 объявляет true → код операции = 5 + тело статистики bplist; в противном случае код операции = 2 пустой кадр.
+     * True iPhone/catplay по-прежнему отправляет раз в секунду, когда видео продолжает передаваться - это не резервная копия видеотрафика,
+     * — это независимый сигнал выживания на принимающем экране (фактическое испытание двухколесного Audi 3315 19 октября 2026 г.: без него
+     * Весь раунд был сброшен через 10,2 секунды после       RECORD, и все каналы видео/обратной связи/событий работают нормально).
      */
     private val keepAliveWithStats: Boolean = false,
 ) {
@@ -61,14 +61,14 @@ class VideoSender(
     private var frameCounter = 0L
     private var configSent = false
 
-    /** AES-CTR 密钥流实例：状态必须跨帧连续（每帧新建会导致对端解出乱码）。 */
+    /** Пример потока ключей AES-CTR: состояние должно быть непрерывным во всех кадрах (новое создание каждого кадра приведет к декодированию искаженных символов одноранговым узлом). */
     private val aesStream: AirPlayCrypto.Aes128CtrStream? =
         (frameCipher as? StreamFrameCipher.AesCtr)?.let { AirPlayCrypto.Aes128CtrStream(it.key, it.iv) }
 
-    /** 上一次屏幕流 keepAlive 的时刻（uptimeMillis；0 = 尚未发过）。 */
+    /** Последний раз, когда поток экрана оставался активным (uptimeMillis; 0 = еще не отправлен). */
     private var lastKeepAliveAt = 0L
 
-    /** 两次 keepAlive 之间的帧数/字节数（统计体用，catplay ScreenSenderStats 同义）。 */
+    /** Количество кадров/байтов между двумя KeepAlives (для статистики это синоним «кошачьей игры» ScreenSenderStats). */
     private var framesSinceKeepAlive = 0
     private var bytesSinceKeepAlive = 0L
     private var keepAliveCount = 0L
@@ -76,19 +76,22 @@ class VideoSender(
     @Volatile
     private var framesSent = 0L
 
-    /** 推流是否活跃（静默降噪守卫判断用：start 失败时保持 false）。 */
+    /** Активен ли push-поток (определяется функцией тихого шумоподавления: сохраняет значение false при сбое запуска). */
     val isRunning: Boolean get() = running.get()
 
-    /** 已发送帧总数（英雄卡实时帧率 = 1s 轮询取差值）。 */
+    /** Общее количество отправленных кадров (частота кадров в реальном времени на карте героя = опрос в течение 1 секунды для определения разницы). */
     val framesSentTotal: Long get() = framesSent
 
     /**
-     * 提前建立屏幕数据端口 TCP 连接（幂等）。
+     * Предварительно устанавливает TCP-соединение порта данных экрана (идемпотентное).
      *
-     * 车机看门狗（2026-10-17 奥迪实测）：屏幕流 SETUP 之后 ~2s 内数据端口必须连上，
-     * 否则直接 reset 控制通道拆掉整轮会话。音频 SETUP 本身要 ~2.1s，若排在它后面，
-     * 端口连接必然迟到——所以协商音频前先调本方法。catplay 亦然（视频 SETUP 后立即
-     * finish_tx 连流，再协商音频）。
+     * Автомобильный сторожевой таймер       (проверен Audi 17 октября 2026 г.): порт данных должен быть подключен в
+     * течение примерно 2 секунд после НАСТРОЙКИ экрана.
+     * В противном случае напрямую сбросить канал управления и снести всю сессию. Сама НАСТРОЙКА звука занимает ~2,1
+     * с. Если это произойдет после этого,
+     * Соединения порта       неизбежно задерживаются, поэтому настройте этот метод перед согласованием звука. То же
+     * самое касается кошачьих игр (сразу после НАСТРОЙКИ видео).
+     * Finish_tx, затем согласуйте аудио).
      */
     fun openDataPort(): Boolean {
         val existing = socket
@@ -97,21 +100,24 @@ class VideoSender(
             val client = Socket()
             client.connect(InetSocketAddress(host, dataPort), 5_000)
             client.tcpNoDelay = true
-            // 推流是长连接：车机熄火/走出热点时链路常不发 RST，写入会阻塞在满窗口上，
-            // 编码器线程随之卡死（表现为「画面停在最后一帧」）。
-            TcpLiveness.configure(client, "视频数据口", log)
+            // Push-стриминг — это долгое подключение: при выключении автомобиля или выходе из хотспота ссылка часто не
+            // отправляет RST, и запись блокируется на полном окне.
+
+            // Затем поток кодировщика застревает (это отображается как «изображение останавливается на последнем кадре»).
+            TcpLiveness.configure(client, "Порт видеоданных", log)
             socket = client
-            log("VIDEO: 数据端口已连通 $host:$dataPort（等 RECORD 后启动编码器）")
+            log("ВИДЕО: Подключен порт данных $host:$dataPort (запустите кодер после ожидания ЗАПИСИ)")
             true
         } catch (error: Exception) {
-            log("VIDEO: 数据端口连接失败 - ${error.message}")
+            log("ВИДЕО: Не удалось подключиться к порту данных — ${error.message}")
             false
         }
     }
 
     /**
-     * 启动编码与推流。编码器输入 Surface 通过 [onSurfaceReady] 交给调用方渲染
-     * （隐形屏模式下由 DualDisplayComposer 的合成画布填充）。
+     * начинает кодирование и потоковую передачу. Входная поверхность кодировщика передается вызывающему объекту для
+     * рендеринга через [onSurfaceReady].
+     * (заполнен составным холстом DualDisplayComposer в режиме невидимого экрана).
      */
     fun start(onSurfaceReady: (Surface) -> Unit): Boolean {
         if (running.get()) return true
@@ -125,7 +131,7 @@ class VideoSender(
                     ((width * height * 6L).toInt()).coerceIn(2_000_000, 10_000_000) *
                         if (targetFps >= 60) 1.5f else 1f
                 ).toInt().coerceAtMost(15_000_000)
-            log("VIDEO: 启动编码器 ${width}x$height@$targetFps ${bitrate / 1_000_000}Mbps（端口已连通）")
+            log("ВИДЕО: Запускаем энкодер ${width}x$height@$targetFps ${bitrate / 1_000_000}Mbps (порт подключен)")
 
             val format =
                 MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
@@ -133,12 +139,16 @@ class VideoSender(
                     setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                     setInteger(MediaFormat.KEY_FRAME_RATE, targetFps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                    // 固定 H.264 level 4.0（SPS level_idc=40，真 iPhone 同款流形态）。
-                    // 不固定时编码器按「分辨率+帧率」自动选：默认 30fps 下 1412x654
-                    // 合法落入 level 3.2——奥迪 DELPHI 解码器对该 level 静默不渲染
-                    // （TCP 照收、会话活着、车机黑屏，2026-10-22 奥迪 0628 真机日志
-                    // 定谳：同机 level=40 全部成功、level=32 首例黑屏）。60fps 时编码
-                    // 器本来就选 4.0，此设置对它无变化。
+                    // Исправлен уровень H.264 4.0 (SPS level_idc=40, тот же формат потока, что и на реальном iPhone).
+                    // Если он не фиксирован, кодер автоматически выбирается в соответствии с «разрешением + частотой кадров»: по
+                    // умолчанию — 1412x654 при 30 кадрах в секунду.
+
+                    // Юридически попадает на уровень 3.2 - декодер Audi DELPHI молча не отображает этот уровень
+                    // (TCP все еще получен, сеанс активен, экран автомобиля черный, журнал реальной машины Audi 0628 от 22 октября 2026 г.
+                    // Дин Цзе: Все успехи на уровне = 40 на одной машине, черный экран впервые на уровне = 32). Закодировано со
+                    // скоростью 60 кадров в секунду
+
+                    // Изначально на устройстве установлена версия 4.0, и эта настройка не подлежит изменению.
                     runCatching {
                         setInteger(
                             MediaFormat.KEY_LEVEL,
@@ -147,11 +157,16 @@ class VideoSender(
                     }
                 }
             val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            // 个别编码器不接受 level 指定（configure 抛异常=视频全灭），降级为不指定重试
+            // Некоторые кодировщики не принимают указание уровня (конфигурация выдает исключение = видео полностью
+            // уничтожено), понизьте версию до не указывающей и повторите попытку.
+
             try {
                 codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             } catch (levelRejected: Exception) {
-                log("VIDEO: 指定 level 4.0 被编码器拒绝（${levelRejected.message}）——回退自动选择（部分车机可能黑屏）")
+                log(
+                    "ВИДЕО: Указанный уровень 4.0 отвергается энкодером (${levelRejected.message}) - возврат к " +
+                        "автоматическому выбору (на некоторых машинах может быть черный экран)",
+                )
                 val fallback =
                     MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                         setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -176,7 +191,7 @@ class VideoSender(
             }
             true
         } catch (error: Exception) {
-            log("VIDEO: 启动失败 - ${error.message}")
+            log("ВИДЕО: Ошибка запуска — ${error.message}")
             stop()
             false
         }
@@ -194,11 +209,13 @@ class VideoSender(
     }
 
     /**
-     * 立即编码一个关键帧（车机 `/command` 的 `forceKeyFrame` 请求）。
+     * немедленно кодирует ключевой кадр (запрос `forceKeyFrame` для машины `/command`).
      *
-     * 车机解不出画面时会反复要 I 帧；我们本身每秒一个，但**要帧请求必须立即响应**——
-     * 否则车机可能一直卡在「等下一个 I 帧」的状态，表现就是「连上了但没画面」
-     * （宝马 iD9 2026-10-20 实测：会话刚起时收到一次 forceKeyFrame）。
+     * Когда автомобиль не может разрешить изображение, он неоднократно запрашивает I-кадры; у нас есть один кадр в
+     * секунду, но на запрос кадра нужно отвечать немедленно——
+     * В противном случае автомобиль может зависнуть в состоянии «ожидание следующего I-кадра», а производительность
+     * «подключена, но нет изображения».
+     * (фактическое тестирование BMW iD9 20 октября 2026 г.: ForceKeyFrame был получен один раз, когда сеанс только начался).
      */
     fun requestKeyFrame(): Boolean {
         val codec = encoder ?: return false
@@ -208,12 +225,12 @@ class VideoSender(
             codec.setParameters(params)
             true
         } catch (error: Exception) {
-            log("VIDEO: 请求关键帧失败 - ${error.message}")
+            log("ВИДЕО: не удалось запросить ключевой кадр — ${error.message}")
             false
         }
     }
 
-    // ---- 编码输出 → 协议封装发送 ----
+    // ---- Кодирование вывода → Инкапсуляция и отправка протокола ----
 
     private fun drainEncoder() {
         val codec = encoder ?: return
@@ -225,9 +242,13 @@ class VideoSender(
                     try {
                         codec.dequeueOutputBuffer(bufferInfo, 10_000)
                     } catch (error: Exception) {
-                        // 编码器进错误态（如非法尺寸首帧）：必须留痕——静默 break 曾让
-                        // 「零帧推流 4 秒后断开」无从排查（接收端只见 peer EOF）
-                        log("VIDEO: 编码器取帧异常，停止推流 - ${error.message}")
+                        // Кодер входит в состояние ошибки (например, первый кадр недопустимого размера): должен остаться след — разрешен
+                        // тихий перерыв
+
+                        // «Отправка нулевого кадра отключается через 4 секунды» невозможно проверить (принимающая сторона видит только
+                        // EOF однорангового узла)
+
+                        log("ВИДЕО: Кодеру не удалось получить кадры и остановить потоковую передачу - ${error.message}")
                         break
                     }
                 when {
@@ -250,24 +271,33 @@ class VideoSender(
                 }
             }
         } catch (error: Exception) {
-            // 视频数据口断开（如接收端屏幕关闭收摊会话）：只终止推流，绝不冒泡——
-            // 后台线程未捕获异常会杀死整个进程（曾导致锁屏后 app 消失）
-            log("VIDEO: 推流中止 - ${error.message}（等待接收端恢复后重连）")
+            // Порт видеоданных отключен (например, конечный экран приема закрыт и сеанс закрыт): завершается только поток
+            // push-уведомлений и никогда не всплывает ——
+
+            // Неперехваченные исключения в фоновом потоке уничтожат весь процесс (из-за чего приложение однажды исчезло
+            // после блокировки экрана).
+
+            log(
+                "ВИДЕО: потоковая передача прервана — ${error.message} (ожидание восстановления принимающей стороны и " +
+                    "повторное подключение)",
+            )
         } finally {
             stop()
-            // 会话真实结束信号（静默降噪解除 / 状态收尾）
+            // Истинный сигнал окончания сеанса (отключение тихого шумоподавления/окончание статуса)
             runCatching { onEnded?.invoke() }
         }
     }
 
     /**
-     * 屏幕流 keepAlive 帧（catplay `ScreenTransmitSession::create_keep_alive`，1s 间隔）。
+     * экранный поток KeepAlive кадр (кошачья игра `ScreenTransmitSession::create_keep_alive`, интервал 1 с).
      *
-     * 与 UDP keepAlive / RTSP feedback 是三条相互独立的存活信号；接收端（奥迪 3315）
-     * 只看视频帧不够——缺这条时 RECORD 后约 10s 会 reset 整轮会话（2026-10-19 两轮
-     * 实测）。帧是**明文**的（catplay 仅对 opcode=VideoFrame 加密），因此不消耗 ChaCha
-     * 帧计数；带统计体时 opcode=5，并把 body 长度写进头部 params[14] 的后 4 字节
-     * （f32 LE），与 catplay 逐字节一致。
+     * и обратная связь UDP KeepAlive/RTSP — это три независимых сигнала выживания; приемная сторона (Ауди 3315)
+     * Только просмотра видеокадров недостаточно - при его отсутствии вся сессия будет сброшена примерно через 10
+     * секунд после ЗАПИСИ (два раунда 19.10.2026).
+     * фактическое измерение). Кадр представляет собой **открытый текст** (catplay шифрует только код операции =
+     * VideoFrame), поэтому ChaCha не используется.
+     * количество кадров; со статистическим телом, код операции = 5, и запишите длину тела в последние 4 байта параметров заголовка [14]
+     * (f32 LE), побайтно идентичен кошачьей игре.
      */
     private fun maybeSendKeepAlive(output: java.io.OutputStream) {
         if (!running.get()) return
@@ -305,18 +335,18 @@ class VideoSender(
         val rawSps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 7 }
         val pps = nalUnits.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1F) == 8 }
         if (rawSps == null || pps == null) {
-            log("VIDEO: csd 缺少 SPS/PPS（${nalUnits.size} 个 NAL），跳过 config")
+            log("ВИДЕО: в csd отсутствует SPS/PPS (NAL ${nalUnits.size}), пропуск конфигурации")
             return
         }
-        // level_idc 补丁到 4.0（关键帧内嵌 SPS 同样会打补丁，见 sendVideoFrame）
+        // level_idc исправлен до версии 4.0 (встроенный ключевой кадр SPS также будет исправлен, см. sendVideoFrame)
         val sps = patchSpsLevel(rawSps)
         val avcc = ByteArrayOutputStream(8 + sps.size + pps.size)
         avcc.write(1)
-        avcc.write(sps[1].toInt()) // profile
-        avcc.write(sps[2].toInt()) // compat
-        avcc.write(sps[3].toInt()) // level
-        avcc.write(0xFF) // 6 位保留 + 2 位长度尺寸-1（4 字节）
-        avcc.write(0xE1) // 3 位保留 + 5 位 SPS 数
+        avcc.write(sps[1].toInt()) // профиль
+        avcc.write(sps[2].toInt()) // совместимость
+        avcc.write(sps[3].toInt()) // уровень
+        avcc.write(0xFF) // 6 бит зарезервировано + 2 бита, размер длины - 1 (4 байта)
+        avcc.write(0xE1) // 3-значный зарезервированный + 5-значный номер SPS
         avcc.write((sps.size ushr 8) and 0xFF)
         avcc.write(sps.size and 0xFF)
         avcc.write(sps)
@@ -325,23 +355,29 @@ class VideoSender(
         avcc.write(pps.size and 0xFF)
         avcc.write(pps)
         val body = avcc.toByteArray()
-        // 头部必须与 catplay `ScreenFrame::config` 一致，否则部分车机（Audi/DELPHI 实测：
-        // 连接与触摸都正常、车机屏全黑）会把后续加密帧按明文 NAL 解析 → 解码失败：
-        //  - small_param[1] |= ScreenFlag::Encrypted(0x04)：声明「视频帧是加密的」
-        //  - params[1] = (width, height) 两个 f32 LE：车机据此建立解码器画布
-        //  - params[0] 归零（catplay 的 config 不带 PTS；只有 VideoFrame 才写 params[0]）
-        // 旧实现三项都没写——DiPlay/WinPlay 只读 body、不校验头，所以测试台一直正常，
-        // 真车（Audi 4851）却黑屏（2026-10-19 用户日志）。
+        // Головка должна соответствовать кошачьей игре `ScreenFrame::config`, в противном случае некоторые автомобили
+        // (фактические измерения Audi/DELPHI:
+
+        // Если соединение и касание в норме, а экран автомобиля полностью черный), последующие зашифрованные кадры будут
+        // анализироваться как открытый текст NAL → декодирование не удастся:
+
+        //  - small_param[1] |= ScreenFlag::Encrypted(0x04): объявляет «Видеокадры зашифрованы»
+        //  - params[1] = (ширина, высота) два f32 LE: автомобильная машина соответствующим образом строит холст декодера
+        //  - Params[0] обнулены (конфиг catplay не содержит PTS; только VideoFrame пишет params[0])
+        // Старая реализация не записывала три элемента — DiPlay/WinPlay только читали тело и не проверяли заголовок,
+        // поэтому тестовый стенд всегда был нормальным.
+
+        // Настоящая машина (Audi 4851) имеет черный экран (журнал пользователя 19 октября 2026 г.).
         val header = buildVideoConfigHeader(body.size, width, height)
         output.write(header)
         output.write(body)
         output.flush()
         configSent = true
         log(
-            "VIDEO: ✓ VideoConfig 已发送 avcC=${body.size}B（SPS ${sps.size}B/PPS ${pps.size}B，" +
+            "ВИДЕО: ✓ VideoConfig отправил avcC=${body.size}B (SPS ${sps.size}B/PPS ${pps.size}B," +
                 "profile=${sps[1].toInt() and 0xFF} level=${sps[3].toInt() and 0xFF} " +
                 "flags=0x%02x ${width}x$height）".format(header[6].toInt() and 0xFF) +
-                "\n  ↳ 头部前 24 字节=" + header.take(24).joinToString(" ") { "%02x".format(it) },
+                "\n ↳ 24 байта перед заголовком =" + header.take(24).joinToString(" ") { "%02x".format(it) },
         )
     }
 
@@ -352,7 +388,7 @@ class VideoSender(
         output: java.io.OutputStream,
     ) {
         if (!configSent) {
-            log("VIDEO: 丢弃一帧（config 尚未发送）")
+            log("ВИДЕО: Пропал кадр (конфигурация еще не отправлена)")
             return
         }
         val annexB = ByteArray(size)
@@ -360,8 +396,12 @@ class VideoSender(
         val nalUnits = splitAnnexB(annexB)
         if (nalUnits.isEmpty()) return
 
-        // 关键帧内嵌的 SPS 同步打 level 补丁：车机会用帧内 SPS 更新解码器参数，
-        // 只改 csd 不改帧内 SPS 的话，收到第一个关键帧就又变回低 level 了
+        // Синхронное исправление уровня SPS, встроенное в ключевые кадры: автомобиль будет использовать внутрикадровый
+        // SPS для обновления параметров декодера.
+
+        // Если вы измените только csd без изменения внутрикадрового SPS, он вернется на низкий уровень после получения
+        // первого ключевого кадра.
+
         val packed = ByteArrayOutputStream(size)
         for (nal in nalUnits) {
             val out =
@@ -374,11 +414,13 @@ class VideoSender(
         }
         val plain = packed.toByteArray()
 
-        // 加密方式按会话的 et 选择（catplay ScreenFrameCodec）：
-        //  - ChaCha：header 作 AAD，body 长度含 16B tag；
-        //  - AES-128-CTR：无 tag、不改长度，密钥流跨帧连续。
-        // keepAlive/config 帧在两种模式下都不加密。头只能构造一次——ChaCha 的 AAD
-        // 必须是最终发出的那 128 字节（重复构造会带不同时间戳，对端解密必然失败）。
+        // Метод шифрования выбирается et сеанса (catplay ScreenFrameCodec):
+        //  - ChaCha: заголовок используется как AAD, а длина тела включает тег 16B;
+        //  - AES-128-CTR: нет тегов, нет изменения длины, поток ключей непрерывен во всех кадрах.
+        // Кадры KeepAlive/config не шифруются ни в одном из режимов. Головы можно построить только один раз — AAD ChaCha
+        // Это должны быть 128 байт, наконец отправленные (повторяющаяся конструкция приведет к появлению разных
+        // временных меток, и расшифровка узла неизбежно завершится неудачей).
+
         val header =
             buildHeader(
                 OP_FRAME,
@@ -402,11 +444,11 @@ class VideoSender(
         framesSinceKeepAlive++
         bytesSinceKeepAlive += plain.size.toLong()
         if (keyFrame || framesSent <= 3 || framesSent % 150 == 0L) {
-            log("VIDEO: 帧 #$framesSent ${plain.size}B${if (keyFrame) " (key)" else ""} 已发送")
+            log("ВИДЕО: Кадр #$framesSent ${plain.size}B${if (keyFrame) " (key)" else ""} Отправлено")
         }
     }
 
-    /** 128 字节消息头：u32LE body 长度、opcode、NTP 32.32 LE 时间戳，其余为零。 */
+    /** 128-байтовый заголовок сообщения: длина тела u32LE, код операции, временная метка NTP 32.32 LE, остальные равны нулю. */
     private fun buildHeader(
         opcode: Int,
         bodyLength: Int,
@@ -438,7 +480,7 @@ class VideoSender(
         output.flush()
     }
 
-    /** 按 00 00 00 01 / 00 00 01 起始码切分 AnnexB 码流为 NAL 列表。 */
+    /** Разделите поток кода Приложения B на список NAL в соответствии со стартовым кодом 00 00 00 01/00 00 01. */
     private fun splitAnnexB(bytes: ByteArray): List<ByteArray> {
         val units = ArrayList<ByteArray>()
         val starts = ArrayList<Int>()
@@ -481,23 +523,25 @@ class VideoSender(
         private const val TAG_SIZE = 16
 
         /**
-         * 头部位标志（catplay `ScreenFlag`）：写进 `small_param[1]`（头部偏移 6）。
-         * `Encrypted = 1<<2`：视频帧是 ChaCha 密封的；VideoConfig 里必须声明，
-         * 否则车机按明文 NAL 解析 → 解码失败黑屏（会话与触摸仍正常）。
+         * Флаг части головы  (кошачья игра `ScreenFlag`): запись в `small_param[1]` (смещение головы 6).
+         * `Encrypted = 1<<2`: Видеокадр запечатан ChaCha; его необходимо объявить в VideoConfig,
+         * Иначе машина будет парсить по простому тексту NAL → декодирование не получится и экран будет черным (сессия и тач пока в норме).
          */
         private const val SCREEN_FLAG_ENCRYPTED = 0x04
 
-        /** VideoConfig 头部 `params[1]` 的偏移：8 + 1×8，两个 f32 LE = 宽、高。 */
+        /** Смещение заголовка VideoConfig `params[1]`: 8 + 1×8, два f32 LE = ширина, высота. */
         private const val CONFIG_WIDTH_HEIGHT_OFFSET = 16
 
-        /** 屏幕流 keepAlive 间隔（catplay `DEFAULT_KEEP_ALIVE` = 1s）。 */
+        /** Интервал KeepAlive потока экрана (кошачья игра `DEFAULT_KEEP_ALIVE` = 1 с). */
         private const val KEEPALIVE_INTERVAL_MS = 1_000L
 
         /**
-         * 构造屏幕流 keepAlive 帧（明文头 + 可选 bplist 统计体）。
+         * создает кадр KeepAlive потока экрана (обычный текстовый заголовок + необязательное тело статистики bplist).
          *
-         * 拆成纯函数是为了单测：帧格式一旦写错（opcode/body 长度字段/统计体键名），
-         * 接收端会静默忽略而不报错——现象仍是 10 秒后被拆链，排查成本极高。
+         * разделен на чистые функции для одиночного тестирования: если формат кадра написан неправильно (код
+         * операции/поле длины тела/имя статистического ключа тела),
+         * Принимающая сторона молча проигнорирует его, не сообщая об ошибке — явление все равно отключается через 10
+         * секунд, а затраты на устранение неполадок чрезвычайно высоки.
          */
         internal fun buildKeepAliveFrame(
             withStats: Boolean,
@@ -507,7 +551,7 @@ class VideoSender(
         ): ByteArray {
             val body =
                 if (withStats) {
-                    // 字段名对照 catplay ScreenSenderStats（serde camelCase）
+                    // Сравнение имен полей Catplay ScreenSenderStats (serde CamelCase)
                     BinaryPlist.encode(
                         linkedMapOf(
                             "txUsageAvg" to bytesPerSecond,
@@ -521,14 +565,14 @@ class VideoSender(
                     ByteArray(0)
                 }
             val header = ByteArray(HEADER_LEN)
-            // 头部布局：u32LE body 长度、u8 opcode、3 字节小参数、15 × 8 字节参数
+            // Макет заголовка: длина тела u32LE, код операции u8, небольшие параметры по 3 байта, параметры по 15 × 8 байт.
             header[0] = (body.size and 0xFF).toByte()
             header[1] = ((body.size ushr 8) and 0xFF).toByte()
             header[2] = ((body.size ushr 16) and 0xFF).toByte()
             header[3] = ((body.size ushr 24) and 0xFF).toByte()
             header[4] = (if (body.isEmpty()) OP_KEEP_ALIVE else OP_KEEP_ALIVE_WITH_BODY).toByte()
             if (body.isNotEmpty()) {
-                // params[14]（偏移 8+14*8=120）：前 4 字节 0.0f，后 4 字节 body 长度 f32 LE
+                // params[14] (смещение 8+14*8=120): первые 4 байта 0.0f, последние 4 байта длина тела f32 LE
                 writeLittleEndianFloat(header, 120, 0f)
                 writeLittleEndianFloat(header, 124, body.size.toFloat())
             }
@@ -536,13 +580,14 @@ class VideoSender(
         }
 
         /**
-         * VideoConfig 帧头（catplay `ScreenFrame::config` 逐字节对齐）：
-         *  - `small_param[1]`（偏移 6）置 Encrypted(0x04) —— 声明后续视频帧是密封的
-         *  - `params[1]`（偏移 16）= 宽、高两个 f32 LE —— 车机据此建解码器画布
-         *  - `params[0]`（偏移 8..16）保持 0 —— config 不带 PTS
+         * Заголовок кадра  VideoConfig (выровнен побайтно по Catplay `ScreenFrame::config`):
+         * — `small_param[1]` (смещение 6) Set Encrypted(0x04) — объявляет, что последующие видеокадры запечатаны.
+         * - `params[1]` (смещение 16) = ширина и высота f32 LE - машина автомобиля строит холст декодера соответственно
+         * - `params[0]` (смещение 8..16) остается 0 - конфиг без PTS
          *
-         * 拆成纯函数是为了单测：真车（Audi 4851）缺这两项时**会话不断、触摸正常、屏全黑**，
-         * 日志里看不出任何错误，极难排查。
+         * разбит на чистые функции для единичного тестирования: когда в реальной машине (Audi 4851) этих двух пунктов не
+         * хватает, разговор продолжается, тач нормальный, а экран полностью черный.
+         * В журнале           не видно ошибок, что чрезвычайно затрудняет устранение неполадок.
          */
         internal fun buildVideoConfigHeader(
             bodySize: Int,
@@ -578,22 +623,24 @@ class VideoSender(
     }
 }
 
-/** H.264 level_idc 目标值：4.0（0x28）。真 iPhone 同款流形态。 */
+/** Целевое значение H.264 level_idc: 4,0 (0x28). Та же форма потока, что и у настоящего iPhone. */
 private const val TARGET_LEVEL_IDC = 40
 
 /**
- * 把 SPS 的 level_idc 补丁到 4.0（3.1→4.0 是放宽约束，安全）。
+ * Исправьте level_idc SPS до 4.0 (3.1→4.0 — для ослабления ограничений и безопасности).
  *
- * 为什么不改用 MediaFormat.KEY_LEVEL：实测（MagicOS/Android 17）编码器**静默忽略**
- * 该键——不抛异常、SPS 里仍是 3.1。只能后处理。
+ * Почему бы вместо этого не использовать MediaFormat.KEY_LEVEL: протестировано (MagicOS/Android 17) кодировщик **Тихий игнор**
+ * Этот ключ не генерирует исключение и по-прежнему имеет версию 3.1 в SPS. Возможна только постобработка.
  *
- * 为什么安全：① level_idc 在 SPS 的固定偏移（nal[3]），单字节改值不改长度；
- * ② 3.1→4.0 只放宽 maxMBPS/maxFS/maxBR 上限，解码器按 4.0 分配的资源对 3.1 编码
- * 的流只多不少；③ 0x28 非零且不会引入 emulation prevention 序列（00 00 0x）。
- * 若 SPS 本来就 ≥4.0（如 60fps 时自动选 4.2），保持原值不降级。
+ * Почему   безопасен: ① level_idc имеет фиксированное смещение в SPS (nal[3]), и изменение значения одного байта не меняет длину;
+ * ② 3.1→4.0 ослабляет только верхний предел maxMBPS/maxFS/maxBR, а декодер кодирует 3.1 в соответствии с ресурсами, выделенными 4.0.
+ * Поток   намного больше; ③ 0x28 не равен нулю и не вводит последовательность предотвращения эмуляции (00 00 0x).
+ * Если исходное значение SPS составляет ≥4,0 (например, 4,2 автоматически выбирается при частоте 60 кадров в
+ * секунду), исходное значение будет сохранено без понижения.
  *
- * 动机：奥迪 DELPHI 解码器对 level 3.1/3.2 的流静默不渲染（TCP 照收、会话正常、
- * 车机黑屏；2026-10-22 奥迪 0628 真机日志：同机 level=40 全部成功、level=32 首例黑屏）。
+ * Мотивация  : декодер Audi DELPHI молча не отображает потоки уровня 3.1/3.2 (TCP все еще получает, сеанс нормальный,
+ * машина машина черный экран; 22 октября 2026 г. Журнал реальной машины Audi 0628: тот же уровень машины = 40,
+ * все успешно, уровень = 32, первый черный экран).
  */
 internal fun patchSpsLevel(sps: ByteArray): ByteArray {
     if (sps.size < 4) return sps

@@ -11,9 +11,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 发送端会话对 mock 配件端的端到端回环测试：
- * 内存双工流两端各跑一个链路通道，mock 按 DiPlay/xcertplay 的配件侧时序应答，
- * 验证 Phase 1 全序列（识别→MFi 跳过→HID→WiFi 配置→CarPlay 启动→通知）。
+ * Сквозная петлевая проверка сеанса отправителя с фиктивным аксессуаром:
+ * запускает канал связи на обоих концах дуплексного потока памяти. Макет реагирует в соответствии с
+ * синхронизацией DiPlay/xcertplay на стороне аксессуаров.
+ * Полная последовательность этапа проверки 1 (Идентификация→Пропуск MFi→HID→Конфигурация Wi-Fi→Запуск CarPlay→Уведомление).
  */
 class Iap2SenderSessionTest {
     @Test
@@ -49,10 +50,11 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * 奥迪 MMI 9310 形态：识别帧只声明发 0x5703/0xea03（不发 0x4301），Phase 1
-     * 因此不等待；车机在保活期间（Phase 1 之后）才补发 0x4301。
-     * 旧实现把这条消息当 keep-alive 只记长度，配对永远不会重启——本用例锁住
-     * 「晚到 0x4301 必须解析成端点并回调」这一行为。
+     * Форма  Audi MMI 9310: В рамке распознавания указывается только 0x5703/0xea03 (0x4301 не передается), Фаза 1
+     * Поэтому       не ждет; машина перевыпустит 0x4301 в течение периода поддержки активности (после фазы 1).
+     * Старая реализация обрабатывает это сообщение как подтверждение активности и запоминает только длину, а
+     * сопряжение никогда не перезапускается — этот вариант использования заблокирован.
+     * «Поздний 0x4301 должен быть проанализирован в конечную точку и вызван обратно».
      */
     @Test
     fun lateStartSessionAfterPhaseOneTriggersEndpointUpdate() {
@@ -80,14 +82,16 @@ class Iap2SenderSessionTest {
             )
 
         val phaseOne = session.run(timeoutMillis = 10_000L)
-        // 车机声明不发 0x4301：Phase 1 必须立即返回空端点，而不是白等 3s 窗口
+        // Декларация транспортного средства не отправляет 0x4301: Фаза 1 должна немедленно вернуть пустую конечную
+        // точку, а не ждать трехсекундного окна.
+
         assertTrue(phaseOne.ipAddresses.isEmpty())
 
         val pump = Thread({ session.pumpIncomingForever() }, "phone-pump")
         pump.isDaemon = true
         pump.start()
 
-        assertTrue("晚到 0x4301 未触发端点回调", updateLatch.await(5, TimeUnit.SECONDS))
+        assertTrue("Прибытие поздно 0x4301 Обратный вызов конечной точки не запущен", updateLatch.await(5, TimeUnit.SECONDS))
         val late = updates.get()
         assertNotNull(late)
         assertEquals("MockAP", late!!.ssid)
@@ -101,9 +105,10 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * PR #19（凯迪拉克 CT5）：新协议车机声明会发 0x4301 但窗口内未到——
-     * **不拆链**，返回空端点进入保活；保活泵把晚到的 0x4301 解析成完整端点
-     * 经 onEndpointUpdate 回调（Audi MMI 9310 晚到 2 分 35 秒的同族形态）。
+     * PR № 19 (Cadillac CT5): Заявление о новом автомобиле, согласованном с машиной, будет отправлено 0x4301, но окно не пришло——
+     * **не разрывает цепочку**, возвращает пустую конечную точку и переходит в режим поддержки активности; насос
+     * поддержки активности анализирует поздний 0x4301 в полную конечную точку
+     * через обратный вызов onEndpointUpdate (Audi MMI 9310 в своей родственной форме прибывает на 2 минуты 35 секунд позже).
      */
     @Test
     fun newProtocolCarWithoutCredentialsKeepsLinkForLateStartSession() {
@@ -141,7 +146,7 @@ class Iap2SenderSessionTest {
         val pumpThread = Thread({ session.pumpIncomingForever() }, "phone-pump")
         pumpThread.isDaemon = true
         pumpThread.start()
-        assertTrue("晚到 0x4301 未在 10s 内经 onEndpointUpdate 回调", updateLatch.await(10, TimeUnit.SECONDS))
+        assertTrue("Прибытие поздно 0x4301 Не здесь 10s Нэй Цзин onEndpointUpdate обратный вызов", updateLatch.await(10, TimeUnit.SECONDS))
         val late = updates.get()
         assertNotNull(late)
         assertEquals("MockAP", late!!.ssid)
@@ -153,14 +158,15 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * **奥迪 MMI 3315 真实形态必须发 0x5702**（2026-10-22 回归的钉子）。
+     * **Настоящая версия Audi MMI 3315 должна иметь номер 0x5702** (возврат гвоздя 22 октября 2026 г.).
      *
-     * 它的可收清单只有 5 项且不含 0x5702，旧实现据此判「跳过旧协议」→ 整轮一次
-     * 0x5702 都没发 → 车机 AirPlay 服务**始终没起来**（45 次连接全部 ECONNREFUSED，
-     * `_airplay._tcp` 也没广播）。而同一台车在旧版本（无脑发 0x5702）下 122~368ms
-     * 就回 0x5703，入网 30ms 后端口即可连通。
+     * В списке дебиторской задолженности       всего 5 позиций, в него не входит 0x5702. Старая реализация будет
+     * оценивать «пропустить старый протокол» на основании этого → один раз за весь раунд.
+     * 0x5702 не были отправлены → Служба AirPlay на автомобиле **никогда не запускалась** (все 45 подключений были ECONNREFUSED,
+     * `_airplay._tcp` тоже не транслируется). И та же машина в старой версии (0x5702) — 122~368мс.
+     * возвращается к 0x5703, и порт можно подключить через 30 мс после подключения к сети.
      *
-     * 判据是 `ReceiverProfile.wifiGen`：稀疏清单 → UNKNOWN → 保守走旧协议。
+     * Критерием для       является `ReceiverProfile.wifiGen`: разреженный список → НЕИЗВЕСТНО → консервативный старый протокол.
      */
     @Test
     fun sparseDeclarationsStillSendWifiRequest() {
@@ -181,8 +187,11 @@ class Iap2SenderSessionTest {
                 deviceName = "test-device",
             ).run(timeoutMillis = 10_000L)
 
-        assertTrue("奥迪 3315 形态必须发 0x5702（跳过会让车机不开 AirPlay 服务）", accessory.sawWifiRequest)
-        // 且必须采用 0x5703 给的凭据
+        assertTrue(
+            "Ауди 3315 Форма должна быть 0x5702（Пропуск приведет к остановке движения автомобиля. AirPlay услуга）",
+            accessory.sawWifiRequest,
+        )
+        // И должен использовать учетные данные, предоставленные 0x5703.
         assertEquals("MockAP", endpoint.ssid)
         assertEquals("secret-passphrase", endpoint.passphrase)
         assertEquals(36, endpoint.channel)
@@ -192,11 +201,11 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * **宝马 iD9 形态不能发 0x5702**（同一处改动的另一半钉子）。
+     * **Форма BMW iD9 не может выдавать 0x5702** (вторую половину той же модификации).
      *
-     * 它两份清单都完整（合计 ≥10 项）仍无 0x57xx → 画像判 NEW → 跳过 0x5702，
-     * AP 信息完全由 0x4301 自带。若误发 0x5702 并傻等 0x5703，就是 8b64147
-     * 当初要修的「每轮死等超时」老毛病。
+     * Оба его списка полны (всего ≥10 элементов), но 0x57xx все еще нет → Оценка изображения НОВОЕ → Пропустить 0x5702,
+     * Информация о точке доступа       полностью предоставлена 0x4301. Если вы по ошибке отправите 0x5702 и дождетесь 0x5703, это 8b64147.
+     * изначально хотел исправить старую проблему «таймаута для каждого раунда ожидания смерти».
      */
     @Test
     fun fullDeclarationsWithoutOldProtocolSkipWifiRequest() {
@@ -217,8 +226,11 @@ class Iap2SenderSessionTest {
                 deviceName = "test-device",
             ).run(timeoutMillis = 10_000L)
 
-        assertTrue("宝马 iD9 形态不应发 0x5702（AP 信息由 0x4301 自带）", !accessory.sawWifiRequest)
-        // AP 信息来自 0x4301 的无线组
+        assertTrue(
+            "БМВ iD9 Форма не должна быть 0x5702（AP Информация предоставлена 0x4301 Принесите свой собственный）",
+            !accessory.sawWifiRequest,
+        )
+        // Информация о точке доступа поступает от беспроводной группы 0x4301.
         assertEquals("MockAP", endpoint.ssid)
         assertEquals(49152, endpoint.airPlayPort)
 
@@ -227,23 +239,29 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * **无新凭据但知道热点 SSID 时不得拆链**（2026-10-22 奥迪回归的第二根钉子）。
+     * **Не разрывайте ссылку, не имея новых учетных данных, но зная SSID точки доступа** (Второй гвоздь в
+     * возвращении Audi 22 октября 2026 г.).
      *
-     * 关键时序证据：真 iPhone 14:23:02 入网、14:23:23 才收到车机 ctrl 邀请
-     * （21 秒）；旧实现「8 秒没 0x4301 就抛异常」每轮自杀，车机侧的等待永远
-     * 从 0 重新计时。只要还知道该连哪个热点，就必须让主控按当前网络继续等。
+     * Ключевое доказательство времени: настоящий iPhone подключился к сети в 14:23:02 и получил приглашение ctrl в 14:23:23.
+     * (21 секунда); старая реализация «выдает исключение, если 0x4301 не достигается в течение 8 секунд» совершает
+     * самоубийство каждый раунд, и сторона автомобиля ждет вечно
+     * перезапускает время с 0. Пока вы все еще знаете, к какой точке доступа подключаться, вы должны позволить
+     * главному элементу управления продолжать ждать в соответствии с текущей сетью.
      */
     @Test
     fun knownCarSsidAvoidsCredentiallessAbort() {
         val endpoint = credentiallessEndpoint("Audi_MMI_3315_5GHz")
-        assertNotNull("已知热点时必须合成兜底端点，而不是拆链", endpoint)
+        assertNotNull(
+            "Когда горячая точка известна, необходимо синтезировать нижнюю конечную точку.，вместо того, чтобы разорвать цепь",
+            endpoint,
+        )
         assertEquals("Audi_MMI_3315_5GHz", endpoint!!.ssid)
-        // 必须是「不自足端点」：主控据此才走「等 ctrl 邀请 → mDNS/网关」路径
+        // Это должна быть «несамостоятельная конечная точка»: мастер соответственно выберет путь «ожидание приглашения ctrl → mDNS/шлюз».
         assertEquals(0, endpoint.airPlayPort)
         assertTrue(endpoint.ipAddresses.isEmpty())
     }
 
-    /** 连 SSID 都不知道才允许失败（继续等只会空转）。 */
+    /** Даже если не знать, что SSID может выйти из строя (продолжение ожидания приведет только к простою). */
     @Test
     fun noCredentialAndNoKnownSsidStillFails() {
         assertEquals(null, credentiallessEndpoint(null))
@@ -252,11 +270,14 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * Audi MMI 3315 形态：0x4301 的地址字段按定长 NUL 填充（IPv6 后 22 个、IPv4 后 5 个）。
-     * 旧实现只去掉**一个**尾部 NUL，得到 `"10.174.189.1\0\0\0\0\0"`——它 contains('.')=true、
-     * contains(':')=false，能骗过所有「是不是 IPv4」的判断，但 Android 的 getaddrinfo 解不了，
-     * 表现为 `Unable to resolve host "10.174.189.1"`（2026-10-18 实测：配对成功后视频端口
-     * 与 keepAlive 全挂、会话 10 秒被拆）。
+     * Форма  Audi MMI 3315: поле адреса 0x4301 заполняется NUL-значениями фиксированной длины (последние 22 для
+     * IPv6, последние 5 для IPv4).
+     * Старая реализация удаляет только **один** конечный NUL, в результате чего получается
+     * `"10.174.189.1\0\0\0\0\0"` - он содержит('.')=true,
+     * содержит(':')=false, что может обмануть все суждения о том, "является ли это IPv4", но getaddrinfo Android не
+     * может решить эту проблему.
+     * ведет себя как `Unable to resolve host "10.174.189.1"` (фактический тест 18 октября 2026 г.: видеопорт после успешного сопряжения
+     * и KeepAlive все отключены, а сессия снесена за 10 секунд).
      */
     @Test
     fun nulPaddedAddressesAreStrippedCompletely() {
@@ -277,13 +298,13 @@ class Iap2SenderSessionTest {
                 deviceName = "test-device",
             ).run(timeoutMillis = 10_000L)
 
-        // 每个地址都必须干净：没有 NUL、没有空白
+        // Каждый адрес должен быть чистым: без NUL и пробелов.
         endpoint.ipAddresses.forEach { address ->
-            check(address.none { it == '\u0000' }) { "地址含 NUL：${address.toByteArray().toList()}" }
-            check(address.trim() == address) { "地址含首尾空白：'$address'" }
+            check(address.none { it == '\u0000' }) { "Адрес содержит NUL：${address.toByteArray().toList()}" }
+            check(address.trim() == address) { "Адрес содержит начальные и конечные пробелы：'$address'" }
         }
         assertEquals(listOf("192.168.49.1", "fd00::1"), endpoint.ipAddresses)
-        // 端口解析不受填充影响（同一帧里的 u32 参数）
+        // На разрешение порта не влияет заполнение (параметр u32 в том же кадре)
         assertEquals(49152, endpoint.airPlayPort)
 
         phoneChannel.close()
@@ -291,8 +312,9 @@ class Iap2SenderSessionTest {
     }
 
     /**
-     * 0x5703 迟迟不答：发送端必须在等待窗口内**重发设备状态问候**、再**重发 0x5702**，
-     * 而不是干等到车机拆链（BMW iD8.5 卡在 0x5703 的修复点）。
+     * 0x5703 Отложенный ответ: отправитель должен **повторно отправить приветствие о состоянии устройства**, а затем
+     * **повторно отправить 0x5702** в течение окна ожидания,
+     * вместо того, чтобы ждать, пока автомобиль будет отсоединен (BMW iD8.5 застрял в точке ремонта 0x5703).
      */
     @Test
     fun slowWifiConfigurationTriggersResends() {
@@ -320,56 +342,60 @@ class Iap2SenderSessionTest {
         accessoryChannel.close()
     }
 
-    /** 按 DiPlay Iap2WirelessControlClient 的时序脚本化应答。 */
+    /** Ответ по сценарию времени от DiPlay Iap2WirelessControlClient. */
     private class MockAccessory(
         private val channel: Iap2LinkChannel,
         /**
-         * 车机形态（0x1D01 双清单 + 是否应答 0x5702）。
+         * Форма машины  (двойной список 0x1D01 + отвечать ли на 0x5702).
          *
-         * 这四种形态是 WiFi 凭据协议分派的**全部**依据来源，任何一个判错都会
-         * 让对应车型连不上，所以逐个钉死：
-         *  - [Shape.TEST_BENCH]：DiPlay/xcertplay 测试台，无清单、走 0x5702→0x5703；
-         *  - [Shape.AUDI_9310]：发清单 2 项（含 0x5703），走旧协议；
-         *  - [Shape.AUDI_3315]：发 2 项（**不含** 0x5703）收 5 项（**不含** 0x5702）
-         *    ——稀疏且不完整，但**实际完整支持旧协议**；判成「跳过 0x5702」会让车机
-         *    压根不启动 AirPlay 服务（2026-10-22 真车日志：45 次 ECONNREFUSED）；
-         *  - [Shape.BMW_ID9]：两清单完整（10+ 项）仍无 0x57xx，AP 信息只在 0x4301。
+         * Эти четыре состояния являются базовыми источниками **все**, назначенными Wi-Fi в соответствии с протоколом.
+         * Любое неправильное суждение приведет к
+         * не дает возможности подключить соответствующие модели, поэтому они прибиваются поочередно:
+         * - [Shape.TEST_BENCH]: тестовый стенд DiPlay/xcertplay, без списка, перейдите 0x5702→0x5703;
+         * - [Shape.AUDI_9310]: Отправьте 2 предмета из списка (включая 0x5703), следуйте старому соглашению;
+         * – [Shape.AUDI_3315]: отправьте 2 предмета (**исключая** 0x5703) и получите 5 предметов (**исключая** 0x5702)
+         * — разреженный и неполный, но **фактически полностью поддерживает старый протокол**; судя по тому как
+         * "пропустить 0x5702" сделает машину
+         * вообще не запускает службу AirPlay (реальный автомобильный журнал 22 октября 2026 г.: 45 раз ECONNREFUSED);
+         * - [Shape.BMW_ID9]: Оба списка полные (более 10 элементов), 0x57xx по-прежнему отсутствует, а информация о
+         * точке доступа находится только в 0x4301.
          */
         private val shape: Shape = Shape.TEST_BENCH,
-        /** Phase 1 结束后再补发 0x4301（车机窗口晚开的真实时序）。 */
+        /** 0x4301 будет переиздан после завершения Фазы 1 (фактический момент позднего открытия окна автомобиля и машины). */
         private val lateStartSession: Boolean = false,
         /**
-         * 地址字段按真实车机的定长填充（Audi MMI 3315 实测：IPv6 后跟 22 个 NUL、
-         * IPv4 后跟 5 个）。用于锁定「必须去掉全部尾部 NUL」这一行为。
+         * Поле адреса  заполняется в соответствии с фиксированной длиной реального автомобиля (фактическое измерение
+         * Audi MMI 3315: IPv6, за которым следуют 22 NUL,
+         * IPv4, за которым следует 5). Используется для блокировки поведения «все конечные NUL должны быть удалены».
          */
         private val padAddresses: Boolean = false,
-        /** 0x5703 迟迟不答：发送端应重发问候、再重发 0x5702（而不是干等到车机拆链）。 */
+        /** 0x5703 отвечает с задержкой: отправитель должен повторно отправить приветствие, а затем повторно отправить 0x5702 (вместо того, чтобы ждать, пока автомобиль и машина будут отключены). */
         private val slowWifi: Boolean = false,
     ) {
         private val parser = Iap2Csm.Parser()
         private val pending = ArrayDeque<Iap2Csm.Frame>()
 
-        /** 发送端是否发过 0x5702（分派断言用）。 */
+        /** Отправил ли отправитель 0x5702 (для подтверждения отправки). */
         @Volatile
         var sawWifiRequest: Boolean = false
             private set
 
-        /** 车机形态。 */
+        /** Форма автомобиля. */
         enum class Shape {
             TEST_BENCH,
             AUDI_9310,
             AUDI_3315,
             BMW_ID9,
 
-            // 凯迪拉克 CT5（GM/Cinemo）：声明会发 0x4301、无 0x5702/0x5703——
-            // AP 信息只能在 0x4301 里，且窗口内常不到（PR #19，2026-10-21 日志）
+            // Cadillac CT5 (GM/Cinemo): заявление будет выдано 0x4301, без 0x5702/0x5703——
+            // Информацию о точке доступа можно найти только в 0x4301, и она часто недоступна в окне (журнал PR № 19, 21 октября 2026 г.).
             CT5_NEW_PROTOCOL,
         }
 
-        /** 老式奥迪/测试台：不声明接收清单，也不发 StartHID。 */
+        /** Старый Audi/испытательный стенд: список приемочных работ не заявлен, StartHID не выдан. */
         private val legacyHid: Boolean get() = shape != Shape.TEST_BENCH
 
-        /** 是否应答 0x5702（旧协议在网络侧有凭据交换）。CT5 与 BMW 同为纯新协议。 */
+        /** Отвечать ли 0x5702 (старый протокол имеет обмен учетными данными на стороне сети). CT5 — это настоящая новинка, как и BMW. */
         private val answersWifiRequest: Boolean get() = shape != Shape.BMW_ID9 && shape != Shape.CT5_NEW_PROTOCOL
 
         fun run() {
@@ -391,10 +417,12 @@ class Iap2SenderSessionTest {
             send(Iap2MessageIds.MFI_RESPONSE, Iap2Csm.param(0, ByteArray(70) { (it * 7).toByte() }))
             expect(Iap2MessageIds.MFI_AUTHENTICATION_SUCCEEDED)
 
-            // 设备状态问候紧跟 0xAA05（真机次序，早于订阅与 0x5702；PR17 分段等待也靠它）
+            // Приветствие о состоянии устройства следует за 0xAA05 (реальная машинная последовательность, предшествующая
+            // подписке и 0x5702; ожидание сегмента PR17 также зависит от нее)
+
             expectDeviceStateGreetings()
 
-            // 订阅 + StartHID（奥迪/宝马/CT5 形态不发，发送端应直接跳过等待）
+            // Подписаться + StartHID (формы Audi/BMW/CT5 не отправляются, отправителю следует сразу пропустить ожидание)
             if (!legacyHid) {
                 send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
                 send(Iap2MessageIds.START_POWER_UPDATES)
@@ -408,21 +436,31 @@ class Iap2SenderSessionTest {
                 expect(Iap2MessageIds.DEVICE_HID_REPORT)
             }
 
-            // WiFi 配置：BMW/CT5 形态不发 0x5702（AP 信息由 0x4301 自带）。
-            // 若发送端在 BMW 形态下仍发 0x5702，下面第一个 expect(0x4e0d) 会立刻
-            // 报「expected 0x4e0d got 0x5702」——分派错误无处可藏。
+            // Конфигурация Wi-Fi: режим BMW/CT5 не отправляет 0x5702 (информацию о точке доступа передает 0x4301).
+            // Если отправитель по-прежнему отправляет 0x5702 в режиме BMW, первое ожидаемое сообщение (0x4e0d) ниже будет
+            // немедленно отправлено.
+
+            // Отчет "ожидаемый 0x4e0d получил 0x5702" - ошибкам отправки некуда спрятаться.
             if (answersWifiRequest) {
                 expect(Iap2MessageIds.REQUEST_ACCESSORY_WIFI_CONFIGURATION)
                 sawWifiRequest = true
                 if (slowWifi) {
-                    // 发送端 1.5s 未等到 0x5703 → 重发问候；再 1.3s → 重发 0x5702
-                    // （PR17 分段等待救援剧本，BMW iD8.5 实测）
+                    // Отправитель не дождался 0x5703 в течение 1,5 с → отправляет приветствие повторно; затем ждет 1,3 секунды →
+                    // повторно отправляет 0x5702
+
+                    // (Сегментированный скрипт ожидания спасения PR17, реальный тест на BMW iD8.5)
                     expectDeviceStateGreetings()
                     expect(Iap2MessageIds.REQUEST_ACCESSORY_WIFI_CONFIGURATION)
                 }
-                // 迟到一条订阅请求（真实车机 bring-up 常见：0x5000 与 0x5703 相邻到达）。
-                // 它必须被暂存而不是在 expectOrNull 里被反复重读——旧实现把非预期帧塞回
-                // 「自己下一轮优先读取」的队列，同一帧无限循环（2026-10-18 日志刷屏根因）。
+                // Один запрос на подписку задерживается (обычно подключаются настоящие автомобильные машины: 0x5000 и 0x5703
+                // прибывают рядом).
+
+                // Его необходимо проиндексировать, а не многократно перечитывать в ожидаемом ОрНуле — старая реализация помещала
+                // обратно неожиданные кадры.
+
+                // Очередь «собственное чтение первым в следующем раунде» бесконечно зацикливается в одном и том же кадре
+                // (основная причина обновления экрана журнала 18 октября 2026 г.).
+
                 send(Iap2MessageIds.START_NOW_PLAYING_UPDATES)
                 send(
                     Iap2MessageIds.ACCESSORY_WIFI_CONFIGURATION,
@@ -433,7 +471,7 @@ class Iap2SenderSessionTest {
                 )
             }
 
-            // CarPlay 启动
+            // Запуск CarPlay
             expect(Iap2MessageIds.CARPLAY_AVAILABILITY)
             if (!lateStartSession) {
                 sendStartSession()
@@ -441,13 +479,13 @@ class Iap2SenderSessionTest {
 
             expect(Iap2MessageIds.DEVICE_TRANSPORT_IDENTIFIER)
             if (lateStartSession) {
-                // 车机打开 CarPlay 窗口后补发（Phase 1 早已结束）
+                // Перевыпуск после открытия окна CarPlay в машине (1 этап давно закончился)
                 Thread.sleep(150)
                 sendStartSession()
             }
         }
 
-        /** 设备状态问候五连（0x4E0D/0x4E0A/0x4E09/0x4E0B/0x4E0C）。 */
+        /** Приветствие о состоянии оборудования пять последовательных (0x4E0D/0x4E0A/0x4E09/0x4E0B/0x4E0C). */
         private fun expectDeviceStateGreetings() {
             expect(Iap2MessageIds.WIRELESS_CARPLAY_UPDATE)
             expect(Iap2MessageIds.DEVICE_LANGUAGE_UPDATE)
@@ -456,7 +494,7 @@ class Iap2SenderSessionTest {
             expect(Iap2MessageIds.DEVICE_UUID_UPDATE)
         }
 
-        /** 0x1D01 的 name（奥迪/宝马/CT5 形态用真实车机名，MFi 记忆与画像键才一致）。 */
+        /** Имя 0x1D01 (для форм Audi/BMW/CT5 используйте настоящее имя автомобиля, память MFi и портретные ключи должны совпадать). */
         private fun identityName(): String =
             when (shape) {
                 Shape.AUDI_9310, Shape.AUDI_3315 -> "Audi_MMI_3315"
@@ -466,24 +504,24 @@ class Iap2SenderSessionTest {
             }
 
         /**
-         * 0x1D01 的参数 6（车机会发）与参数 7（车机可收）。
+         * Параметр 6  0x1D01 (автомобиль может передавать) и параметр 7 (автомобиль может втягиваться).
          *
-         * 奥迪 3315 的 5 项接收清单取自真实识别帧（2026-10-22 日志），宝马 iD9 的
-         * 两份完整清单取自 ReceiverProfileTest 的同款形态——两者都是「分派判错的现场」。
+         * Список приемов Audi 3315 из 5 пунктов взят из реального кадра распознавания (журнал 2026-10-22), BMW iD9
+         * Два полных списка взяты из одной и той же формы ReceiverProfileTest — оба являются «местами ошибок распределения».
          */
         private fun declarationParams(): Array<ByteArray> =
             when (shape) {
-                // 测试台：完全不声明 → 画像 UNKNOWN → 走旧协议
+                // Испытательный стенд: вообще никаких деклараций → портрет НЕИЗВЕСТНО → следовать старому протоколу
                 Shape.TEST_BENCH -> emptyArray()
-                // 奥迪 MMI 9310：只声明发 0x5703/0xea03（无接收清单）
+                // Audi MMI 9310: декларируйте только 0x5703/0xea03 (без списка получения)
                 Shape.AUDI_9310 -> arrayOf(Iap2Csm.u16List(6, intArrayOf(0x5703, 0xea03)))
-                // 奥迪 MMI 3315：发 2 项（0x4301/0xea03）、收 5 项（均无 0x57xx）
+                // Audi MMI 3315: отправить 2 предмета (0x4301/0xea03), получить 5 предметов (без 0x57xx)
                 Shape.AUDI_3315 ->
                     arrayOf(
                         Iap2Csm.u16List(6, intArrayOf(0x4301, 0xea03)),
                         Iap2Csm.u16List(7, intArrayOf(0x4e0c, 0x4e09, 0x4300, 0xea00, 0xea01)),
                     )
-                // 宝马 iD9：两清单各 10 项、合计 20（≥10）仍无 0x57xx → NEW
+                // BMW iD9: по 10 позиций в каждом списке, всего 20 (≥10), 0x57xx по-прежнему нет → НОВОЕ
                 Shape.BMW_ID9 ->
                     arrayOf(
                         Iap2Csm.u16List(
@@ -495,7 +533,7 @@ class Iap2SenderSessionTest {
                             intArrayOf(0xaa00, 0xaa02, 0xaa04, 0xaa05, 0xea00, 0xea01, 0x5001, 0x5201, 0x4300, 0x4e0d),
                         ),
                     )
-                // 凯迪拉克 CT5（PR #19）：发 11 项含 0x4301、收 9 项，均无 0x57xx → NEW
+                // Cadillac CT5 (PR № 19): отправьте 11 предметов, содержащих 0x4301, получите 9 предметов, ни одного 0x57xx → НОВОЕ
                 Shape.CT5_NEW_PROTOCOL ->
                     arrayOf(
                         Iap2Csm.u16List(
@@ -528,7 +566,7 @@ class Iap2SenderSessionTest {
             )
         }
 
-        /** 地址参数：真实车机按定长 NUL 填充；默认（不填充）与之前行为一致。 */
+        /** Параметр адреса: Реальный автомобиль заполнен NUL фиксированной длины; значение по умолчанию (не заполнено) соответствует предыдущему поведению. */
         private fun addressParam(
             id: Int,
             value: String,
@@ -536,7 +574,7 @@ class Iap2SenderSessionTest {
         ): ByteArray {
             val raw = value.encodeToByteArray()
             if (!padAddresses) return Iap2Csm.param(id, raw + byteArrayOf(0))
-            // 至少保留一个 NUL 结尾（CSM 字符串语义），其余补到固定宽度
+            // Сохраните хотя бы один терминатор NUL (семантика строки CSM), а остальные дополните до фиксированной ширины.
             val width = maxOf(padTo, raw.size + 1)
             val padded = raw + ByteArray(width - raw.size)
             return Iap2Csm.param(id, padded)

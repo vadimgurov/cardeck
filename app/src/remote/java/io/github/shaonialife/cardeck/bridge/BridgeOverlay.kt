@@ -16,10 +16,11 @@ import android.widget.TextView
 import io.github.shaonialife.cardeck.util.DebugFileLog
 
 /**
- * 可拖动的调试提示悬浮窗（TYPE_APPLICATION_OVERLAY，权限与暗幕共用）。
+ * Перетаскиваемое плавающее окно подсказки отладки (TYPE_APPLICATION_OVERLAY, разрешения доступны для темного экрана).
  *
- * 主线程操作（Handler(main)）；文字 + 可选按钮（如「安装」/「继续调试」）；
- * 默认数秒自动消失，携带按钮时保持常驻直到点击。拖动即改 WindowManager 坐标。
+ * Операция основного потока (Handler(main)); текст + дополнительная кнопка (например, «Установить»/«Продолжить отладку»);
+ * По умолчанию   автоматически исчезнет через несколько секунд. Когда кнопка удерживается, она останется там до
+ * тех пор, пока не будет нажата. Перетащите, чтобы изменить координаты WindowManager.
  */
 object BridgeOverlay {
     private val main = Handler(Looper.getMainLooper())

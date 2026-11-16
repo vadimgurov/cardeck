@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- CarPlay 主区：纯黑背景 + 4×3 图标分页网格 + 底部页点（无字母导航，对照 CarPlay 截图） -->
+<!-- Основная область CarPlay: чистый черный фон + сетка страниц со значками 4×3 + нижняя точка страницы (без навигации по буквам, см. снимок экрана CarPlay) -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"

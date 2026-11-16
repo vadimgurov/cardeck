@@ -8,12 +8,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * **隧道重放回归**：录制的车机隧道 CSM（IAPLINK rx）逐条喂给真实的
- * [VirtualIap2Link]（MIB3 形态），我们回出的 CSM 消息号序列必须与录制的
- * 隧道 tx 序列一致（0x4E0C/0x4E0B 等含随机内容，比对消息号与首现顺序）。
+ * **Возврат повтора туннеля**: Записанный CSM автомобильно-машинного туннеля (IAPLINK rx) подается на реальный один за другим.
+ * [VirtualIap2Link] (форма MIB3), последовательность номеров сообщений CSM, которую мы возвращаем, должна быть такой же, как записанная.
+ * Последовательность передачи туннеля   согласована (0x4E0C/0x4E0B и т. д. содержат случайный контент, сравните
+ * номер сообщения и последовательность первого появления).
  *
- * 车机侧由引擎扮演（复用 VirtualIap2LinkTest 的换帧法），录制的 CSM 体
- * 经引擎注入——聚焦控制会话状态机，不重演链路层。
+ * Сторона автомобиля   воспроизводится движком (повторно используя метод смены кадров VirtualIap2LinkTest), а записанное тело CSM
+ * внедряется через движок — фокусируется на управлении конечным автоматом сеанса и не воспроизводит канальный уровень.
  */
 class TunnelReplayTest {
     @Test
@@ -21,12 +22,12 @@ class TunnelReplayTest {
         val fixtures = CarFixture.loadDirectory()
         val usable = fixtures.filter { it.tunnelRx.isNotEmpty() }
         if (usable.isEmpty()) {
-            println("REPLAY: 无隧道 fixture——跳过")
+            println("REPLAY: Нет туннеля fixture——пропустить")
             return
         }
         val failures = ArrayList<String>()
         usable.forEach { fixture -> replay(fixture, failures) }
-        assertTrue("隧道重放回归失败：\n" + failures.joinToString("\n"), failures.isEmpty())
+        assertTrue("Регрессия воспроизведения туннеля не удалась：\n" + failures.joinToString("\n"), failures.isEmpty())
     }
 
     private class Harness {
@@ -84,11 +85,11 @@ class TunnelReplayTest {
         h.link.armMib3()
         h.car.start(h.engineClock)
         h.exchange()
-        assertEquals("${fixture.car}: 链路未达 NORMAL", Iap2LinkEngine.State.NORMAL, h.car.state)
+        assertEquals("${fixture.car}: Ссылка не достигнута NORMAL", Iap2LinkEngine.State.NORMAL, h.car.state)
 
         fixture.tunnelRx.forEach { (messageId, body) ->
             assertTrue(
-                "${fixture.car}: 注入 0x${messageId.toString(16)} 失败（引擎拒绝入队）",
+                "${fixture.car}: Вводить 0x${messageId.toString(16)} не удалось（Двигатель отказывается присоединяться к очереди）",
                 h.car.sendControl(Iap2Csm.encode(messageId, body), h.engineClock),
             )
             h.exchange()
@@ -96,17 +97,22 @@ class TunnelReplayTest {
 
         val replayCore = distinctCsmIds(extractCsmPayloads(h.controlAll))
         val recordedCore = fixture.tunnelTxIds.distinct()
-        // 旧版录制的应答可能少于现行代码（有意的新增，如 MIB3 突发）——
-        // 断言「录制 = 回放的有序子序列」：少答/乱序/换序都会红，有意追加放行
+        // Старые версии могут записывать меньше ответов, чем текущий код (намеренные дополнения, такие как пакеты MIB3).
+        // Запись должна быть упорядоченной подпоследовательностью результата;
+        // дополнительные ответы текущего кода разрешены.
         val subsequenceOk = isOrderedSubsequence(recordedCore, replayCore)
         if (!subsequenceOk) {
             failures.add(
-                "${fixture.car}: 隧道应答序列漂移（录制应为回放的有序子序列）\n" +
-                    "  录制=${recordedCore.joinToString { "0x%04x".format(it) }}\n" +
-                    "  回放=${replayCore.joinToString { "0x%04x".format(it) }}",
+                "${fixture.car}: Смещение последовательности ответов туннеля（Запись должна представлять собой " +
+                    "упорядоченную последовательность воспроизведения.）\n" +
+                    "  Запись=${recordedCore.joinToString { "0x%04x".format(it) }}\n" +
+                    "  Воспроизведение=${replayCore.joinToString { "0x%04x".format(it) }}",
             )
         } else {
-            println("REPLAY ✓ ${fixture.car} 隧道序列一致（录制 ${recordedCore.size} ⊆ 回放 ${replayCore.size}）")
+            println(
+                "REPLAY ✓ ${fixture.car} Последовательность туннелей согласована（Запись ${recordedCore.size} ⊆ " +
+                    "Воспроизведение ${replayCore.size}）",
+            )
         }
     }
 

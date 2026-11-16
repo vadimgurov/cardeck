@@ -6,17 +6,22 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 仪表盘分屏几何纯函数测试：分屏比例由把手拖动调整，几何推导（tile 尺寸/把手中心/
- * 音乐卡起始）必须四方一致（composer 绘制、地图屏 resize、音乐卡 margin、把手布局）。
- * 历史上四方各自裸写公式导致过静默错位（CARD_MARGIN_PX 契约注释），这里把
- * [VirtualLauncher.dashSplitGeom] 的推导钉死。
+ * Тест геометрической чистоты функции разделенного экрана приборной панели: соотношение разделенного экрана
+ * регулируется путем перетаскивания маркера, и выводится геометрия (размер плитки/центр маркера/
+ * (запуск музыкальной карты) должны быть одинаковыми во всех направлениях (рисунок композитора, изменение
+ * размера экрана карты, поля музыкальной карты, расположение ручки).
+ * Исторически сложилось так, что четыре стороны писали голые формулы, что приводило к скрытому несовпадению
+ * (аннотация контракта CARD_MARGIN_PX). Вот
+ * Вывод   [VirtualLauncher.dashSplitGeom] прибит.
  */
 class DashSplitMathTest {
     private val appLen = 1000
 
     @Test
     fun defaultFractionCentersHandle() {
-        // 0.5 恰使把手中心=应用区中点（与旧版中线分屏视觉一致）
+        // 0,5 Просто сделайте центр ручки = середине области приложения (визуально соответствует старой версии
+        // разделения экрана по центральной линии)
+
         val g = VirtualLauncher.dashSplitGeom(appLen, 0.5f)
         assertEquals(500f, g.splitCenter, 0.001f)
     }
@@ -26,7 +31,7 @@ class DashSplitMathTest {
         assertEquals(0.2f, VirtualLauncher.clampDashSplitFraction(0.05f), 0.001f)
         assertEquals(0.8f, VirtualLauncher.clampDashSplitFraction(0.95f), 0.001f)
         assertEquals(0.6f, VirtualLauncher.clampDashSplitFraction(0.6f), 0.001f)
-        // geom 侧同样钳制（防「卡片拉到 0」回退的另一处入口）
+        // Сторона Geom также зажата (еще один вход, чтобы предотвратить падение карты назад)
         assertEquals(0.2f, VirtualLauncher.dashSplitGeom(appLen, 0.05f).fraction, 0.001f)
         assertEquals(0.8f, VirtualLauncher.dashSplitGeom(appLen, 0.99f).fraction, 0.001f)
     }
@@ -40,7 +45,9 @@ class DashSplitMathTest {
 
     @Test
     fun geometryRelationsHold() {
-        // 把手中心=tile 边缘+半把手；音乐卡起始=tile 边缘+整把手（中缝=把手宽）
+        // Центр ручки = край плитки + половина ручки; начало музыкальной открытки = край плитки + ручка целиком (средний
+        // шов = ширина ручки)
+
         for (f in listOf(0.2f, 0.35f, 0.5f, 0.66f, 0.8f)) {
             val g = VirtualLauncher.dashSplitGeom(appLen, f)
             assertEquals(DASH_GAP_PX / 2f, g.splitCenter - g.tileEdge, 0.001f)
@@ -50,9 +57,9 @@ class DashSplitMathTest {
 
     @Test
     fun commitRoundTripsFraction() {
-        // commit 的反推路径（把手中心流像素 → 比例）与 geom 正推一致：
-        // streamPos = 主轴偏移 + 边距 + tileLen + 半把手 → fraction 复原
-        val offset = 126f // 假想 dock 宽
+        // Обратный путь фиксации (обработка центрального пикселя потока → масштаб) соответствует прямому перемещению geom:
+        // streamPos = смещение главной оси + поле + tileLen + половина маркера → восстановление дроби
+        val offset = 126f // Воображаемая ширина дока
         for (f in listOf(0.2f, 0.5f, 0.8f)) {
             val g = VirtualLauncher.dashSplitGeom(appLen, f)
             val streamPos = offset + CARD_MARGIN_PX + g.tileLen + DASH_GAP_PX / 2f

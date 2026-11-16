@@ -7,12 +7,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LetterboxHintParseTest {
-    /** 真机（荣耀 Magic7 Pro，CarPlayMap #511）dumpsys 片段，只保留相关行。 */
+    /** Фрагмент dumpsys реальной машины (Honor Magic7 Pro, CarPlayMap #511), сохраняются только соответствующие строки. */
     private val realDump =
         """
         ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
         Display #511 (activities from top to bottom):
-          * Task{d47b965 #34012 type=standard A=10241:com.autonavi.minimap U=0 visible=true visibleRequested=true mode=fullscreen translucent=false embedded=false sz=1}
+          * Task{d47b965 #34012 type=standard A=10241:com.autonavi.minimap U=0 visible=true visibleRequested=true
+          * mode=fullscreen translucent=false embedded=false sz=1}
             isSleeping=false
             topResumedActivity=ActivityRecord{15928233 u0 com.autonavi.minimap/com.autonavi.map.activity.SplashActivity t34012}
             * Hist  #0: ActivityRecord{15928233 u0 com.autonavi.minimap/com.autonavi.map.activity.SplashActivity t34012}
@@ -27,7 +28,8 @@ class LetterboxHintParseTest {
           Resumed activities in task display areas (from top to bottom):
             Resumed: ActivityRecord{15928233 u0 com.autonavi.minimap/com.autonavi.map.activity.SplashActivity t34012}
         Display #510 (activities from top to bottom):
-          * Task{74f1ce1 #33999 type=standard A=10296:io.github.shaonialife.cardeck U=0 visible=true visibleRequested=true mode=fullscreen translucent=true embedded=false sz=1}
+          * Task{74f1ce1 #33999 type=standard A=10296:io.github.shaonialife.cardeck U=0 visible=true visibleRequested=true
+          * mode=fullscreen translucent=true embedded=false sz=1}
             topResumedActivity=ActivityRecord{199877690 u0 io.github.shaonialife.cardeck/.launcher.GridActivity t33999}
             * Hist  #0: ActivityRecord{199877690 u0 io.github.shaonialife.cardeck/.launcher.GridActivity t33999}
               CurrentConfiguration={1.0 460mcc1mnc [zh_CN_#Hans] masculine ldltr sw431dp w825dp h431dp 361dpi nrml long compactNeeded land winConfig={ mBounds=Rect(0, 0 - 1861, 972) mAppBounds=Rect(0, 0 - 1861, 972) mMaxBounds=Rect(0, 0 - 1861, 972) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen}}
@@ -44,7 +46,9 @@ class LetterboxHintParseTest {
         assertEquals(511, activity.displayId)
         assertTrue(activity.letterboxed)
         assertEquals("FIXED_ORIENTATION", activity.letterboxReason)
-        // 内窗与外框都取自 dumpsys 实测值（不是估算）：左右各 312px
+        // Внутреннее окно и внешняя рамка взяты из фактически измеренных значений dumpsys (не оценок): 312 пикселей
+        // слева и справа соответственно.
+
         assertEquals(PixelBounds(312, 0, 929, 648), activity.inner)
         assertEquals(PixelBounds(0, 0, 1241, 648), activity.full)
         assertEquals(312, activity.inner.left - activity.full.left)
@@ -64,7 +68,8 @@ class LetterboxHintParseTest {
         val dump =
             """
             Display #509 (activities from top to bottom):
-              * Task{aaa #1 type=standard A=10241:com.autonavi.minimap U=0 visible=true visibleRequested=true mode=fullscreen translucent=false embedded=false sz=1}
+              * Task{aaa #1 type=standard A=10241:com.autonavi.minimap U=0 visible=true visibleRequested=true mode=fullscreen
+              * translucent=false embedded=false sz=1}
                 topResumedActivity=ActivityRecord{bbb u0 com.autonavi.minimap/.MainActivity t1}
                 * Hist  #0: ActivityRecord{bbb u0 com.autonavi.minimap/.MainActivity t1}
                   bounds=Rect(312, 0 - 929, 648)
@@ -88,7 +93,8 @@ class LetterboxHintParseTest {
         val dump =
             """
             Display #511 (activities from top to bottom):
-              * Task{aaa #1 type=standard A=10241:com.a U=0 visible=true visibleRequested=true mode=fullscreen translucent=false embedded=false sz=1}
+              * Task{aaa #1 type=standard A=10241:com.a U=0 visible=true visibleRequested=true mode=fullscreen
+              * translucent=false embedded=false sz=1}
                 topResumedActivity=ActivityRecord{bbb u0 com.a/.Main t1}
                 * Hist  #0: ActivityRecord{bbb u0 com.a/.Main t1}
                   bounds=Rect(0, 0 - 1241, 648)
@@ -125,9 +131,9 @@ class LetterboxHintPolicyTest {
     fun showsOnlyForForceLandscapePackageWithFixedOrientationLetterbox() {
         val enabled = setOf("com.ss.android.article.news")
         assertTrue(shouldShowLetterboxHint(activity(), enabled, emptySet()))
-        // 不在名单：用户本意就是竖窗，别打扰
+        // Нет в списке: намерением пользователя являются вертикальные окна, не беспокойтесь.
         assertFalse(shouldShowLetterboxHint(activity(pkg = "com.other"), enabled, emptySet()))
-        // 不是方向锁导致的 letterbox（宽高比等）：不是本提示的场景
+        // Почтовый ящик (соотношение сторон и т. д.) не вызван блокировкой ориентации: это не тот сценарий для этого совета.
         assertFalse(shouldShowLetterboxHint(activity(reason = "BOOK_ASPECT_RATIO"), enabled, emptySet()))
         assertFalse(shouldShowLetterboxHint(activity(letterboxed = false), enabled, emptySet()))
     }
@@ -146,13 +152,15 @@ class LetterboxHintPolicyTest {
 
     @Test
     fun prefLeftSideButFallsBackToRightWhenLeftTooNarrow() {
-        // 左侧放得下 → 左侧（靠近驾驶位）
+        // Подходит для левой стороны → Левая сторона (возле сиденья водителя)
         assertEquals(LetterboxSide.LEFT, chooseLetterboxSide(leftPx = 312f, rightPx = 312f, neededPx = 240f))
-        // 左侧只有几像素、右侧够 → 右侧
+        // Всего несколько пикселей слева, достаточно справа → Справа
         assertEquals(LetterboxSide.RIGHT, chooseLetterboxSide(leftPx = 8f, rightPx = 312f, neededPx = 240f))
-        // 两侧都放不下 → 不显示（黑边窄到与全屏横屏无区别）
+        // Не помещается ни на одну из сторон → не отображается (черная рамка настолько узкая, что ее невозможно отличить
+        // от полноэкранного горизонтального экрана)
+
         assertNull(chooseLetterboxSide(leftPx = 40f, rightPx = 40f, neededPx = 240f))
-        // 左侧更宽但右侧也够：仍优先左侧
+        // Левая сторона шире, но правой стороны достаточно: все равно отдавайте приоритет левой стороне.
         assertEquals(LetterboxSide.LEFT, chooseLetterboxSide(leftPx = 500f, rightPx = 260f, neededPx = 240f))
     }
 }
@@ -160,31 +168,31 @@ class LetterboxHintPolicyTest {
 class LetterboxCardGestureTest {
     @Test
     fun tapOnlyWhenPressStartsAndEndsOnCard() {
-        // 按下落在卡片上 → 由卡片接管
+        // Пресс падает на карту → карта берет верх
         assertEquals(CardGesture.CONSUME, resolveCardGesture(true, false, true, true))
-        // 按住期间 move 一律吞掉，不漏给应用
+        // Во время периода нажатия и удержания ход будет проглочен и не будет передан в приложение.
         assertEquals(CardGesture.CONSUME, resolveCardGesture(true, true, true, true))
-        // 抬起仍在卡片内 → 算一次点按
+        // Поднять, пока он находится в карте → считается за одно касание.
         assertEquals(CardGesture.TAP, resolveCardGesture(true, true, false, true))
     }
 
     @Test
     fun dragOffCardCancelsTapButStillConsumes() {
-        // 按住后拖出卡片：抬起时命中=false → 吞掉但不触发
+        // Нажмите, удерживайте и вытащите карту: hit=false при поднятии → проглотите, но не активируйте
         assertEquals(CardGesture.CONSUME, resolveCardGesture(true, true, false, false))
     }
 
     @Test
     fun passesThroughWhenPressStartsOutsideCard() {
-        // 未命中按下 → 交回普通路由（注入应用）
+        // Пропущенное нажатие → вернуть нормальную маршрутизацию (вставлено в приложение)
         assertEquals(CardGesture.NOT_HANDLED, resolveCardGesture(true, false, true, false))
         assertEquals(CardGesture.NOT_HANDLED, resolveCardGesture(true, false, false, false))
     }
 
     @Test
     fun doesNotStealGestureDraggedInFromApp() {
-        // 应用手势进行中（按下时不在卡片上）拖进卡片区域：不能接管，
-        // 否则应用收不到抬起、停在按下态
+        // Жест приложения выполняется (не на карте при нажатии) и перетаскивается в область карты: перехватить управление невозможно.
+        // В противном случае приложение не получит подъема и останется в нажатом состоянии.
         assertEquals(
             CardGesture.NOT_HANDLED,
             resolveCardGesture(true, false, true, true, appGestureActive = true),
@@ -193,7 +201,9 @@ class LetterboxCardGestureTest {
 
     @Test
     fun releasesStuckHoldWhenCardDisappears() {
-        // 卡片已收起但手势仍按住（探测清掉提示）：吞掉这一抬，避免漏成应用点击
+        // Карта убрана, но жест все еще удерживается (подсказка об обнаружении и очистке): проглотите этот подъем, чтобы
+        // не пропустить щелчок приложения.
+
         assertEquals(CardGesture.CONSUME, resolveCardGesture(false, true, false, false))
     }
 }

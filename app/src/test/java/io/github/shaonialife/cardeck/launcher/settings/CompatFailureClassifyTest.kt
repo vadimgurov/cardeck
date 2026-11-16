@@ -4,14 +4,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * `am compat` 失败分类测试。
+ * `am compat` не прошел классификационный тест.
  *
- * 这个分类决定「偏好要不要落盘」：永久拒绝（user build 限制）落盘只会让下次连接
- * 白跑一轮 applyAll，且面板显示「已开启」而系统实际没生效；临时故障则相反，应保留
- * 用户意愿以便重试。实测样本取自 2026-10-18 红米 Android 13 user build 的真实输出。
+ * Эта категория определяет «предпочтение, размещать ли заказ»: постоянный отказ (ограничение на сборку
+ * пользователя), размещение разрешает только следующее соединение.
+ * тщетно запускает applyAll, и на панели отображается «Открыто», но система фактически не вступает в силу;
+ * временные неисправности противоположны и должны быть сохранены.
+ * Пользователь желает попробовать еще раз. Измеренный образец взят из реальных результатов пользовательской
+ * сборки Redmi Android 13 от 18 октября 2026 г.
  */
 class CompatFailureClassifyTest {
-    /** 已安装的普通第三方应用在 user build 上被拒（本次问题的真实输出）。 */
+    /** Часто установленные сторонние приложения отклоняются в пользовательских сборках (реальный результат этой проблемы). */
     @Test
     fun nonDebuggableOnUserBuildIsUnsupported() {
         assertEquals(
@@ -20,7 +23,7 @@ class CompatFailureClassifyTest {
         )
     }
 
-    /** 目标是该 ChangeId 的默认对象时的另一种拒绝措辞。 */
+    /** Другая формулировка отклонения, когда целью является объект по умолчанию для этого ChangeId. */
     @Test
     fun defaultChangeOnUserBuildIsUnsupported() {
         assertEquals(
@@ -30,11 +33,11 @@ class CompatFailureClassifyTest {
     }
 
     /**
-     * **本机 ROM 未注册该 ChangeId**（红米 Android 13 实测输出）。
+     * **Встроенное ПЗУ не регистрирует ChangeId** (фактические результаты измерений Redmi Android 13).
      *
-     * 这是「荣耀能改、红米不能」的真正原因：这两个 ChangeId 是 OEM 定制项，
-     * 荣耀注册了（392 个）、红米没注册（173 个）。未注册时 `am compat` 先给
-     * `is not known yet` 警告，再以 user build 的措辞拒绝。
+     * Это настоящая причина, почему «Honor может это изменить, а Redmi не может»: эти два ChangeId являются элементами настройки OEM.
+     * Honor зарегистрирован (392), а Redmi не зарегистрирован (173). Если незарегистрированный `am compat` будет выдан первым
+     * `is not known yet` Внимание, затем отклоните с формулировкой пользовательской сборки.
      */
     @Test
     fun unregisteredChangeIdIsUnsupported() {
@@ -45,33 +48,33 @@ class CompatFailureClassifyTest {
                     "Cannot override a change on a non-debuggable app and user build.",
             ),
         )
-        // 仅警告行（某些 ROM 只回警告）同样判永久
+        // Только строки с предупреждениями (некоторые ПЗУ возвращают только предупреждения) также постоянно наказываются.
         assertEquals(
             AppOrientationCompat.WriteResult.UNSUPPORTED,
             classifyCompatFailure("Warning! Change 265464455 is not known yet."),
         )
     }
 
-    /** Shizuku 未连接：临时故障，可重试。 */
+    /** Шизуку не подключается: временный сбой, можно попробовать еще раз. */
     @Test
     fun shizukuNotConnectedIsTemporary() {
         assertEquals(
             AppOrientationCompat.WriteResult.FAILED,
-            classifyCompatFailure("Shizuku 未连接"),
+            classifyCompatFailure("Shizuku Не подключено"),
         )
     }
 
-    /** 超时/进程被杀：临时故障。 */
+    /** Тайм-аут/процесс остановлен: временный сбой. */
     @Test
     fun emptyOrTimeoutIsTemporary() {
         assertEquals(AppOrientationCompat.WriteResult.FAILED, classifyCompatFailure(""))
         assertEquals(
             AppOrientationCompat.WriteResult.FAILED,
-            classifyCompatFailure("命令执行失败：timeout"),
+            classifyCompatFailure("Не удалось выполнить команду：timeout"),
         )
     }
 
-    /** 成功输出不该被判成永久拒绝（防御：调用方仅在失败时才分类）。 */
+    /** Успешный вывод не следует рассматривать как постоянное отклонение (Защита: вызывающая сторона классифицирует только в случае неудачи). */
     @Test
     fun successTextIsNotPermanent() {
         assertEquals(
@@ -81,12 +84,12 @@ class CompatFailureClassifyTest {
     }
 
     /**
-     * 版本门槛：这两个 ChangeId 自 **Android 14 / SDK 34** 起才进 AOSP
-     * （`android.content.pm.ActivityInfo`）。Android 13 及更早的 ActivityInfo 里
-     * 一个 orientation 类 ChangeId 都没有（实测 A13=0、A14=9），因此低版本
-     * 不必跑 dumpsys 即可判定不支持。
+     * Порог версии : эти два ChangeId вошли в AOSP только с **Android 14/SDK 34**.
+     * (`android.content.pm.ActivityInfo`). В ActivityInfo Android 13 и более ранних версий
+     * не имеет класса ориентации ChangeId (фактическое измерение A13=0, A14=9), поэтому младшая версия
+     * не нужно запускать dumpsys, чтобы определить, что он не поддерживается.
      *
-     * 实测对照：红米 K40（SDK 33）不支持；荣耀 Magic7 Pro（SDK 37）支持。
+     * Сравнение фактических измерений      : Redmi K40 (SDK 33) не поддерживает его; Honor Magic7 Pro (SDK 37) поддерживает это.
      */
     @Test
     fun minSupportedSdkIsAndroid14() {

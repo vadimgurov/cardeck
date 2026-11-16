@@ -8,8 +8,8 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /**
- * 链路通道：一个读线程 + 一个节奏线程驱动 [Iap2LinkEngine]，向会话层暴露
- * 阻塞式的 sendControl/recvControl 与 awaitReady。
+ * Канал связи : поток чтения + драйвер ритмического потока [Iap2LinkEngine], доступный для сеансового уровня.
+ * блокирует sendControl/recvControl и awaitReady.
  */
 class Iap2LinkChannel(
     private val stream: DuplexStream,
@@ -25,11 +25,11 @@ class Iap2LinkChannel(
     private var terminated = false
     private var readySignalled = false
 
-    /** 原始字节转储预算（每方向每连接），真车字节级对照用。 */
+    /** Бюджет необработанного дампа байтов (на каждое направление на соединение), используемый для реального сравнения на уровне байтов. */
     private var rxDumpBudget = RAW_DUMP_LIMIT
     private var txDumpBudget = RAW_DUMP_LIMIT_TX
 
-    /** 逐帧摘要日志预算（每方向每连接）。 */
+    /** Бюджет сводного журнала по кадрам (на соединение по направлению). */
     private var rxFrameLogs = 0
     private var txFrameLogs = 0
 
@@ -38,15 +38,17 @@ class Iap2LinkChannel(
     init {
         engine.onPeerSynchronizationAdopted = { sync ->
             log(
-                "LINK: 采纳对端会话表 maxOutgoing=${sync.maxOutgoing} maxLen=${sync.maxLength} " +
+                "ССЫЛКА: Примите таблицу одноранговых сеансов maxOutgoing=${sync.maxOutgoing} maxLen=${sync.maxLength}" +
                     "sessions=" + sync.sessions.joinToString { "${it.id}/k${it.kind}/v${it.version}" },
             )
         }
         engine.onUnknownSessionData = { sessionId, size ->
-            log("LINK: 丢弃未知会话 $sessionId 的数据帧（$size 字节）")
+            log("ССЫЛКА: удалить кадр данных (байты $size) неизвестного сеанса $sessionId.")
         }
         engine.onFrameReceived = { control, sequence, ack, sessionId, size ->
-            // 真车调试关键观测：车机在识别阶段是否回帧、回什么（静默分歧全靠它定位）
+            // Ключевые наблюдения для отладки реального автомобиля: возвращает ли и какой кадр автомобиль на этапе
+            // распознавания (все молчаливые различия зависят от его положения)
+
             if (rxFrameLogs < FRAME_LOG_LIMIT) {
                 rxFrameLogs++
                 log(
@@ -74,16 +76,16 @@ class Iap2LinkChannel(
         }
     }
 
-    /** 等待链路协商完成（会话 10 可写）。 */
+    /** Дождитесь завершения согласования канала (сеанс 10 доступен для записи). */
     fun awaitReady(timeoutMillis: Long): Boolean {
         if (!readyLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)) return false
         return !terminated
     }
 
-    /** 对端协商的最大控制载荷（已扣除帧头与校验和），协商前为 null。 */
+    /** Максимальная управляющая полезная нагрузка, согласованная партнером (после вычета заголовка кадра и контрольной суммы), которая до согласования равна нулю. */
     fun peerMaxControlPayload(): Int? = synchronized(lock) { engine.peerSynchronization?.maxLength?.minus(Iap2LinkEngine.HEADER_BYTES + 1) }
 
-    /** 排入一个完整控制载荷；链路已死返回 false。窗口满时内部积压，由 ACK 驱动发出。 */
+    /** Ставит в очередь полезные данные полного управления; возвращает false, если ссылка не работает. Внутреннее отставание, когда окно заполнено, выдается драйвером ACK. */
     fun sendControl(
         bytes: ByteArray,
         awaitAck: Boolean = true,
@@ -96,7 +98,7 @@ class Iap2LinkChannel(
         }
     }
 
-    /** 取下一个控制载荷；超时或链路结束返回 null。 */
+    /** Удалить следующую управляющую нагрузку; возвращает значение null при тайм-ауте или конце ссылки. */
     fun recvControl(timeoutMillis: Long): ByteArray? {
         if (timeoutMillis == 0L && terminated && controls.isEmpty()) return null
         val polled =
@@ -113,7 +115,7 @@ class Iap2LinkChannel(
         finish(null)
     }
 
-    // ---- 内部 ----
+    // ---- Внутренний ----
 
     private fun runReader() {
         try {
@@ -144,8 +146,9 @@ class Iap2LinkChannel(
     }
 
     /**
-     * 原始字节抓包（真车字节级对照的唯一手段）：每方向仅转储前
-     * [RAW_DUMP_LIMIT] 字节，防止长期会话日志爆炸。
+     * Захват оригинального байтового пакета  (единственное средство сравнения на уровне байтов для реальных
+     * автомобилей): сбрасывать только переднюю часть в каждом направлении
+     * [RAW_DUMP_LIMIT] байт для предотвращения взрыва журнала долгосрочных сеансов.
      */
     private fun dumpInbound(bytes: ByteArray) {
         if (bytes.isEmpty() || rxDumpBudget <= 0) return
@@ -183,7 +186,7 @@ class Iap2LinkChannel(
         }
     }
 
-    /** 持锁调用：抽取引擎事件并搬运输出。 */
+    /** Вызов с удержанием блокировки: извлекает события механизма и обрабатывает выходные данные. */
     private fun processEventsLocked() {
         while (true) {
             when (val event = engine.pollEvent() ?: return) {
@@ -236,7 +239,7 @@ class Iap2LinkChannel(
     private fun finishLocked(failure: IOException?) {
         if (terminated) return
         terminated = true
-        controls.offer(POISON) // 哨兵：唤醒阻塞的接收方（LBQ 不接受 null）
+        controls.offer(POISON) // Sentinel: пробуждение заблокированного получателя (LBQ не принимает значение null)
         readyLatch.countDown()
         lock.notifyAll()
         runCatching { stream.close() }
@@ -252,17 +255,17 @@ class Iap2LinkChannel(
     private companion object {
         const val PACER_POLL_MILLIS = 20L
 
-        /** 原始字节转储预算：rx 需覆盖车机全部协商帧（Audi 实测约 140B），给 512B 余量。 */
-        // 预算按字节计。曾为 512/256：一次完整 bring-up 都盖不住（0x1D01 单帧即 565B），
-        // 提取重放 fixture（tools/extract_car_fixtures.py）会缺尾部——提到 4096 覆盖
-        // 整个识别/MFi/凭据交换，长会话靠预算封顶防日志爆炸
+        /** Бюджет необработанного байтового дампа: rx должен покрыть все кадры переговоров на автомобиле (Audi измерил около 140 байт), оставив запас в 512 байт. */
+        // Бюджет указывается в байтах. Был 512/256: Полное доведение не может его охватить (одиночный кадр 0x1D01 - 565B),
+        // При извлечении фикстур воспроизведения (tools/extract_car_fixtures.py) будет отсутствовать хвост – упоминается покрытие 4096.
+        // Вся идентификация/MFi/обмен учетными данными, длинные сеансы ограничены бюджетом, чтобы предотвратить взрыв журнала.
         const val RAW_DUMP_LIMIT = 4096
         const val RAW_DUMP_LIMIT_TX = 4096
 
-        /** 逐帧摘要日志上限（每方向每连接）。 */
+        /** Ограничение покадрового сводного журнала (на одно соединение на каждое направление). */
         const val FRAME_LOG_LIMIT = 40
 
-        /** 链路终结哨兵；真实控制载荷至少包含一段 CSM 帧，不会为空。 */
+        /** Датчик завершения соединения; реальные управляющие данные содержат по крайней мере один кадр CSM и не будут пустыми. */
         val POISON = ByteArray(0)
     }
 }

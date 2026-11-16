@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 手机侧「车机设置」菜单卡片：图标 tile + 标题/描述 + 箭头 -->
+<!-- Карточка меню «Настройки автомобиля» на мобильном телефоне: плитка со значком + заголовок/описание + стрелка. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"

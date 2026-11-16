@@ -11,19 +11,22 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 日志导出：把运行日志写成 `下载/CarDeck/CarDeck-log-<时间>.txt`，普通文件管理器可见。
+ * Экспорт журнала : записывайте текущий журнал как `внизнагрузка/CarDeck/CarDeck-log-<время>.txt`, видимый в обычных файловых менеджерах.
  *
- * 为什么落 MediaStore.Downloads 而不是应用私有目录：
- *  - `filesDir` / `getExternalFilesDir` 普通用户在文件管理器里找不到（Android 11+
- *    系统文件管理器直接屏蔽 `Android/data`），日志导出等于没导；
- *  - MediaStore.Downloads 无需任何存储权限，落盘即出现在系统「下载」目录，
- *    微信/QQ/邮件发送附件也能直接选到。
+ * Зачем удалять MediaStore.Downloads вместо личного каталога приложения:
+ * - `filesDir`/`getExternalFilesDir` Обычные пользователи не могут найти его в файловом менеджере (Android 11+
+ * Системный файловый менеджер   напрямую блокирует `Android/data`), а экспорт журнала равен отсутствию экспорта;
+ * — MediaStore.Downloads не требует каких-либо разрешений на хранение. Он появится в системном каталоге
+ * «Загрузки» сразу после установки диска.
+ * Вы также можете напрямую выбирать вложения, отправленные по WeChat/QQ/электронной почте.
  *
- * 内容优先取 `files/main_debug.log`：它记录全部 appendLog（不受 UI 日志开关影响，
- * 最多保留最近 2MB）；文件不可读时才退回 UI 的内存缓冲（最近 20~40KB）。
+ * Содержимое   имеет приоритет над `files/main_debug.log`: оно записывает весь журнал AppendLog (на него не
+ * влияет переключение журнала пользовательского интерфейса,
+ * сохраняет самые последние 2 МБ); только когда файл не читается, он возвращается в буфер памяти
+ * пользовательского интерфейса (самые последние 20–40 КБ).
  */
 object LogExporter {
-    /** 导出范围：默认只导本次进程启动后的日志（历史轮次对排查是噪音）。 */
+    /** Область экспорта: по умолчанию экспортируются только журналы после запуска этого процесса (исторические раунды являются помехой для устранения неполадок). */
     enum class Scope(
         val label: String,
         val fileNameTag: String,
@@ -35,19 +38,19 @@ object LogExporter {
     data class Result(
         val uri: Uri,
         val fileName: String,
-        /** 给用户看的绝对路径（文件管理器里按这个找）。 */
+        /** Абсолютный путь, отображаемый пользователю (щелкните по нему, чтобы найти его в файловом менеджере). */
         val displayPath: String,
         val bytes: Long,
         val scope: Scope,
     )
 
-    /** 导出目录（相对外部存储根）：下载/CarDeck。 */
+    /** Каталог экспорта (относительно корня внешнего хранилища): Downloads/CarDeck. */
     private val RELATIVE_DIR = "${Environment.DIRECTORY_DOWNLOADS}/CarDeck"
 
-    /** 文件管理器里展示的绝对路径前缀（主用户外部存储；分区存储下即 /sdcard）。 */
+    /** Префикс абсолютного пути, отображаемый в файловом менеджере (основное внешнее хранилище пользователя; /sdcard в хранилище разделов). */
     private const val DISPLAY_ROOT = "/storage/emulated/0"
 
-    /** 导出并返回结果；失败返回 null（调用方提示用户）。任意线程可调（含 IO）。 */
+    /** Экспорт и возврат результатов; возвращает значение null в случае ошибки (вызывающая сторона запрашивает пользователя). Любой поток регулируется (включая IO). */
     fun export(
         context: Context,
         fallbackText: String,
@@ -63,7 +66,7 @@ object LogExporter {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, RELATIVE_DIR)
-                // 先标 pending 再写：避免文件管理器/相册扫描到半截文件
+                // Сначала пометьте ожидающим, а затем напишите: чтобы файловый менеджер/альбом не сканировал половину файла.
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         val uri = resolver.insert(collection, values) ?: return null
@@ -74,7 +77,7 @@ object LogExporter {
             resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             Result(uri, fileName, "$DISPLAY_ROOT/$RELATIVE_DIR/$fileName", bytes.size.toLong(), scope)
         } catch (_: Exception) {
-            // 半截文件（IS_PENDING=1）对用户不可见，但会占空间——清掉
+            // Половина файла (IS_PENDING=1) не видна пользователю, но будет занимать место — очистите его
             runCatching { resolver.delete(uri, null, null) }
             null
         }
@@ -108,7 +111,9 @@ object LogExporter {
                 append(fileLog)
                 if (!fileLog.endsWith('\n')) appendLine()
             } else {
-                // 启动标记刚写、其余日志还没落盘（或文件不可读）时，界面缓冲仍是有效来源
+                // Когда метка запуска только что была записана, а другие журналы не были записаны на диск (или файл не
+                // читается), буфер интерфейса все еще является действительным источником.
+
                 appendLine("(Журнал файла недоступен — буферизация интерфейса экспорта, может быть неполной)")
                 append(fallbackText)
             }

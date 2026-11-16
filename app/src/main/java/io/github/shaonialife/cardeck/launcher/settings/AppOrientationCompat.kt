@@ -6,41 +6,45 @@ import io.github.shaonialife.cardeck.shizuku.Shell
 import java.util.concurrent.Executors
 
 /**
- * 「强制应用横屏」兼容覆盖的唯一管理口：
- *   - 用户偏好持久化在本应用 SharedPreferences（页面开关读写）；
- *   - 系统侧覆盖（am compat，持久）只在**会话期间**保持：
- *     会话建立时 [applyAllAsync] 逐应用写入，
- *     会话结束（断开/推流终止）时 [resetAllAsync] 统一复原——
- *     避免覆盖残留影响应用在手机侧的正常竖屏使用。
+ * Единственный порт управления, совместимый с  «принудительным горизонтальным экраном приложения»:
+ * — пользовательские настройки сохраняются в этом приложении SharedPreferences (переключение страниц для чтения и записи);
+ * — переопределения на стороне системы (совместимые, постоянные) сохраняются только на время сеанса:
+ * [applyAllAsync] записывается приложением за приложением при установке сеанса.
+ * унифицированное восстановление после завершения сеанса (отключение/принудительное завершение) [resetAllAsync]——
+ * предотвращает влияние остатков покрытия на нормальное использование приложения на вертикальном экране на стороне мобильного телефона.
  *
- * **必须在连接关键路径之外执行**：每个应用两次 `am compat` 都是 shell 往返，
- * 名单 6 个应用实测 ~1.6-2.0s。此前复原在配对前同步跑、写入在虚拟屏 attach 里
- * 同步跑，直接把奥迪连接时间拉长约 3.5s（2026-10-18 实测）。两者用同一个单线程
- * 执行器串行，保证「先复原上一会话、再写入本会话」的顺序（跨线程并发会互相覆盖）。
+ * **должен выполняться вне критического пути соединения**: оба `am compat` для каждого приложения являются циклическими обходами оболочки,
+ * список 6 приложений показал время ~1,6–2,0 с. Раньше восстановление запускалось синхронно перед сопряжением и
+ * записывалось в аттаче виртуального экрана.
+ * работает синхронно, напрямую увеличивая время подключения Audi примерно на 3,5 с (фактическое измерение 18
+ * октября 2026 г.). Оба используют один и тот же поток
+ * Сериализация исполнителя   обеспечивает порядок «сначала восстановить предыдущий сеанс, затем записать в этот
+ * сеанс» (межпоточный параллелизм перезапишет друг друга).
  *
- * 生效组合（头条/抖音实测）：
- *   OVERRIDE_UNDEFINED_ORIENTATION_TO_NOSENSOR + OVERRIDE_ANY_ORIENTATION
+ * Эффективная комбинация   (фактическое испытание Toutiao/Douyin):
+ * OVERRIDE_UNDEFINED_ORIENTATION_TO_NOSENSOR + OVERRIDE_ANY_ORIENTATION
  */
 object AppOrientationCompat {
     const val CHANGE_UNDEFINED_TO_NOSENSOR = 265451093
     const val CHANGE_ANY_ORIENTATION = 265464455
 
     /**
-     * 支持强制横屏的最低 SDK（Android 14）。这两个 ChangeId 是 AOSP 标准项，
-     * 自 Android 14 起定义在 `android.content.pm.ActivityInfo`
-     * （`@ChangeId @Disabled @Overridable`），由 `LetterboxUiController` 消费；
-     * Android 13 及更早完全没有 orientation 类 ChangeId。
+     * поддерживает минимальный SDK для принудительного горизонтального экрана (Android 14). Эти два ChangeId
+     * являются стандартными элементами AOSP.
+     * определен в `android.content.pm.ActivityInfo` начиная с Android 14.
+     * (`@ChangeId @Disabled @Overridable`), потребляемый `LetterboxUiController`;
+     * Android 13 и более ранних версий вообще не имеют класса ориентации ChangeId.
      */
     const val MIN_SUPPORTED_SDK = 34
     private const val PREFS = "app_orientation"
 
-    /** 串行执行器：复原与写入严格按调用顺序执行，且不占用连接/UI 线程。 */
+    /** Последовательный исполнитель: Восстановление и запись выполняются строго в порядке вызовов и не занимают поток соединения/UI. */
     private val executor =
         Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "orientation-compat").apply { isDaemon = true }
         }
 
-    /** 偏好键统一按「包名」存取（am compat 也以包名为对象；读取侧统一 removePrefix 兼容旧键）。 */
+    /** Доступ к привилегированным ключам осуществляется единообразно по «имени пакета» (am compat также нацелен на имя пакета; сторона чтения представляет собой унифицированный метод RemovePrefix и совместима со старыми ключами). */
     private fun key(pkg: String) = "force_$pkg"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -51,49 +55,55 @@ object AppOrientationCompat {
     ): Boolean = prefs(context).getBoolean(key(pkg), false)
 
     /**
-     * 系统侧写入结果。区分「永久不支持」与「临时失败」——两者对偏好的处置相反：
-     * 永久不支持不该留下偏好（否则下次连接白跑、面板显示与系统状态脱节），
-     * 临时失败应保留用户意愿（下次连接/重试仍有机会生效）。
+     * Результат записи на стороне системы. Различайте «постоянный неподдерживаемый» и «временный сбой» — оба
+     * обрабатывают предпочтения противоположными способами:
+     * постоянно не поддерживается и не следует оставлять настройки (иначе следующее подключение будет бесполезным и
+     * дисплей панели не будет соответствовать состоянию системы).
+     * Временный сбой должен сохранять пожелания пользователя (следующее соединение/повторная попытка все еще будет
+     * иметь шанс вступить в силу).
      */
     enum class WriteResult {
-        /** 两个 ChangeId 都写入成功。 */
+        /** Оба ChangeId были записаны успешно. */
         OK,
 
         /**
-         * 本机 **平台不具备该能力**，重试永远不会成功。按 SDK 版本可直接判定：
+         * Нативная платформа  **платформа не имеет такой возможности**, и повторная попытка никогда не будет успешной.
+         * Вы можете напрямую определить версию SDK:
          *
-         * **这两个 ChangeId 是 AOSP 标准项，自 Android 14 (SDK 34) 起引入**
-         * （`android.content.pm.ActivityInfo`，带 `@ChangeId @Disabled @Overridable`），
-         * 在 `LetterboxUiController` 里生效；Android 16 起重构到
-         * `AppCompatOrientationOverrides`。Android 13 及更早**一个 orientation 类
-         * ChangeId 都没有**（实测 A13 的 ActivityInfo 里 0 个，A14 有 9 个）。
+         * **Эти два ChangeIds являются стандартными элементами AOSP, представленными начиная с Android 14 (SDK 34)**
+         * (`android.content.pm.ActivityInfo` с `@ChangeId @Disabled @Overridable`),
+         * вступает в силу в `LetterboxUiController`; реорганизован в
+         * `AppCompatOrientationOverrides`. Android 13 и более ранние версии** — ознакомительный курс.
+         * ChangeId не имеет ** (фактически измеренные значения равны 0 в ActivityInfo для A13 и 9 в A14).
          *
-         * 因此本机不支持的成因按可能性排序：
-         * 1. **Android 13 及更早**（SDK < 34）：平台根本没定义 → `dumpsys
-         *    platform_compat` 里无该 ChangeId 的 name，`am compat` 先警告
-         *    `Change ... is not known yet`。实例：红米 K40（Android 13 / SDK 33）。
-         * 2. **OEM 裁掉了这些 ChangeId**：理论上 A14+ 都有，但个别 ROM 可能移除；
-         *    判据同上（dumpsys 无 name）。
-         * 3. **user build + 非 debuggable 应用**：即使 ChangeId 已注册，
-         *    `PlatformCompat` 也只允许改 debuggable 应用，输出
-         *    `Cannot override a change on a non-debuggable app and user build.`
+         * Поэтому причины, по которым данная машина его не поддерживает, упорядочены по вероятности:
+         * 1. **Android 13 и более ранние версии** (SDK < 34): платформа вообще не определена → `dumpsys
+         * Platform_compat` внутриНеттот ChangeId из name，`am compat` Сначала предупреждение
+         * `Change ... is not known yet`. Пример: Redmi K40 (Android 13/SDK 33).
+         * 2. **OEM отрезал эти ChangeId**: Теоретически они есть у A14+, но некоторые ПЗУ могут их удалить;
+         * Критерии для           такие же, как указано выше (dumpsys не имеет названия).
+         * 3. **пользовательская сборка + неотлаживаемое приложение**: даже если ChangeId зарегистрирован,
+         * `PlatformCompat` также разрешено изменять только отлаживаемые приложения и выходные данные.
+         * `Cannot override a change on a non-debuggable app and user build.`
          *
-         * 都**不是 Shizuku 的问题**（shell 与 UserService 同为 uid 2000，结果一致）。
-         * 用户可操作的建议：升级到 Android 14+ 的机型。
+         * не является проблемой Shizuku (оболочка и UserService имеют uid 2000, и результаты совпадают).
+         * Практические рекомендации для пользователей          : Обновите модель до Android 14+.
          */
         UNSUPPORTED,
 
-        /** 临时失败（Shizuku 未就绪/超时/命令异常）——可重试。 */
+        /** Временный сбой (Шизуку не готов/тайм-аут/исключение команды) — можно повторить попытку. */
         FAILED,
     }
 
     /**
-     * 用户开关的**异步包装**：UI 线程唯一入口。
+     * **Асинхронная оболочка** пользовательского переключателя: единственный вход в поток пользовательского интерфейса.
      *
-     * `setEnabled` 内部是 2 次 `Shell.exec`（各 4s 超时），最坏 8s——直接放在
-     * 勾选框的点击回调里会远超 ANR 阈值（2026-10-18 同批修复）。这里改为投递到
-     * 串行执行器，结果回主线程回调；**执行器串行**保证同一应用连续点击时
-     * 写入/复原按点击顺序落地，不会互相覆盖。
+     * `setEnabled` внутренне 2 раза `Shell.exec` (таймаут по 4 с), самое худшее - 8 с - ставьте прямо
+     * Обратный вызов щелчка флажка       значительно превысит порог ANR (фиксированный в том же пакете 18 октября
+     * 2026 г.). Измените доставку здесь на
+     * последовательный исполнитель, результат возвращается обратному вызову основного потока; **серийный номер
+     * исполнителя** гарантирует, что одно и то же приложение будет щелкаться постоянно
+     * записывают/восстанавливают в порядке щелчков и не перезаписывают друг друга.
      */
     fun setEnabledAsync(
         context: Context,
@@ -111,12 +121,15 @@ object AppOrientationCompat {
     }
 
     /**
-     * 用户开关：写系统覆盖（设置页用）。**成功后才落偏好**。
+     * Пользовательский переключатель: запись переопределения системы (для страницы настроек). **Предпочтение приходит после успеха**.
      *
-     * **只能在后台线程调用**（内部含 2 次 shell 往返，最坏 8s）。UI 用 [setEnabledAsync]。
+     * **может вызываться только в фоновом потоке** (включает 2 внутренних обращения к оболочке, в худшем случае 8
+     * с). Пользовательский интерфейс использует [setEnabledAsync].
      *
-     * 失败分类见 [WriteResult]：`UNSUPPORTED` 时偏好保持原样（用户意愿不落盘，
-     * 因为落盘只会让下次连接再白跑一次 applyAll）；`FAILED` 保留用户意愿。
+     * Классификацию отказов       см. в [WriteResult]: `UNSUPPORTED`, когда предпочтение остается прежним
+     * (пользователь не желает размещать заказ,
+     * , потому что размещение диска приведет к тому, что следующее соединение будет запускать applyAll напрасно);
+     * `FAILED` сохраняет пожелания пользователя.
      */
     fun setEnabled(
         context: Context,
@@ -129,7 +142,7 @@ object AppOrientationCompat {
             if (first.ok) {
                 Shell.exec("am compat $action $CHANGE_ANY_ORIENTATION $pkg", timeoutMs = 4000)
             } else {
-                // 第一条就被拒时不再写第二条（同一限制，省一次无谓的 shell 往返）
+                // Если первый отклонен, не пишите второй (то же ограничение, за исключением ненужного обращения к оболочке туда и обратно)
                 first
             }
         if (first.ok && second.ok) {
@@ -138,13 +151,15 @@ object AppOrientationCompat {
         }
         val unsupported = isPermanentRejection(first.output) || isPermanentRejection(second.output)
         if (!unsupported) {
-            // 临时故障：保留用户意愿，下次连接 applyAll 会再试
+            // Временный сбой: сохраните пожелания пользователя, ApplyAll в следующий раз повторит попытку.
             prefs(context).edit().putBoolean(key(pkg), enable).apply()
         }
-        // 诊断要能区分两种永久性成因（ChangeId 未注册 / user build 非 debuggable）
+        // Диагностика должна позволять различать две постоянные причины (ChangeId не зарегистрирован/пользовательская
+        // сборка не подлежит отладке)
+
         diagSink?.invoke(
             "ORIENTATION: compat $action " +
-                (if (unsupported) "本机不支持" else "失败") +
+                (if (unsupported) "Эта машина не поддерживает" else "не удалось") +
                 " pkg=$pkg change=$CHANGE_UNDEFINED_TO_NOSENSOR exit=${first.exitCode} out=${first.output.take(160)}" +
                 if (unsupported) "（${describeUnsupported()}）" else "",
         )
@@ -152,39 +167,40 @@ object AppOrientationCompat {
     }
 
     /**
-     * 本机**是否具备该能力**（平台事实）。
+     * Имеет ли  изначально такую возможность** (факт платформы).
      *
-     * 判定分两步，快慢结合：
-     * 1. **SDK 版本门槛**（零成本）：这两个 ChangeId 是 AOSP 标准项，自
-     *    **Android 14 / SDK 34** 起在 `android.content.pm.ActivityInfo` 中定义
-     *    （`@ChangeId @Disabled @Overridable`，由 `LetterboxUiController` 消费；
-     *    Android 16 起重构到 `AppCompatOrientationOverrides`）。
-     *    Android 13 及更早的 ActivityInfo 里**一个 orientation 类 ChangeId 都没有**
-     *    （实测 A13=0 个、A14=9 个）→ 直接判不支持，不必跑 shell。
-     * 2. **dumpsys 复核**（SDK ≥ 34 时才跑）：确认该 ROM 真的注册了这两个 ID
-     *    （个别 OEM 可能裁掉）。已注册条目带 `name=...`，未注册只有裸
-     *    `ChangeId(...; rawOverrides={...})`。
+     * Решение       разделено на два этапа, сочетающих в себе быстрое и медленное:
+     * 1. **Порог версии SDK** (нулевая стоимость): эти два ChangeId являются стандартными элементами AOSP.
+     * Определен в `android.content.pm.ActivityInfo` из **Android 14/SDK 34**
+     * (`@ChangeId @Disabled @Overridable`, потребляется `LetterboxUiController`;
+     * реорганизован в `AppCompatOrientationOverrides`, начиная с Android 16).
+     * В ActivityInfo Android 13 и более ранних версий нет класса ориентации ChangeId**
+     * (фактически измерено A13=0, A14=9) → Он сразу оценивается как не поддерживаемый, и нет необходимости запускать оболочку.
+     * 2. **просмотр дампсиса** (запускается только при SDK ≥ 34): убедитесь, что ПЗУ действительно регистрирует эти два идентификатора.
+     * (может быть отрезан отдельными производителями). Зарегистрированные записи имеют `name=...`,
+     * незарегистрированные записи имеют только голый
+     * `ChangeId(...; rawOverrides={...})`.
      *
-     * 结果进程内缓存（同一次安装内不会变）。
+     * Результаты       кэшируются в процессе (не изменяются в рамках одной установки).
      */
     fun changeIdsRegistered(): Boolean {
         cachedRegistered?.let { return it }
-        // 1) 版本门槛：Android 14 以下平台根本没有这些 ChangeId
+        // 1) Порог версии: платформы ниже Android 14 вообще не имеют этих ChangeIds.
         if (Build.VERSION.SDK_INT < MIN_SUPPORTED_SDK) {
             cachedRegistered = false
             return false
         }
-        // 2) dumpsys 复核：两个 ID 分别取行校验——不能对整段输出查一次 `name=`
-        //    （只注册了其中一个时会被误判成两个都可用，随后第二个写入才失败）。
+        // 2) Обзор Dumpsys: возьмите два идентификатора отдельно для проверки — вы не можете проверить весь вывод один раз `name=`
+        //    (Когда зарегистрирован только один из них, будет ошибочно считать, что оба доступны, и тогда вторая запись не удастся).
         val first = changeIdLine(CHANGE_UNDEFINED_TO_NOSENSOR)
         val second = changeIdLine(CHANGE_ANY_ORIENTATION)
         val value = first.contains("name=") && second.contains("name=")
-        // dumpsys 不可用（命令失败）时不缓存，留待下次重试
+        // Если dumpsys недоступен (команда не выполнена), он не будет кэшироваться и его можно будет повторить в следующий раз.
         if (first.isNotBlank() || second.isNotBlank()) cachedRegistered = value
         return value
     }
 
-    /** 取某 ChangeId 在 `dumpsys platform_compat` 里的那一行（未注册时可能为空）。 */
+    /** Получите строку с определенным ChangeId в `dumpsys platform_compat` (она может быть пустой, если она не зарегистрирована). */
     private fun changeIdLine(changeId: Int): String =
         Shell
             .exec(
@@ -195,34 +211,35 @@ object AppOrientationCompat {
     @Volatile
     private var cachedRegistered: Boolean? = null
 
-    /** 永久失败的具体成因（写进日志，便于跨机型排查）。 */
+    /** Конкретная причина постоянного сбоя (записывается в журнал для облегчения устранения неполадок между моделями). */
     private fun describeUnsupported(): String =
         when {
             Build.VERSION.SDK_INT < MIN_SUPPORTED_SDK ->
-                "Android ${Build.VERSION.RELEASE}（SDK ${Build.VERSION.SDK_INT}）低于 14" +
-                    "——这两个 ChangeId 自 Android 14 起才进平台"
+                "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}) ниже 14" +
+                    "——Эти два ChangeId появились на платформе только начиная с Android 14."
 
             !changeIdsRegistered() ->
-                "SDK ${Build.VERSION.SDK_INT} 但该 ROM 未注册这两个 ChangeId（疑似 OEM 裁剪）"
+                "SDK ${Build.VERSION.SDK_INT}, но ПЗУ не регистрирует эти два ChangeId (подозрение на обрезку OEM)"
 
             else ->
-                "ChangeId 已注册，但 user build 不允许修改非 debuggable 应用"
+                "ChangeId зарегистрирован, но пользовательская сборка не позволяет изменять неотлаживаемые приложения."
         }
 
     /**
-     * 该命令输出是否为「永久失败」（不可重试）。
+     * Является ли вывод команды «постоянным сбоем» (невозможно повторить попытку).
      *
-     * 覆盖两类措辞：ChangeId 未注册时 `am compat` 先警告 `is not known yet` 再拒绝；
-     * 已注册但受 user build 限制时给出 `non-debuggable app and user build`。
-     * 两者都与 Shizuku 无关，重试无效。
+     * охватывает два типа формулировок: когда ChangeId не зарегистрирован, `am compat` сначала предупреждает `is not
+     * known yet`, а затем отклоняет;
+     * дает `non-debuggable app and user build` при регистрации, но ограничен пользовательской сборкой.
+     * Оба не имеют никакого отношения к Шизуку, повторная попытка не имеет никакого эффекта.
      */
     private fun isPermanentRejection(output: String): Boolean = classifyCompatFailure(output) == WriteResult.UNSUPPORTED
 
-    /** 诊断日志出口（SessionController.appendLog 接到文件日志）。 */
+    /** Экспорт журнала диагностики (SessionController.appendLog получает файл журнала). */
     @Volatile
     var diagSink: ((String) -> Unit)? = null
 
-    /** 异步版 [applyAll]：连接关键路径调用（log 在完成后回调，便于排查）。 */
+    /** Асинхронная версия [applyAll]: вызов критического пути соединения (журнал будет вызван после завершения для упрощения устранения неполадок). */
     fun applyAllAsync(
         context: Context,
         log: (String) -> Unit,
@@ -230,11 +247,16 @@ object AppOrientationCompat {
         val app = context.applicationContext
         executor.execute {
             val count = runCatching { applyAll(app) }.getOrDefault(0)
-            if (count > 0) log("ORIENTATION: 已为 $count 个应用启用强制横屏（会话期间生效）")
+            if (count > 0) {
+                log(
+                    "ОРИЕНТАЦИЯ: для приложений $count включена принудительная альбомная ориентация " +
+                        "(эффективно во время сеанса).",
+                )
+            }
         }
     }
 
-    /** 异步版 [resetAll]：会话退役时调用，不阻塞后续配对。 */
+    /** Асинхронная версия [resetAll]: вызывается при завершении сеанса и не блокирует последующее сопряжение. */
     fun resetAllAsync(
         context: Context,
         log: (String) -> Unit,
@@ -242,19 +264,23 @@ object AppOrientationCompat {
         val app = context.applicationContext
         executor.execute {
             val count = runCatching { resetAll(app) }.getOrDefault(0)
-            if (count > 0) log("ORIENTATION: 已复原 $count 个应用的显示设置")
+            if (count > 0) log("ОРИЕНТАЦИЯ: восстановлены настройки отображения для приложений $count.")
         }
     }
 
     /**
-     * 等排队中的覆盖写入/复原执行完（最多 [timeoutMs]）。
+     * Дождитесь завершения очереди перезаписи/восстановления (до [timeoutMs]).
      *
-     * **应用启动前必须调用**：`am compat enable` 会立即杀掉目标应用。覆盖写入改成
-     * 异步后，用户在写入完成前点桌面图标，就会出现「应用刚起来就被覆盖写入杀掉」。
-     * 执行器是单线程 FIFO，投一个空任务并等它完成即等价于 drain。
+     * **Необходимо вызывать перед запуском приложения**: `am compat enable` немедленно завершит целевое приложение.
+     * Перезаписать запись изменена на
+     * После асинхронного режима      , если пользователь щелкнет значок на рабочем столе до завершения записи,
+     * появится сообщение «приложение было перезаписано и закрыто сразу после запуска».
+     * Исполнитель       представляет собой однопоточный FIFO. Создание пустой задачи и ожидание ее завершения эквивалентно сливу.
      *
-     * @return 是否在时限内排空；false = 超时（调用方必须留痕——静默失效会让
-     * 「先写覆盖再拉应用」的保证悄悄失效，应用照样被杀，2026-10-23 审阅定谳）。
+     * @return Будет ли он опорожнен в течение установленного срока; false = тайм-аут (вызывающая сторона должна
+     * оставить следы — тихий сбой приведет к
+     * Гарантия       «сначала перезаписать, а затем извлечь приложение» незаметно истекла, а приложение все равно
+     * было убито, проверено и определено 23 октября 2026 г.).
      */
     fun awaitPending(timeoutMs: Long = 6_000L): Boolean {
         val done = java.util.concurrent.CountDownLatch(1)
@@ -267,17 +293,22 @@ object AppOrientationCompat {
         }
     }
 
-    /** 会话建立：名单内应用逐个写入覆盖（幂等）。返回**成功**写入的应用数。 */
+    /** Установление сеанса: покрытие по записи, применяемое внутри списка (идемпотентное). Возвращает количество успешно написанных приложений. */
     fun applyAll(context: Context): Int {
         val pkgs = enabledPkgs(context)
         if (pkgs.isEmpty()) return 0
-        // 先做一次平台能力探测：ROM 未注册这两个 ChangeId 时（红米 Android 13 实测），
-        // 名单里每个应用都要白跑两次 4s 超时的 shell 往返。一次 dumpsys 就能判定，
-        // 成本约 30ms、结果进程内缓存。
+        // Сначала выполните определение возможностей платформы: когда ПЗУ не регистрирует эти два ChangeId (фактический
+        // тест на Redmi Android 13),
+
+        // Каждому приложению в списке приходится тщетно запускать два цикла обработки оболочки с тайм-аутом в 4 секунды.
+        // Один дампсис может определить,
+
+        // Стоимость составляет около 30 мс, а результаты кэшируются в процессе.
         if (!changeIdsRegistered()) {
             diagSink?.invoke(
-                "ORIENTATION: 本机 ROM 未注册横屏兼容 ChangeId——跳过本次全部覆盖" +
-                    "（名单 ${pkgs.size} 个应用；该机型不支持强制横屏）",
+                "ОРИЕНТАЦИЯ: Родное ПЗУ не зарегистрировано и совместимо с горизонтальным экраном. ChangeId — на этот " +
+                    "раз пропустите все покрытия." +
+                    "(приложений: ${pkgs.size}; принудительная альбомная ориентация не поддерживается)",
             )
             return 0
         }
@@ -285,12 +316,16 @@ object AppOrientationCompat {
         for (pkg in pkgs) {
             val first = Shell.exec("am compat enable $CHANGE_UNDEFINED_TO_NOSENSOR $pkg", timeoutMs = 4000)
             if (!first.ok) {
-                // ChangeId 已注册仍被拒 → user build 不允许改非 debuggable 应用；
-                // 同样整体停止，不逐应用空跑。
+                // ChangeId зарегистрирован, но по-прежнему отклонен → пользовательской сборке не разрешено изменять
+                // неотлаживаемые приложения;
+
+                // Он также останавливается целиком и не запускается отдельно для каждого приложения.
                 if (isPermanentRejection(first.output)) {
                     diagSink?.invoke(
-                        "ORIENTATION: 系统限制——user 版本只允许修改可调试(debuggable)应用的" +
-                            "兼容设置，跳过本次全部横屏覆盖（名单 ${pkgs.size} 个应用）",
+                        "ОРИЕНТАЦИЯ: Системное ограничение - пользовательская версия позволяет модифицировать только " +
+                            "отлаживаемые приложения." +
+                            "Совместимые настройки, на этот раз пропустите все горизонтальное покрытие экрана (список " +
+                            "приложений ${pkgs.size})",
                     )
                     return 0
                 }
@@ -302,7 +337,7 @@ object AppOrientationCompat {
         return count
     }
 
-    /** 会话结束：名单内应用统一复原（偏好保留，仅撤销系统覆盖）。返回处理的应用数。 */
+    /** Конец сеанса: Приложения в списке восстанавливаются единообразно (предпочтения сохраняются, отменяются только системные переопределения). Возвращает количество обработанных заявок. */
     fun resetAll(context: Context): Int {
         var count = 0
         enabledPkgs(context).forEach { pkg ->
@@ -314,21 +349,28 @@ object AppOrientationCompat {
     }
 
     /**
-     * 系统侧当前真正开着覆盖的「覆盖键」集合（事实源；键可能是包名，也可能是
-     * 历史脏数据里的 `包/组件` 串）。
+     * Набор «ключей переопределения», которые в данный момент переопределяются на стороне системы (источник; ключ
+     * может быть именем пакета или
+     * `пакет/компоненты` строка в исторических грязных данных).
      *
-     * 偏好文件读不到「系统实际状态」：**卸载会删掉偏好，系统侧 am compat 覆盖却会留下**
-     * （2026-10-16 实测：设备上有飞书/大众点评/荣耀云音乐三个残留）。查询只能走
-     * `dumpsys platform_compat`（该 ROM 无 `cmd platform_compat`），实测全量 30ms/36KB，
-     * 过滤到关心的两个 ChangeId 后约 3KB——**面板打开时查一次**，行绑定只做内存查表，
-     * 绝不可每行一次（40+ 应用 × ~100ms = 卡顿）。
+     * Файл настроек не может прочитать «фактическое состояние системы»: **При удалении настройки будут удалены, но
+     * перезапись на стороне системы сохранит их**
+     * (Фактическое тестирование 16 октября 2026 г.: на устройстве имеются три остатка Feishu/Dianping/Honor Cloud
+     * Music). Запрос может идти только
+     * `dumpsys platform_compat` (в этом ПЗУ нет `cmd platform_compat`), фактический измеренный полный размер составляет 30 мс/36 КБ,
+     * занимает около 3 КБ после фильтрации двух интересующих ChangeId — **Проверьте один раз при открытии панели**,
+     * привязка строк выполняет только поиск в таблице памяти.
+     * никогда не следует использовать один раз на строку (40+ приложений × ~100 мс = задержка).
      *
-     * **必须同时解析 packageOverrides 与 rawOverrides**：已卸载应用的覆盖只存在于
-     * rawOverrides——packageOverrides 是平台按「已安装包」解析后的映射，包不存在时条目
-     * 消失（2026-10-16 实测：给未安装包写的覆盖只在 rawOverrides 可见）。「其它系统
-     * 残留」汇总正是为卸载残留设计的，漏读会让横幅永远空着。
+     * **Необходимо разрешить как packageOverrides, так и rawOverrides**: переопределения для неустановленных приложений существуют только в
+     * rawOverrides — packageOverrides — это сопоставление после того, как платформа анализирует «установленный
+     * пакет», и запись — это когда пакет не существует.
+     * исчез (фактическое тестирование 16 октября 2026 г.: переопределения, записанные для неустановленных пакетов,
+     * видны только в rawOverrides). «Другие системы
+     * Сводка       «Остаток» предназначена для удаления остатков. Если страница отсутствует, баннер останется пустым навсегда.
      *
-     * 两个 ChangeId 取或：只开其一的半残状态同样视为「已开启」（清理时会一并写两个）。
+     * ИЛИ двух ChangeIds: полуотключенное состояние только одного из них также считается "открытым" (при очистке оба
+     * будут записаны вместе).
      */
     fun systemEnabled(): Set<String> {
         val out =
@@ -341,29 +383,35 @@ object AppOrientationCompat {
         return out
             .lineSequence()
             .flatMap { line ->
-                // packageOverrides={com.a=true, ...}；rawOverrides 里还可能有 包/组件 键
+                // packageOverrides={com.a=true, ...}; в rawOverrides также могут быть ключи пакета/компонента
                 Regex("(?:packageOverrides|rawOverrides)=\\{([^}]*)\\}")
                     .findAll(line)
                     .flatMap { m ->
-                        // 键容许多数可打印字符（含 / 的组件键）；只取 =true
+                        // Ключи допускают использование нескольких печатаемых символов (ключи компонентов содержат /); только возьми =true
                         Regex("([^=,{}\\s]+)=true").findAll(m.groupValues[1]).map { it.groupValues[1] }
                     }
             }.toSet()
     }
 
     /**
-     * 指定包的系统侧覆盖是否真的开着（letterbox 提示的触发前置条件）。
+     * указывает, действительно ли включено покрытие указанного пакета на стороне системы (запускает предварительное
+     * условие для запроса почтового ящика).
      *
-     * 光看偏好不够：`am compat` 临时失败时偏好会保留（用户意愿），但系统侧没有覆盖，
-     * 此时提示「强制重启」注定无效。探测只在候选应用上跑一次，成本≈一次 grep。
+     * Простого просмотра настроек недостаточно: `am compat` Настройки будут сохранены (пожелания пользователя) при
+     * возникновении временного сбоя, но на стороне системы нет защиты.
+     * В настоящее время запрос «принудительный перезапуск» недействителен. Зонд запускается только один раз в
+     * приложении-кандидате, стоимость которого составляет ≈ один grep.
      */
     fun isSystemEnabledFor(pkg: String): Boolean = pkg in systemEnabled()
 
     /**
-     * 清除单个「覆盖键」的系统侧覆盖（两个 ChangeId 都写 disable）。
-     * 仅动系统覆盖、**不动偏好**——用于清理「偏好已不在（卸载残留）但覆盖还开着」的条目；
-     * 名单内的应用请用 [setEnabled]（会同步偏好，避免 UI 与系统状态脱节）。
-     * 注意：am compat disable 会立即杀掉目标应用进程（新设置需重启应用生效）。
+     * отменяет переопределение на стороне системы одного «ключа переопределения» (отключение записи в обоих ChangeId).
+     * перемещает только системное наложение, **не перемещает настройки** — используется для очистки записей, в
+     * которых «предпочтение больше не существует (остатки удаления), но наложение все еще включено»;
+     * Для приложений из списка       используйте [setEnabled] (предпочтения будут синхронизированы, чтобы
+     * предотвратить отключение пользовательского интерфейса от состояния системы).
+     * Примечание: отключение am compat немедленно завершит процесс целевого приложения (новые настройки должны быть
+     * перезапущены, чтобы они вступили в силу).
      */
     fun clearSystemOnly(key: String): Boolean {
         val ok1 = Shell.exec("am compat disable $CHANGE_UNDEFINED_TO_NOSENSOR $key", timeoutMs = 4000).ok
@@ -378,25 +426,26 @@ object AppOrientationCompat {
             .keys
             .map { it.removePrefix("force_") }
 
-    /** 「应用横屏」名单（包名集合）：letterbox 提示探测用，只读。 */
+    /** Список «Горизонтальный экран приложения» (коллекция имен пакетов): используется для обнаружения подсказок почтового ящика, только для чтения. */
     fun enabledPackages(context: Context): Set<String> = enabledPkgs(context).toSet()
 }
 
 /**
- * 把 `am compat` 的失败输出分类（纯函数，可单测）。
+ * классифицирует выходной сигнал отказа `am compat` (чистая функция, поддающаяся единичному тестированию).
  *
- * 判为**永久失败**的三种措辞（都与 Shizuku 无关，重试无效）：
- *  1. `Cannot override a change on a non-debuggable app and user build.`
- *  2. `Cannot override a default enabled/disabled change on a user build.`
- *  3. `Change <id> is not known yet.` —— 本机 ROM 未注册该 ChangeId
- *     （这两个 ID 是 OEM 定制，AOSP 标准表里没有；红米 Android 13 实测缺失）
+ * считается **постоянным сбоем** по трем причинам (ни один из них не имеет никакого отношения к Шизуку, повторная попытка недействительна):
+ * 1. `Cannot override a change on a non-debuggable app and user build.`
+ * 2. `Cannot override a default enabled/disabled change on a user build.`
+ * 3. `Change <id> is not known yet.` — — Локальное ПЗУ не регистрирует ChangeId
+ * (Эти два идентификатора настроены OEM и не входят в стандартную таблицу AOSP; они отсутствуют в реальном тесте Redmi Android 13)
  *
- * 实测输出（2026-10-18）：
- *  - 红米（未注册）：
- *      `Warning! Change 265451093 is not known yet. Enabling/disabling it could have no effect.`
- *      `Cannot override a change on a non-debuggable app and user build.`
- *  - 荣耀（已注册，但目标是非 debuggable 应用时的同类拒绝）：同上第二条措辞
- *  - Shizuku 未连接：`Shizuku 未连接`（临时，可重试）
+ * Фактический измеренный выход   (18 октября 2026 г.):
+ * - Redmi (не зарегистрирован):
+ * `Warning! Change 265451093 is not known yet. Enabling/disabling it could have no effect.`
+ * `Cannot override a change on a non-debuggable app and user build.`
+ * — Honor (зарегистрировано, но аналогичное отклонение при нацеливании на неотлаживаемое приложение): то же, что
+ * и вторая формулировка выше.
+ * — Шизуку не подключен: `Шизуку не на связи` (временно, можно повторить попытку)
  */
 internal fun classifyCompatFailure(output: String): AppOrientationCompat.WriteResult =
     if (output.contains("non-debuggable app and user build") ||

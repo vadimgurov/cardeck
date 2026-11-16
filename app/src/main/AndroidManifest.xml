@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 无线 CarPlay 全链路：蓝牙 RFCOMM（iAP2 控制通道）+ WiFi（热点加入 / mDNS） -->
+    <!-- Полная ссылка на беспроводную связь CarPlay: Bluetooth RFCOMM (канал управления iAP2) + Wi-Fi (присоединение к точке доступа/mDNS) -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
@@ -10,14 +10,14 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
-    <!-- WifiNetworkSpecifier（应用专属网络）在 Android 12/12L（API 31-32）仍要求位置权限；
-         13+ 由 NEARBY_WIFI_DEVICES 取代，运行时不再申请这两个权限。
-         声明层面必须 FINE+COARSE 成对（lint CoarseFineLocation 强制要求）。 -->
+    <!-- WifiNetworkSpecifier (сеть для конкретного приложения) по-прежнему требует разрешения на определение местоположения на Android 12/12L (API 31–32);
+         13+ заменено на NEARBY_WIFI_DEVICES, эти два разрешения больше не будут применяться во время выполнения.
+         Уровень объявления должен быть в паре FINE+COARSE (обязательно для lint CoarseFineLocation). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- 目标车机选择里的「扫描未配对设备」：Android 12+ 需单独授权；
-         neverForLocation 表示扫描结果不用于定位（免去定位权限） -->
+    <!-- «Поиск неспаренных устройств» при выборе целевого автомобиля: Android 12+ требует отдельной авторизации;
+         NeverForLocation означает, что результаты сканирования не используются для позиционирования (разрешение на позиционирование отменяется) -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
@@ -26,11 +26,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <!-- 音频通道：AudioPlaybackCapture（捕获本机媒体/导航声音上车）必需 -->
+    <!-- Аудиоканал: требуется AudioPlaybackCapture (захват встроенных звуков мультимедиа/навигации) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- 音频通道激活时静音手机媒体音量（声音只从车机出），断开恢复 -->
+    <!-- Отключение громкости мультимедиа мобильного телефона при активации аудиоканала (звук раздается только из автомобиля) и восстановление после отключения. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <!-- 暗幕（替代息屏）需要；系统「显示在其他应用上层」列表只收录声明本权限的应用 -->
+    <!-- Требуется для темного экрана (замена экрана ожидания); в системный список «Показывать поверх других приложений» входят только приложения, задекларировавшие это разрешение. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
@@ -40,7 +40,7 @@
         <package android:name="moe.shizuku.privileged.api" />
         <package android:name="com.autonavi.amapauto" />
         <package android:name="com.autonavi.minimap" />
-        <!-- 应用桌面需要枚举全部可启动应用（Android 11+ 包可见性） -->
+        <!-- На рабочем столе приложения необходимо перечислить все запускаемые приложения (видимость пакета Android 11+). -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -56,10 +56,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.CarPlaySender">
 
-        <!-- 手机侧操作台自行处理旋转：它是有状态的工具界面（滚动位置、折叠卡、
-             已填热点 SSID、正在显示的弹窗），系统重建会把它们全部丢掉。
-             声明 configChanges 后 Activity 不重建、视图状态原样保留；
-             依赖屏幕尺寸的弹窗窗口在 onConfigurationChanged 里重算。 -->
+        <!-- Мобильная консоль сама управляет вращением: это интерфейс инструмента с отслеживанием состояния (положение прокрутки, сворачивание карты,
+             Заполнен SSID точки доступа, отображается всплывающее окно), при перестройке системы они все будут потеряны.
+             После объявления configChanges Activity не перестраивается, а состояние просмотра сохраняется как есть;
+             Всплывающие окна, зависящие от размера экрана, пересчитываются в onConfigurationChanged. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
@@ -71,9 +71,9 @@
             </intent-filter>
         </activity>
 
-        <!-- 车机设置（手机侧）：二级菜单页 + 内容 Fragment 宿主（与车机双栏共用面板）。
-             不声明 configChanges：这两页是短暂的工具页，旋转重建无状态损失；
-             首页才是要保留滚动/折叠/已填内容的长驻操作台。 -->
+        <!-- Настройки автомобиля и машины (со стороны мобильного телефона): Вторичная страница меню + хост фрагмента контента (общая панель с двумя столбцами автомобиля и машины).
+             Не объявляйте configChanges: эти две страницы являются кратковременными страницами инструментов, которые вращаются и перестраиваются без потери состояния;
+             Домашняя страница — это постоянная консоль, на которой должен сохраняться прокручиваемый/сворачиваемый/заполненный контент. -->
         <activity
             android:name=".PhoneSettingsActivity"
             android:exported="false" />
@@ -86,10 +86,10 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice|mediaProjection" />
 
-        <!-- 静默投屏跳板（自动连接时领 MediaProjection 令牌给音频内录用）：
-             exported=true 让 Shizuku 的 `am start` 能拉起（shell 只有
-             START_ACTIVITIES_FROM_BACKGROUND，没有 START_ANY_ACTIVITY）；
-             noHistory + excludeFromRecents + taskAffinity="" 保证不留痕迹。 -->
+        <!-- Плацдарм для бесшумной проекции экрана (получите токен MediaProjection для записи звука при автоматическом подключении):
+             Exported=true позволяет поднять `am start` Шизуку (только для оболочки).
+             START_ACTIVITIES_FROM_BACKGROUND, нет START_ANY_ACTIVITY);
+             noHistory + ignoreFromRecents + TaskAffinity="" гарантирует, что следов не останется. -->
         <activity
             android:name=".audio.SilentProjectionActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
@@ -99,9 +99,9 @@
             android:taskAffinity=""
             android:theme="@style/Theme.CarPlaySender.SilentTranslucent" />
 
-        <!-- 上车自动连接：ACL_CONNECTED / ACL_DISCONNECTED 在隐式广播豁免清单里，
-             清单静态注册可在应用进程被杀时把进程拉起来（docs/AUTO-CONNECT.md）。
-             exported=true 是因为系统蓝牙栈以独立 uid 发送；目标车机过滤在接收器里做。 -->
+        <!-- Автоматически подключаться к шине: ACL_CONNECTED/ACL_DISCONNECTED в списке неявных широковещательных исключений,
+             Статическая регистрация манифеста может активировать процесс приложения после его завершения (docs/AUTO-CONNECT.md).
+             Exported=true — потому что системный стек Bluetooth отправляет данные с независимым uid; Фильтрация целевых автомобилей осуществляется в приемнике. -->
         <receiver
             android:name=".bt.CarBluetoothReceiver"
             android:enabled="true"
@@ -112,7 +112,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- 虚拟屏桌面（exported：shell am start 需要可从外部拉起） -->
+        <!-- Виртуальный экран рабочего стола (экспортирован: при необходимости можно запустить Shell am start) -->
         <activity
             android:name=".launcher.DockActivity"
             android:exported="true"
@@ -127,8 +127,8 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.CarPlaySender.Launcher" />
 
-        <!-- 通知监听（媒体会话枚举）：音乐卡需要「通知使用权」；
-             Shizuku 在场时可由 cmd notification allow_listener 静默授权 -->
+        <!-- Мониторинг уведомлений (перечисление медиа-сессий): для музыкальной карты требуются «права на использование уведомлений»;
+             Шизуку можно авторизовать в автоматическом режиме с помощью уведомления cmdallow_listener, если оно присутствует. -->
         <service
             android:name=".media.MediaListenerService"
             android:exported="false"
@@ -138,7 +138,7 @@
             </intent-filter>
         </service>
 
-        <!-- 车机设置（双栏）：由桌面「车机设置」图标进入，仅应用内使用 -->
+        <!-- Настройки автомобиля и машины (двойной столбец): введите значок «Настройки автомобиля и машины» на рабочем столе, только для использования в приложении. -->
         <activity
             android:name=".launcher.SettingsActivity"
             android:exported="false"
@@ -146,7 +146,7 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.CarPlaySender.Settings" />
 
-        <!-- Shizuku（隐形屏模式：am start 指定 display + MotionEvent 直注） -->
+        <!-- Сидзуку (режим невидимого экрана: указанный дисплей при запуске + прямое примечание MotionEvent) -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

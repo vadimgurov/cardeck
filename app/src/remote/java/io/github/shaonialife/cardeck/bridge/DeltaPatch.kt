@@ -5,25 +5,28 @@ import java.io.RandomAccessFile
 import java.security.MessageDigest
 
 /**
- * 块差分补丁应用（与服务端 deltadiff.ts 的二进制格式硬约定，勿单独改动）：
+ * Приложение  для исправления разницы блоков (жесткое согласование с двоичным форматом deltadiff.ts на стороне
+ * сервера, не меняйте его отдельно):
  *
- *   "CDDELTA1"  8B magic
- *   targetLen   u64 LE
- *   targetSha256 32B
- *   baseLen     u64 LE
- *   baseSha256  32B
- *   ops: 0x01 COPY(u64 oldOffset,u64 len) | 0x02 LITERAL(u64 len + bytes)
+ * "CDDELTA1" 8B магия
+ * targetLen u64 LE
+ * цельSha256 32B
+ * baseLen u64 LE
+ * базаSha256 32B
+ * ops: 0x01 COPY(u64 oldOffset,u64 len) | 0x02 ЛИТЕРАЛ (u64 длина + байты)
  *
- * 安全性不依赖补丁本身可信：应用后强制校验产物 sha256，不符即整包作废走
- * 全量回退。基线固定用本进程自己的 sourceDir（唯一能读到且与服务器基线
- * 逐字节一致的来源）。
+ * Безопасность   не зависит от надежности самого патча: продукт sha256 принудительно проверяется после
+ * применения. Если он не совпадает, весь пакет будет отброшен.
+ * полностью откатился. Базовая версия фиксирована для использования собственного исходного каталога процесса
+ * (единственного, который можно прочитать и сопоставить с базовой версией сервера).
+ * побайтно согласованный источник).
  */
 object DeltaPatch {
     private const val MAGIC = "CDDELTA1"
 
     /**
-     * 把 [patch] 应用到 [base]（必须与服务器差分基线逐字节一致）写出 [out]。
-     * 返回 null = 成功；否则返回失败原因（调用方回退全量下载）。
+     * применяет [patch] к [base] (который должен побайтно соответствовать базовой дифференциальной линии сервера) для записи [out].
+     * возвращает значение null = успех; в противном случае возвращает причину сбоя (вызывающая программа возвращается к полной загрузке).
      */
     fun apply(
         patch: File,
@@ -49,7 +52,7 @@ object DeltaPatch {
                     while (true) {
                         when (pf.readByte().toInt()) {
                             0x01 -> {
-                                // COPY：从基线 seek+复制
+                                // КОПИРОВАТЬ: искать+копировать из базовой линии
                                 val off = pf.readLong()
                                 var len = pf.readLong()
                                 bf.seek(off)
@@ -64,7 +67,7 @@ object DeltaPatch {
                             }
 
                             0x02 -> {
-                                // LITERAL：补丁内联字节
+                                // ЛИТЕРАЛ: исправление строковых байтов
                                 var len = pf.readLong()
                                 while (len > 0) {
                                     val n = pf.read(buf, 0, minOf(buf.size.toLong(), len).toInt())

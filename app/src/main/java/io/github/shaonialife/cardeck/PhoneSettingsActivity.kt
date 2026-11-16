@@ -14,8 +14,9 @@ import io.github.shaonialife.cardeck.launcher.settings.SettingsMenus
 import io.github.shaonialife.cardeck.launcher.settings.SettingsToastHost
 
 /**
- * 手机侧「车机设置」二级菜单页（M3 暗色）：
- * 列出五个设置入口，点击进入内容 Fragment——与车机 SettingsActivity 双栏共用同一套面板。
+ * Страница второго уровня меню «Настройки автомобиля» на мобильном телефоне (темный цвет M3):
+ * перечисляет пять входов в настройки. Щелкните, чтобы ввести фрагмент содержимого. Он использует тот же набор
+ * панелей, что и двойные столбцы SettingsActivity для автомобиля и машины.
  */
 class PhoneSettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,7 +64,7 @@ class PhoneSettingsActivity : AppCompatActivity() {
 }
 
 /**
- * 手机侧设置内容宿主：承载与车机双栏共用的内容 Fragment。
+ * Установите хост контента на стороне мобильного телефона: перенесите фрагмент контента, общий для двух столбцов автомобиля и машины.
  */
 class SettingsContentActivity :
     AppCompatActivity(),

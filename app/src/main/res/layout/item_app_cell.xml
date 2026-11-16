@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 桌面单个应用格子：图标 + 白色标签（对照 CarPlay 主屏样式） -->
+<!-- Сетка одного приложения на рабочем столе: значок + белая метка (сравните со стилем главного экрана CarPlay) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"

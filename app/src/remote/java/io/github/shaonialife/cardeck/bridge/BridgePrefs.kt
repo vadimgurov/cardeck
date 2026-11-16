@@ -3,7 +3,7 @@ package io.github.shaonialife.cardeck.bridge
 import android.content.Context
 import java.util.UUID
 
-/** 远程调试桥偏好（独立文件 "bridge"，不与业务设置混放）。 */
+/** Настройки моста удаленной отладки (отдельный файл «мост», не смешанный с бизнес-настройками). */
 object BridgePrefs {
     private const val FILE = "bridge"
     private const val KEY_URL = "serverUrl"
@@ -30,7 +30,7 @@ object BridgePrefs {
             .apply()
     }
 
-    /** 本机稳定设备标识（首次生成后持久化；服务端按它区分设备）。 */
+    /** Собственный стабильный идентификатор устройства (постоянный после первого поколения; сервер различает устройства по нему). */
     fun deviceId(context: Context): String {
         val p = prefs(context)
         p.getString(KEY_DEVICE_ID, null)?.let { return it }
@@ -39,7 +39,7 @@ object BridgePrefs {
         return id
     }
 
-    /** App 启动即自动连桥（用户在设置页点过「连接」后置位；「断开」清零）。 */
+    /** Приложение автоматически подключается к мосту при его запуске (устанавливается после того, как пользователь нажимает «Подключиться» на странице настроек; снимается при «Отключиться»). */
     fun autoConnect(context: Context): Boolean = prefs(context).getBoolean(KEY_AUTO, false)
 
     fun setAutoConnect(
@@ -49,10 +49,10 @@ object BridgePrefs {
         prefs(context).edit().putBoolean(KEY_AUTO, value).apply()
     }
 
-    /** 重装前置位：新版本首次启动时弹「继续进入调试模式？」。 */
+    /** Положение перед переустановкой: При первом запуске новой версии вопрос «Продолжить вход в режим отладки?» всплывет. */
     fun resumePending(context: Context): Boolean = prefs(context).getBoolean(KEY_RESUME, false)
 
-    // ---- 差分基线 sha 缓存（版本键控：装新包后自然失效重算）----
+    // ---- Дифференциальный базовый кэш sha (кодирование версий: естественный сбой и перерасчет после установки новых пакетов) ----
 
     fun baseApkSha(
         context: Context,

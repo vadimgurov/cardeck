@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 应用超采样设置行：图标 + 名称 + 三态分段控件（自动/开启/关闭） -->
+<!-- Применить строку настроек суперсэмплинга: значок + имя + сегментированное управление по трем состояниям (авто/вкл/выкл) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -31,7 +31,7 @@
         android:textColor="#FFF5F5F7"
         android:textSize="13sp" />
 
-    <!-- 三态分段控件：自动 / 开启 / 关闭 -->
+    <!-- Сегментированное управление с тремя состояниями: Авто/Вкл/Выкл -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

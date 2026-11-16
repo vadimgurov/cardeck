@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 桌面「车机设置」入口图标：灰色渐变圆角底 + 白色齿轮（对照设计原型） -->
+<!-- Значок входа в «Настройки автомобиля» на рабочем столе: серый градиент с закругленным низом + белая шестеренка (сравните дизайн-прототип) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="96dp"

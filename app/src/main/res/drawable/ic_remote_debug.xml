@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 远程调试入口图标：终端提示符（> + 光标下划线），与 ic_info_circle 同款 24dp 线性风格 -->
+<!-- Значок входа в удаленную отладку: приглашение терминала (> + подчеркивание курсора), тот же линейный стиль 24dp, что и ic_info_circle -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

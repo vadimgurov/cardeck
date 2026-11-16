@@ -8,11 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 会话级 SETUP 报文体的回归保护。
+ * Защита от регрессии тела сообщения SETUP на уровне сеанса.
  *
- * WinPlay（2026-10-19 实测）按「用户选中的 iPhone 蓝牙地址」过滤会话，
- * 报文体里的 deviceID 对不上直接 403——曾用 catplay 的写死假值
- * ff:ee:dd:cc:bb:aa，表象是连上约 45 秒后自动断开（接收端等视频超时）。
+ * WinPlay (проверено 19 октября 2026 г.) фильтрует сеансы по «адресу iPhone Bluetooth, выбранному пользователем».
+ * ID устройства в теле сообщения   не соответствует прямому 403 — использовалось поддельное значение, записанное catplay.
+ * ff:ee:dd:cc:bb:aa, похоже, соединение автоматически отключается примерно через 45 секунд (принимающая сторона
+ * ожидает истечения времени ожидания видео).
  */
 class SessionSetupBodyTest {
     private fun client() =
@@ -50,16 +51,19 @@ class SessionSetupBodyTest {
         val port = 35449
         val body = client().buildSessionSetupBody("10:C1:97:1A:C7:44", port)
         val root = BinaryPlist.parse(body) as Map<*, *>
-        // timingPort 是媒体时钟同步入口；features 决定 enabledFeatures（缺失即视频管线不启用）
+        // TimingPort — это запись синхронизации часов мультимедиа; функции определяют включенные функции (если они
+        // отсутствуют, видеоконвейер не включен)
+
         assertEquals(port.toLong(), root["timingPort"])
         assertTrue((root["features"] as List<*>).contains("viewAreas"))
         assertEquals(true, root["keepAliveLowPower"])
     }
 
     /**
-     * 未配对（et=NONE）会话必须显式带 `et=1`（catplay `AirPlayEncryptionType::NONE`）。
-     * pre-HomeKit 老车机只认明文会话；缺这个键时严格接收端会把它当成
-     * 「声明加密但没有密钥」而拒绝。
+     * Непарные (et=NONE) сеансы должны явно приносить `et=1` (кошачья игра `AirPlayEncryptionType::NONE`).
+     * Старая машина       до HomeKit распознает только текстовые разговоры; когда этот ключ отсутствует, принимающая
+     * сторона будет строго рассматривать его как
+     * Отклонено       «Шифрование заявлено, но нет ключа».
      */
     @Test
     fun unpairedSessionDeclaresEtNone() {

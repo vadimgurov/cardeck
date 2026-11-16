@@ -4,19 +4,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 扩展长度（0x…F + int 对象）必须按无符号解读。
+ * Расширенная длина  (0x…F + объект int) должна интерпретироваться как беззнаковая.
  *
- * 实测来源（2026-10-20）：DiPlay 以 iAPSendMessage 信封下发 0x5000，data 长 182B
- * （0xB6）——旧实现 readSigned 读成 -74，copyOfRange 抛 `IllegalArgumentException:
- * 51 > -23`，整条命令被丢；≥128 的长度全部中招。
+ * Фактический источник измерений   (20 октября 2026 г.): DiPlay поставляет 0x5000 с конвертом iAPSendMessage, длина данных 182 байт.
+ * (0xB6) — старая реализация readSigned читает -74, copyOfRange выдает `IllegalArgumentException:
+ * 51 > -23`, вся команда отбрасывается; включены все длины ≥128.
  */
 class BplistExtendedLengthTest {
     @Test
     fun extendedDataLengthAbove127Parses() {
         val data = ByteArray(200) { (it and 0xFF).toByte() }
-        // 手工编码：{"data": <200B>}（规范布局：扩展长度 0x4F 0x10 0xC8）
+        // Ручное кодирование: {"data": <200B>} (стандартная раскладка: расширенная длина 0x4F 0x10 0xC8)
         val objects = ArrayList<ByteArray>()
-        objects.add(byteArrayOf(0xD1.toByte(), 1, 2)) // root dict(1)
+        objects.add(byteArrayOf(0xD1.toByte(), 1, 2)) // rootdict(1)
         objects.add(byteArrayOf(0x54.toByte()) + "data".toByteArray()) // 1
         objects.add(byteArrayOf(0x4F.toByte(), 0x10, 200.toByte()) + data) // 2
         var body = "bplist00".toByteArray()
@@ -51,11 +51,11 @@ class BplistExtendedLengthTest {
     fun extendedAsciiStringLengthAbove127Parses() {
         val text = "x".repeat(150)
         val objects = ArrayList<ByteArray>()
-        objects.add(byteArrayOf(0x5F.toByte(), 0x10, 150.toByte()) + text.toByteArray()) // 0 root
+        objects.add(byteArrayOf(0x5F.toByte(), 0x10, 150.toByte()) + text.toByteArray()) // 0 корень
         var body = "bplist00".toByteArray()
         body += objects[0]
         val table = body.size
-        body += byteArrayOf(8) // 偏移表：1 对象
+        body += byteArrayOf(8) // Таблица смещения: 1 объект
         val trailer = ByteArray(32)
         trailer[6] = 1
         trailer[7] = 1

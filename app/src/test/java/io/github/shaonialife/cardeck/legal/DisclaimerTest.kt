@@ -9,7 +9,7 @@ import org.junit.Test
 class DisclaimerPolicyTest {
     @Test
     fun contentNotScrollableOnlyNeedsCountdown() {
-        // 文案一屏放得下（无需滚动）：只等倒计时
+        // Копия может поместиться на одном экране (нет необходимости прокручивать): Просто дождитесь обратного отсчета.
         assertFalse(canAcceptDisclaimer(countdownDone = false, contentScrollable = false, scrolledToBottom = false))
         assertTrue(canAcceptDisclaimer(countdownDone = true, contentScrollable = false, scrolledToBottom = false))
     }
@@ -23,7 +23,7 @@ class DisclaimerPolicyTest {
 
     @Test
     fun shorterElapsedButAtBottomStillBlocked() {
-        // 滑到底了但没等够 10 秒：仍不可接受（两个条件是并列的）
+        // Скольжение вниз, но не ожидание 10 секунд: все еще неприемлемо (два условия связаны)
         assertFalse(canAcceptDisclaimer(countdownDone = false, contentScrollable = true, scrolledToBottom = true))
     }
 }
@@ -37,9 +37,9 @@ class DisclaimerVersionTest {
     @Test
     fun acceptedCurrentVersionNeedsNothing() {
         assertFalse(needsDisclaimerAtLaunch(acceptedVersion = 1, currentVersion = 1))
-        // 老版本接受过（1）但当前是 2：文案变了必须重新确认
+        // Старая версия принята (1), но сейчас это 2: копия изменилась и должна быть подтверждена повторно.
         assertTrue(needsDisclaimerAtLaunch(acceptedVersion = 1, currentVersion = 2))
-        // 已接受更高版本（回退安装旧 APK）：不再打扰
+        // Принята более новая версия (резервный вариант для установки старого APK): больше не беспокойтесь.
         assertFalse(needsDisclaimerAtLaunch(acceptedVersion = 3, currentVersion = 2))
     }
 }
@@ -47,7 +47,7 @@ class DisclaimerVersionTest {
 class DisclaimerHintTest {
     @Test
     fun hintsExplainWhyAcceptIsBlocked() {
-        // 两者都没满足：提示同时给出倒计时与滑动要求
+        // Ни один из них не удовлетворен: в подсказке указаны требования как обратного отсчета, так и скользящего.
         assertEquals(
             "Прокрутите страницу вниз и подождите 7 секунд.",
             disclaimerBlockReason(
@@ -57,7 +57,7 @@ class DisclaimerHintTest {
                 remainingSeconds = 7,
             ),
         )
-        // 只有倒计时
+        // Только обратный отсчет
         assertEquals(
             "Пожалуйста, подождите 3 секунд, прежде чем принять",
             disclaimerBlockReason(
@@ -67,7 +67,7 @@ class DisclaimerHintTest {
                 remainingSeconds = 3,
             ),
         )
-        // 只有滚动
+        // только прокручивать
         assertEquals(
             "Пожалуйста, прокрутите вниз, чтобы прочитать",
             disclaimerBlockReason(
@@ -77,7 +77,7 @@ class DisclaimerHintTest {
                 remainingSeconds = 0,
             ),
         )
-        // 已可接受：无提示
+        // Принято: без запроса
         assertNull(
             disclaimerBlockReason(
                 countdownDone = true,
@@ -93,18 +93,20 @@ class DisclaimerContentTest {
     @Test
     fun contentCoversMandatoryTopics() {
         val text = DisclaimerContent.sections.joinToString("\n") { it.title + "\n" + it.body }
-        // 分享出去必须讲清的三类内容：测试范围、驾驶风险、系统权限
+        // При совместном использовании необходимо четко объяснить три категории контента: объем тестирования, риски
+        // вождения и системные разрешения.
+
         assertTrue(text.contains("Проверены только следующие конфигурации"))
         assertTrue(text.contains("Безопасность вождения"))
         assertTrue(text.contains("Shizuku"))
-        // 非官方声明（避免被误认为与 Apple 有关联）
+        // Неофициальное заявление (чтобы вас не приняли за связь с Apple)
         assertTrue(text.contains("неофициальный"))
         assertTrue(text.contains("товарными знаками"))
     }
 
     @Test
     fun contentHasNoMarkdownMarkers() {
-        // 正文直接进 TextView：`**`/`#` 会原样显示，属排版事故
+        // Если текст вводится непосредственно в TextView: `**`/`#` будет отображаться как есть, что является ошибкой при наборе текста.
         val text = DisclaimerContent.sections.joinToString("") { it.body }
         assertFalse(text.contains("**"))
         assertFalse(text.contains("##"))

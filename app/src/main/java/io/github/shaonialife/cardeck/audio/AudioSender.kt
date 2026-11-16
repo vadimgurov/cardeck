@@ -14,51 +14,57 @@ import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * CarPlay 主音频发送端（手机 → 车机，RTP over UDP）。
+ * Основной отправитель звука CarPlay (мобильный телефон → автомобильное устройство, RTP через UDP).
  *
- * 线格式（对照 DiPlay `AudioStream.kt` 解密路径与 catplay `rtp_cipher_chacha.rs`）：
+ * Формат строки   (сравните путь расшифровки DiPlay `AudioStream.kt` и кошачью игру `rtp_cipher_chacha.rs`):
  * ```
- * [RTP 头 12B][ChaCha20-Poly1305 密封的 PCM 负载 + 16B tag][8B LE nonce]
+ * [RTP голова 12B][ChaCha20-Poly1305 герметичная нагрузка PCM + тег 16B][8B LE nonce]
  * ```
- *  - 加密：ChaCha20-Poly1305；AAD = 头 4..12 字节（timestamp+ssrc 的 BE 表示，
- *    catplay 的 "modern AAD"；DiPlay 解密即取同一范围）
- *  - nonce（12B）= 4 字节零 + 尾 8 字节（小端计数，从 0 逐包递增）→ [AirPlayCrypto.nonce64]
- *  - RTP 字段：version=2、PT=流类型（100=PCM 通路 / 102=AAC-LC 通路；
- *    对照 catplay `payload_type = stream_type`）、
- *    SSRC=0（catplay 同款）、timestamp = 累计样本帧数、seq 逐包递增
- *  - **首个音频包置 Marker 位**（规范：RECORD/FLUSH 之后的首包要打标记，接收端据此
- *    切分播放边界；catplay 恒 false，但我们的会话是「RECORD 之后才加入音频流」，
- *    首包标记能帮接收端重新对齐）
+ * — Шифрование: ChaCha20-Poly1305; AAD = заголовок 4..12 байт (BE-представление отметки времени + ssrc,
+ * «Современный AAD» от   Catplay; Расшифровка DiPlay занимает тот же диапазон)
+ * — nonce (12B) = 4 байта нуля + конечные 8 байтов (счетчик с прямым порядком байтов, увеличивается с 0 на пакет) → [AirPlayCrypto.nonce64]
+ * — поле RTP: версия=2, PT=тип потока (100=канал PCM / 102=канал AAC-LC;
+ * по сравнению с кошачьими играми `payload_type = stream_type`),
+ * SSRC=0 (та же модель, что и catplay), временная метка = совокупное количество кадров выборки, seq увеличивает пакет за пакетом
+ * - **Первый аудиопакет установлен в бит маркера** (Спецификация: первый пакет после RECORD/FLUSH должен быть
+ * помечен, и принимающая сторона соответственно
+ * разделяет границу воспроизведения; catplay всегда ложь, но наш сеанс «добавить аудиопоток после ЗАПИСИ»,
+ * Первая отметка пакета   может помочь принимающей стороне перестроиться)
  *
- * 旁路：
- *  - **同步包**：[AudioSyncPacket] 每 1 秒发往该流的 `controlPort`，建立 RTP↔NTP 锚点。
- *    （缺了它接收端只能「按到达时刻猜」，严格的实现干脆不排播——2026-10-20 实测）
+ * байпас:
+ * — **Пакет синхронизации**: [AudioSyncPacket] отправляется в `controlPort` этого потока каждую секунду для
+ * установления точки привязки RTP↔NTP.
+ * (Без него принимающая сторона может только «угадывать по времени прибытия». Для строгой реализации это просто
+ * не запланировано — фактическое тестирование 20 октября 2026 г.)
  *
- * 采集：`AudioPlaybackCapture`（Android 10+）捕获手机端其他应用播放的媒体/导航音频
- * （需要 MediaProjection——与镜像模式的同一授权）。每包 [SAMPLES_PER_PACKET] 样本帧
- * （48000Hz 立体声 16bit = 2048B 负载，总包 ~2084B，不超接收端 4096B 收包缓冲）。
+ * Коллекция  : `AudioPlaybackCapture` (Android 10+) записывает мультимедийный/навигационный звук,
+ * воспроизводимый другими приложениями на мобильном телефоне.
+ * (требуется MediaProjection — та же лицензия, что и для зеркального режима). [SAMPLES_PER_PACKET] выборка кадров на пакет
+ * (стерео 48000 Гц, 16 бит = нагрузка 2048 байт, общий пакет ~ 2084 байт, не превышающий буфер приема пакетов
+ * 4096 байт на принимающей стороне).
  */
 class AudioSender(
     private val host: String,
     private val dataPort: Int,
     private val streamKey: ByteArray,
     private val log: (String) -> Unit,
-    /** 静音手机媒体音量（声音只从车机出）。null = 不做（测试用）。 */
+    /** Отключить громкость мультимедиа мобильного телефона (звук исходит только из автомобильного устройства). null = Не делать (для тестирования). */
     private val context: android.content.Context? = null,
     /**
-     * 采集采样率（Hz）：必须与 SETUP 协商出的格式一致（48k 主选，车机只支持
-     * 44.1k 时由 AirPlayClient 协商下发）。默认 48k。
+     * Частота выборки сбора данных  (Гц): должна соответствовать формату, согласованному с помощью SETUP (основной
+     * выбор — 48k, автомобильный компьютер поддерживает только
+     * 44.1k согласовывается и выдается AirPlayClient). По умолчанию 48к.
      */
     private val sampleRate: Int = 48_000,
-    /** 负载编码：PCM（type=100 通路）或 AAC-LC（type=102 通路）。 */
+    /** Кодирование нагрузки: PCM (тип=100 полос) или AAC-LC (тип=102 полосы). */
     private val codec: AudioCodec = AudioCodec.PCM,
-    /** RTP 流类型，仅用于日志（PT 与 SETUP 的 type 保持一致）。 */
+    /** Тип потока RTP, используется только для журналов (PT соответствует типу SETUP). */
     private val streamType: Long = 100L,
-    /** AAC 帧是否补 ADTS 头（见 [AudioTuning.ADTS]，排查车机解码链用）。 */
+    /** Дополняется ли кадр AAC заголовком ADTS (см. [AudioTuning.ADTS], используемый для устранения неполадок в цепочке декодирования машина-машина). */
     private val adtsFrames: Boolean = false,
     /**
-     * 该音频流的控制端口（车机在 SETUP 应答里下发）。>0 时每 [SYNC_INTERVAL_MILLIS]
-     * 发一个 [AudioSyncPacket] 建立 RTP↔NTP 锚点；0 = 车机没给（旧车机），只发音频。
+     * Порт управления этим аудиопотоком (доставленным автомобилем в ответе SETUP). >0 каждые [SYNC_INTERVAL_MILLIS]
+     * отправляет [AudioSyncPacket] для установления точки привязки RTP↔NTP; 0 = машина не указана (старая машина), передается только звук.
      */
     private val controlPort: Int = 0,
 ) {
@@ -66,17 +72,19 @@ class AudioSender(
         const val CHANNELS = 2
 
         /**
-         * 每包样本帧数 = AirPlay 标准 SPF 352（catplay `MAX_FRAMES_PER_PACKET_PCM`，
-         * 真车验证）。48000/352 ≈ 136 包/秒（7.33ms/包）。
-         * 2026-10-17 实测：此前用 512 帧（10.67ms/包），奥迪接收端无声音——
-         * 与真 iPhone 的包长不一致时接收端可能按固定 SPF 缓冲而丢弃。
+         * Образцы кадров  в упаковке = стандарт AirPlay SPF 352 (catplay `MAX_FRAMES_PER_PACKET_PCM`,
+         * проверка реального автомобиля). 48000/352 ≈ 136 пакетов/секунду (7,33 мс/пакет).
+         * 17 октября 2026 г. Фактические измерения: ранее при использовании 512 кадров (10,67 мс/пакет) на принимающей
+         * стороне Audi не было звука ——
+         * Если длина пакета           не соответствует длине пакета реального iPhone, принимающая сторона может
+         * отбросить его в соответствии с фиксированным буфером SPF.
          */
         const val SAMPLES_PER_PACKET = 352
 
-        /** 一包负载字节数（16bit 立体声）。 */
+        /** Количество байтов в пакете полезной нагрузки (16-битное стерео). */
         const val PACKET_BYTES = SAMPLES_PER_PACKET * CHANNELS * 2
 
-        /** 同步包发送间隔（规范：每秒一个）。 */
+        /** Интервал отправки пакетов синхронизации (уточнение: один в секунду). */
         const val SYNC_INTERVAL_MILLIS = 1_000L
 
         private const val RTP_HEADER_LEN = 12
@@ -85,10 +93,10 @@ class AudioSender(
 
         private const val READ_TIMEOUT_QUIET_MILLIS = 500L
 
-        /** 静音前媒体音量的持久化键（进程被杀也不丢恢复目标）。 */
+        /** Ключ сохранения тома носителя перед отключением звука (цель восстановления не будет потеряна, даже если процесс будет завершен). */
         private const val KEY_SAVED_VOLUME = "audio_saved_media_volume"
 
-        /** 小端 s16 → 大端 s16（每两字节换序）。CarPlay 线格式要求大端样本。 */
+        /** s16 с прямым порядком байтов → s16 с прямым порядком байтов (обратный порядок каждые два байта). Для проводного формата CarPlay требуются образцы с прямым порядком байтов. */
         fun bigEndianS16(source: ByteArray): ByteArray {
             val out = source.copyOf()
             var index = 0
@@ -104,7 +112,7 @@ class AudioSender(
 
     private val running = AtomicBoolean(false)
 
-    /** stop() 幂等闸门（多条收尾路径都会调 stop）。 */
+    /** stop() — это идемпотентный вентиль (stop будет вызываться для нескольких конечных путей). */
     private val stopped = AtomicBoolean(false)
     private var socket: DatagramSocket? = null
     private var syncSocket: DatagramSocket? = null
@@ -112,12 +120,14 @@ class AudioSender(
     private var thread: Thread? = null
     private var syncThread: Thread? = null
 
-    /** AAC-LC 编码器（仅 [AudioCodec.AAC_LC] 时创建）。 */
+    /** Кодер AAC-LC (создан только для [AudioCodec.AAC_LC]). */
     private var aacEncoder: AacLcEncoder? = null
 
     /**
-     * RTP 游标（原本是采集循环里的局部变量）。提到字段上是因为**同步包线程**要读
-     * 「当前/下一包时间戳」，否则锚点里的时间戳永远对不上真实发出的包。
+     * Курсор RTP (первоначально это была локальная переменная в цикле сбора данных). Поле упоминается, поскольку
+     * **поток пакета синхронизации** должен прочитать
+     * «Временная метка текущего/следующего пакета», иначе временная метка в точке привязки никогда не будет
+     * соответствовать фактическому отправленному пакету.
      */
     @Volatile private var sequence = 0
 
@@ -125,26 +135,27 @@ class AudioSender(
 
     @Volatile private var nonceCounter = 0L
 
-    /** 首个音频包标记（打完就清）；AAC 自检只跑一次。 */
+    /** Отметка первого аудиопакета (удаляется после ввода); Самотестирование AAC выполняется только один раз. */
     private var markerPending = true
     private var selfChecked = false
 
-    /** 每包/每帧对应的 PCM 字节数（PCM 通路=一包的负载；AAC 通路=一帧的输入）。 */
+    /** Количество байт PCM на пакет/кадр (дорожка PCM = полезная нагрузка одного пакета; полоса AAC = ввод одного кадра). */
     private val framePcmBytes: Int
         get() = if (codec == AudioCodec.AAC_LC) AacLcEncoder.pcmBytes(CHANNELS) else PACKET_BYTES
 
-    /** 每包推进的样本数（AAC 一帧 1024，PCM 一包 352）。 */
+    /** Количество выборок, отправленных на пакет (1024 на кадр для AAC, 352 на пакет для PCM). */
     private val samplesPerPacket: Long
         get() = if (codec == AudioCodec.AAC_LC) AacLcEncoder.FRAME_SAMPLES.toLong() else SAMPLES_PER_PACKET.toLong()
 
     /**
-     * RTP SSRC：固定 0（catplay `prepare_header` 在真车上即用 0；DiPlay 收端不校验）。
-     * 2026-10-17 实测：此前用随机值，奥迪接收端无声音——部分车机按 SSRC 关联 SETUP
-     * 声明的流（非 0 视为未知流丢弃）。
+     * RTP SSRC: фиксированный 0 (catplay `prepare_header` использует 0 на реальных автомобилях; принимающая сторона DiPlay не проверяет).
+     * 17 октября 2026 г. Фактическое измерение: до использования случайных значений на принимающей стороне Audi не
+     * было звука — некоторые автомобили были связаны с НАСТРОЙКОЙ в соответствии с SSRC.
+     * Объявленный поток       (отличное от 0 считается отброшенным неизвестным потоком).
      */
     private val ssrc = 0
 
-    /** 采集+推流统计（日志限流用）。 */
+    /** Сбор + отправка статистики (для ограничения тока журнала). */
     private var packetsSent = 0L
     private var bytesSent = 0L
     private var lastLogAt = 0L
@@ -152,16 +163,20 @@ class AudioSender(
 
     val isRunning: Boolean get() = running.get()
 
-    /** 静音前的手机媒体音量 index（-1 = 未静音）。 */
+    /** Индекс громкости мультимедиа телефона до отключения звука (-1 = звук не отключен). */
     private var mutedOriginalVolume = -1
 
     /**
-     * 静音手机媒体输出：音频通道激活后声音只从车机出（真 CarPlay 行为）。
-     * 依据（实测 2026-10-10）：播放捕获取自 REMOTE_SUBMIX（音量应用点之前），
-     * 手机流音量静音**不影响捕获数据**——手机不响、车机照常出声。
+     * Бесшумный вывод мультимедиа на мобильный телефон: после активации аудиоканала звук исходит только из
+     * автомобильного устройства (настоящее поведение CarPlay).
+     * Основа (фактическое измерение 10 октября 2026 г.): захват воспроизведения берется из REMOTE_SUBMIX (до точки приложения громкости),
+     * Отключение звука потоковой передачи на мобильном телефоне **не влияет на захваченные данные** — мобильный
+     * телефон не звонит, а машина шумит, как обычно.
      *
-     * 恢复值持久化（SharedPreferences）：进程被系统杀死/安装更新时来不及恢复，
-     * 下次静音若读到 0 会把它当"原音量"，导致断开后永久静音（2026-10-10 踩过）。
+     * Сохранение значения восстановления (SharedPreferences): процесс был завершен системой/было слишком поздно
+     * восстанавливаться при установке обновлений.
+     * Если следующее значение отключения звука равно 0, оно будет считаться «исходной громкостью», что приведет к
+     * постоянному отключению звука после отключения (действовано 10 октября 2026 г.).
      */
     private fun mutePhoneMedia() {
         val ctx = context ?: return
@@ -173,7 +188,9 @@ class AudioSender(
             val prefs = ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
             val saved = prefs.getInt(KEY_SAVED_VOLUME, -1)
             val current = manager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-            // 目标恢复值：优先上次未恢复成功的保存值；否则当前值（>0 才可信）
+            // Целевое значение восстановления: приоритет отдается сохраненному значению, которое не удалось восстановить в
+            // последний раз; в противном случае текущее значение (>0 является достоверным)
+
             val restoreTarget =
                 when {
                     saved > 0 -> saved
@@ -185,16 +202,18 @@ class AudioSender(
             }
             mutedOriginalVolume = restoreTarget
             manager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
-            // 回读校验：ROM 的音频策略可能拒绝/立刻回弹（实测见过 volume 仍为原值），
-            // 此时手机继续外放——必须让日志能直接看出来
+            // Проверка обратного чтения: политика звука ПЗУ может немедленно отклонить/восстановить звук (при фактическом
+            // тестировании громкость по-прежнему остается исходным значением).
+
+            // В это время телефон продолжает выпускаться - лог должен быть виден напрямую
             val after = manager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
             log(
-                "AUDIO: 已静音手机媒体输出（原音量 ${if (restoreTarget > 0) restoreTarget else "未知"}，" +
-                    "断开后恢复）——回读音量=$after" +
-                    if (after != 0) "（⚠ 静音未生效，手机仍会外放）" else "",
+                "АУДИО: телефон без звука (прежняя громкость ${if (restoreTarget > 0) restoreTarget else "неизвестно"}，" +
+                    "Восстановление после отключения) - объем чтения = $after" +
+                    if (after != 0) "(⚠ Отключение звука не действует, телефон все равно будет воспроизводиться)" else "",
             )
         } catch (error: Exception) {
-            log("AUDIO: 静音手机媒体失败 - ${error.message}")
+            log("АУДИО: не удалось отключить звук мобильного мультимедиа — ${error.message}")
         }
     }
 
@@ -216,9 +235,12 @@ class AudioSender(
                     target,
                     0,
                 )
-                log("AUDIO: 已恢复手机媒体音量（$target）")
+                log("АУДИО: громкость мультимедиа на мобильном телефоне восстановлена ($target).")
             } else {
-                log("AUDIO: 无有效原音量记录，手机媒体保持当前值（请按音量键调整）")
+                log(
+                    "АУДИО: нет действительной исходной записи громкости, на носителе мобильного телефона сохраняется " +
+                        "текущее значение (для настройки нажмите кнопку громкости)",
+                )
             }
             prefs.edit().remove(KEY_SAVED_VOLUME).apply()
         } catch (_: Exception) {
@@ -227,8 +249,8 @@ class AudioSender(
     }
 
     /**
-     * 启动音频发送。需要 MediaProjection（AudioPlaybackCapture 的授权来源）。
-     * 返回是否成功进入采集循环。
+     * начинает передачу звука. Требуется MediaProjection (авторизованный источник AudioPlaybackCapture).
+     * возвращает информацию о том, успешно ли введен цикл сбора.
      */
     fun start(projection: MediaProjection): Boolean {
         if (running.get()) return true
@@ -238,7 +260,9 @@ class AudioSender(
             client.connect(InetAddress.getByName(host), dataPort)
             socket = client
 
-            // AAC 通路先把编码器立起来：编不出来就没必要采集（也避免「有包无声」的假象）
+            // Для канала AAC сначала настройте кодировщик: если его невозможно закодировать, собирать его не нужно (это
+            // также позволяет избежать иллюзии «пакетов, но нет звука»)
+
             if (codec == AudioCodec.AAC_LC) {
                 val encoder = AacLcEncoder(sampleRate, CHANNELS, wrapAdts = adtsFrames, log = log)
                 if (!encoder.start()) {
@@ -265,7 +289,7 @@ class AudioSender(
                     .setBufferSizeInBytes(framePcmBytes * 8)
                     .build()
             if (recorder.state != AudioRecord.STATE_INITIALIZED) {
-                log("AUDIO: AudioRecord 初始化失败（state=${recorder.state}）")
+                log("АУДИО: инициализация AudioRecord не удалась (состояние = ${recorder.state})")
                 runCatching { recorder.release() }
                 aacEncoder?.stop()
                 aacEncoder = null
@@ -277,17 +301,19 @@ class AudioSender(
             running.set(true)
             mutePhoneMedia()
             log(
-                "AUDIO: 已启动（播放捕获 ${sampleRate}Hz 立体声 → $host:$dataPort，" +
-                    "通路=t$streamType/${codec.name}，" +
+                "АУДИО: включено (захват воспроизведения ${sampleRate}Hz стерео → $host:$dataPort," +
+                    "Канал=t$streamType/${codec.name}," +
                     if (codec == AudioCodec.AAC_LC) {
-                        "每包 1 个 AAC 帧（${AacLcEncoder.FRAME_SAMPLES} 采样" +
-                            (if (adtsFrames) "，ADTS 封装））" else "，裸帧））")
+                        "1 кадр AAC на пакет (выборки ${AacLcEncoder.FRAME_SAMPLES}" +
+                            (if (adtsFrames) ", пакет ADTS))" else ", голый кадр))")
                     } else {
-                        "每包 ${SAMPLES_PER_PACKET} 帧 PCM）"
+                        "${SAMPLES_PER_PACKET} кадров на пакет PCM)"
                     },
             )
 
-            // 同步包线程先起：锚点越早建立，接收端越早能排播
+            // Поток пакетов синхронизации запускается первым: чем раньше будет установлена точка привязки, тем скорее
+            // принимающая сторона сможет запланировать широковещательную рассылку.
+
             startSyncLoop()
 
             Thread(
@@ -295,7 +321,7 @@ class AudioSender(
                     try {
                         recorder.startRecording()
                     } catch (error: Exception) {
-                        log("AUDIO: 启动采集失败 - ${error.message}")
+                        log("АУДИО: Не удалось начать сбор данных — ${error.message}.")
                         stop()
                         return@Thread
                     }
@@ -309,18 +335,20 @@ class AudioSender(
             }
             true
         } catch (error: Exception) {
-            log("AUDIO: 启动失败 - ${error.message}")
+            log("АУДИО: Ошибка запуска — ${error.message}")
             stop()
             false
         }
     }
 
     /**
-     * 停止音频。
+     * останавливает звук.
      *
-     * 收尾路径不止一条（采集线程 finally、会话结束回调、手动断开），会重复调用；
-     * 必须幂等——否则「已恢复手机媒体音量」会打两遍，且在用户于会话期间手动改过
-     * 音量时，第二次恢复会用旧值把它覆盖回去。
+     * имеет более одного конечного пути (потоок сбора, наконец, обратный вызов завершения сеанса, ручное отключение)
+     * и будет вызываться повторно;
+     * должен быть идемпотентным — в противном случае «Том мобильного носителя восстановлен» будет введен дважды и
+     * изменен пользователем вручную во время сеанса.
+     * Когда том      , второе рекавери перезапишет его старым значением.
      */
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return
@@ -337,10 +365,10 @@ class AudioSender(
         syncThread = null
         thread = null
         restorePhoneMedia()
-        log("AUDIO: 已停止（共发 $packetsSent 包 / ${bytesSent / 1024}KB）")
+        log("АУДИО: остановлено (всего пакетов $packetsSent / ${bytesSent / 1024}KB)")
     }
 
-    /** 捕获配置：媒体/游戏/导航等常见播放用途（逐项添加，个别用途被系统拒绝时跳过）。 */
+    /** Конфигурация захвата: общие цели воспроизведения, такие как мультимедиа/игры/навигация (добавляйте элементы один за другим и пропускайте, если система отклоняет отдельные виды использования). */
     private fun buildCaptureConfig(projection: MediaProjection): AudioPlaybackCaptureConfiguration {
         val builder = AudioPlaybackCaptureConfiguration.Builder(projection)
         listOf(
@@ -355,22 +383,28 @@ class AudioSender(
         return builder.build()
     }
 
-    // ---- 音频同步包（RTP 时间戳 ↔ NTP，每秒一个） ----
+    // ---- Пакет синхронизации звука (временная метка RTP ↔ NTP, один раз в секунду) ----
 
     private fun startSyncLoop() {
         if (controlPort <= 0) {
-            log("AUDIO: 车机未下发 controlPort——不发同步包（只能靠音频包自带时间戳）")
+            log(
+                "АУДИО: ControlPort не выдается автомобилем — пакет синхронизации не отправляется (можно полагаться " +
+                    "только на временную метку, включенную в аудиопакет)",
+            )
             return
         }
         val client =
             try {
                 DatagramSocket().apply { connect(InetAddress.getByName(host), controlPort) }
             } catch (error: Exception) {
-                log("AUDIO: 同步包套接字创建失败 - ${error.message}")
+                log("АУДИО: не удалось создать сокет пакета синхронизации — ${error.message}")
                 return
             }
         syncSocket = client
-        log("AUDIO: 同步包已启用 → $host:$controlPort（每 ${SYNC_INTERVAL_MILLIS}ms 一个，建立 RTP↔NTP 锚点）")
+        log(
+            "АУДИО: пакет синхронизации включен → $host:$controlPort (один раз в ${SYNC_INTERVAL_MILLIS}ms, " +
+                "устанавливается привязка RTP↔NTP)",
+        )
         val worker =
             Thread(
                 {
@@ -387,14 +421,14 @@ class AudioSender(
                             if (first) {
                                 first = false
                                 log(
-                                    "AUDIO: 首个同步包已发出（X 位=1）ts=$current→$next——" +
-                                        "车机若仍无声，说明它没在等这个锚点",
+                                    "АУДИО: отправлен первый пакет синхронизации (бит X=1) ts=$current→$next——" +
+                                        "Если двигатель все еще молчит, это означает, что он не ждет этой точки привязки.",
                                 )
                             }
                             Thread.sleep(SYNC_INTERVAL_MILLIS)
                         }
                     } catch (error: Exception) {
-                        if (running.get()) log("AUDIO: 同步包发送停止 - ${error.message}")
+                        if (running.get()) log("АУДИО: передача пакетов синхронизации остановлена — ${error.message}")
                     }
                 },
                 "audio-sync",
@@ -404,13 +438,13 @@ class AudioSender(
         syncThread = worker
     }
 
-    // ---- 采集循环 → 封包发送 ----
+    // ---- Цикл сбора → Отправка пакета ----
 
     private fun runCaptureLoop() {
         val recorder = record ?: return
         val frameBytes = framePcmBytes
         val pcm = ByteArray(frameBytes)
-        // 诊断抽样节拍：PCM 约 125 包/s（每 20s 一次）；AAC 约 47 帧/s
+        // Частота диагностической выборки: PCM около 125 пакетов/с (раз в 20 с); AAC около 47 кадров/с
         val diagnosticStride = if (codec == AudioCodec.AAC_LC) 600 else 1875
         try {
             while (running.get()) {
@@ -418,24 +452,28 @@ class AudioSender(
                     try {
                         recorder.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                     } catch (error: Exception) {
-                        log("AUDIO: 采集读取异常 - ${error.message}")
+                        log("АУДИО: Исключение чтения при сборе данных — ${error.message}")
                         break
                     }
                 if (read < 0) {
                     readFailures++
                     if (readFailures == 1 || readFailures % 100 == 0) {
-                        log("AUDIO: 采集错误码 $read（连续 $readFailures 次）")
+                        log("АУДИО: код ошибки сбора $read ($readFailures раз подряд)")
                     }
                     if (readFailures > 500) break
                     Thread.sleep(READ_TIMEOUT_QUIET_MILLIS)
                     continue
                 }
-                if (read < frameBytes) continue // 残包（缓冲尾部）：丢弃，等下一个整包
+                if (read < frameBytes) continue // Остаточный пакет (хвост буфера): отбросить и дождаться следующего полного пакета.
                 readFailures = 0
 
-                // 内容诊断（2026-10-17）：播放捕获可能拿到全零（app 禁止捕获 / 音频路由
-                // 到蓝牙 / 无音频播放）。全零时车机静音但手机仍在响，用户会报「声音在
-                // 手机上」——必须能区分「没采到」与「采到了但车机没播」。
+                // Диагностика контента (17 октября 2026 г.): захват воспроизведения может иметь все нули (приложение отключает
+                // захват/маршрутизацию звука).
+
+                // Bluetooth/нет воспроизведения звука). Когда все нули установлены, в машине отключается звук, но телефон
+                // продолжает звонить. Пользователь сообщит: «Звук включен».
+
+                // "на мобильном телефоне" - надо уметь отличать "не взял трубку" и "взял, но не играл в машине".
                 if (sequence < 3 || sequence % diagnosticStride == 0) {
                     var nonZero = 0
                     var peak = 0
@@ -449,12 +487,17 @@ class AudioSender(
                     }
                     val percent = nonZero * 100 / (read / 2).coerceAtLeast(1)
                     log(
-                        "AUDIO: 采集样本 seq=$sequence 非零$percent% 峰值=$peak" +
-                            if (peak == 0) "（⚠ 全零：捕获不到音频——app 可能禁止播放捕获或音频走了蓝牙）" else "",
+                        "АУДИО: Сбор выборки seq=$sequence ненулевое $percent% пиковое значение=$peak" +
+                            if (peak == 0) {
+                                "(⚠ Все нули: звук не записан — возможно, приложение отключило " +
+                                    "воспроизведение записи или звук перешел на Bluetooth)"
+                            } else {
+                                ""
+                            },
                     )
                 }
 
-                // PCM 通路：采一段 = 发一包；AAC 通路：喂一帧 PCM，编码器可能吐出 0~N 帧
+                // Канал PCM: взять один сегмент = отправить один пакет; Канал AAC: подайте один кадр PCM, кодер может выдать 0 ~ N кадров.
                 val payloads: List<ByteArray> =
                     if (codec == AudioCodec.AAC_LC) {
                         val encoder = aacEncoder ?: break
@@ -464,9 +507,13 @@ class AudioSender(
                     }
                 if (payloads.isEmpty()) continue
 
-                // 一次性自检：把编码结果自己解一遍，证明比特流有效且非静音。
-                // 这是「车机无声」最需要的一条证据——如果自解码峰值是 0，问题在编码器，
-                // 如果自解码有声音而车机静音，问题在车机侧（会话/音量/路由）。
+                // Одноразовая самопроверка: самостоятельно декодируйте результат кодирования, чтобы убедиться, что битовый поток
+                // действителен и не молчалив.
+
+                // Это самое необходимое доказательство «бесшумной машины-машины» — если пиковое значение самодекодирования равно
+                // 0, проблема кроется в кодере.
+
+                // Если звук при саморасшифровке есть, но машина молчит, проблема на стороне машины (сессия/громкость/маршрутизация).
                 if (!selfChecked) {
                     selfChecked = true
                     verifyEncodedFrame(payloads.first())
@@ -484,20 +531,20 @@ class AudioSender(
                 if (now - lastLogAt >= 30_000L) {
                     lastLogAt = now
                     log(
-                        "AUDIO: 推流中（累计 $packetsSent 包，${bytesSent / 1024}KB，" +
+                        "АУДИО: Нажатие (накопленные пакеты $packetsSent, ${bytesSent / 1024}KB," +
                             "seq=$sequence ts=$timestamp）",
                     )
                 }
             }
         } catch (error: Throwable) {
-            // 后台线程未捕获异常会杀死整个进程——音频异常绝不允许冒泡
-            log("AUDIO: 采集线程异常退出 - ${error.message}")
+            // Неперехваченные исключения в фоновых потоках убивают весь процесс — звуковые исключения никогда не всплывают.
+            log("АУДИО: поток сбора данных завершился ненормально — ${error.message}")
         } finally {
             stop()
         }
     }
 
-    /** 封包 + 发送一包（同步更新 seq/ts/nonce 游标）。返回 false 表示链路已断。 */
+    /** Пакет + Отправить пакет (синхронно обновить курсор seq/ts/nonce). Возврат false указывает на то, что ссылка не работает. */
     private fun sendPayload(payload: ByteArray): Boolean {
         val wire = sealPacket(payload, sequence, timestamp, nonceCounter, markerPending)
         markerPending = false
@@ -511,12 +558,12 @@ class AudioSender(
             bytesSent += wire.size
             true
         } catch (error: IOException) {
-            log("AUDIO: UDP 发送失败 - ${error.message}")
+            log("АУДИО: Ошибка отправки UDP — ${error.message}")
             false
         }
     }
 
-    /** 用平台解码器把首帧解回 PCM，记录峰值（后台线程，不阻塞推流）。 */
+    /** Используйте декодер платформы, чтобы декодировать первый кадр обратно в PCM и записать пиковое значение (фоновый поток, не блокируя поток push-уведомлений). */
     private fun verifyEncodedFrame(frame: ByteArray) {
         val payload = frame.copyOf()
         Thread(
@@ -524,20 +571,24 @@ class AudioSender(
                 try {
                     val result = AacLcEncoder.decodePeak(payload, sampleRate, CHANNELS)
                     if (result == null) {
-                        log("AUDIO: 自检 = 本机解码器没解出样本（首帧 ${payload.size}B）——无法证伪，继续推流")
+                        log(
+                            "АУДИО: Самотестирование = Локальный декодер не декодировал образец (первый кадр " +
+                                "${payload.size}B) — фальсификация невозможна, продолжайте отправлять поток",
+                        )
                         return@Thread
                     }
                     val (peak, samples) = result
                     log(
-                        "AUDIO: 自检 = 首帧 ${payload.size}B 本机解码 $samples 个样本，峰值 $peak" +
+                        "АУДИО: Самотестирование = первый кадр ${payload.size}B, образцы $samples с собственным " +
+                            "декодированием, пиковое значение $peak" +
                             if (peak > 0) {
-                                "（✓ 比特流有效且非静音：车机若无声，问题不在编码/加密）"
+                                "(✓ Битовый поток действителен и не бесшумен: если машина молчит, проблема не в кодировании/шифровании)"
                             } else {
-                                "（⚠ 解码为全零：AAC 编码器输出的是静音数据）"
+                                "(⚠ Декодируется до всех нулей: кодер AAC выводит тихие данные)"
                             },
                     )
                 } catch (error: Exception) {
-                    log("AUDIO: 自检解码异常 - ${error.message}")
+                    log("АУДИО: Исключение декодирования самопроверки — ${error.message}")
                 }
             },
             "audio-selfcheck",
@@ -547,7 +598,7 @@ class AudioSender(
         }
     }
 
-    /** 组一个 RTP 包：明文 PCM → ChaCha20 密封 → [头][密文+tag][nonce8]。（internal：测试直测） */
+    /** Соберите пакет RTP: открытый текст PCM → печать ChaCha20 → [заголовок][шифрованный текст+тег][nonce8]. (внутренний: прямой тест) */
     internal fun sealPacket(
         pcm: ByteArray,
         sequence: Int,
@@ -556,20 +607,24 @@ class AudioSender(
         marker: Boolean = false,
     ): ByteArray {
         val header = buildRtpHeader(sequence, timestamp, marker)
-        // AAD = header 的 timestamp+ssrc 段（字节 4..12）——catplay "modern AAD" / DiPlay 解密同款
+        // AAD = временная метка+ssrc раздел заголовка (байты 4..12) — игра «современный AAD» / DiPlay расшифровывает тот же абзац
         val aad = header.copyOfRange(4, RTP_HEADER_LEN)
-        // 关键：CarPlay 线格式的 LPCM 是**大端** s16 样本——接收端对收到的负载做
-        // byteSwapS16 转回小端再喂 AudioTrack（DiPlay AndroidMediaSink.kt:1687）。
-        // Android 采集是原生小端，因此这里必须换序；漏掉会得到「沙沙声」（2026-10-10 实测）。
+        // Ключ: LPCM для проводного формата CarPlay — это образцы **big endian** s16 — ресивер это делает.
+        // byteSwapS16 Преобразование обратно в прямой порядок байтов и передача AudioTrack (DiPlay AndroidMediaSink.kt:1687).
+        // Коллекция Android имеет прямой порядок байтов, поэтому здесь необходимо изменить порядок; если вы его
+        // пропустите, вы услышите «шуршащий звук» (фактическое измерение 10 октября 2026 г.).
+
         //
-        // AAC 通路不做换序：AAC 比特流是字节流，不是 16bit 样本序列，换序会直接把
-        // 比特流搅烂（车机解码失败 → 有包无声）。
+        // Канал AAC не выполняет переупорядочение: битовый поток AAC представляет собой поток байтов, а не 16-битную
+        // последовательность выборок, и переупорядочение будет осуществляться напрямую.
+
+        // Битовый поток перепутан (декодирование машины не работает → пакеты есть, а звука нет).
         val wirePayload = if (codec == AudioCodec.AAC_LC) pcm else bigEndianS16(pcm)
         val sealed = AirPlayCrypto.chachaSeal(streamKey, AirPlayCrypto.nonce64(nonceCounter), wirePayload, aad)
         val wire = ByteArray(RTP_HEADER_LEN + sealed.size + NONCE_SIZE)
         header.copyInto(wire, 0)
         sealed.copyInto(wire, RTP_HEADER_LEN)
-        // 尾部 8 字节小端 nonce（与 AirPlayCrypto.nonce64 的低 8 字节一致）
+        // Завершающий 8-байтовый одноразовый номер с прямым порядком байтов (согласуется с младшими 8 байтами AirPlayCrypto.nonce64)
         for (index in 0 until NONCE_SIZE) {
             wire[wire.size - NONCE_SIZE + index] =
                 ((nonceCounter ushr (8 * index)) and 0xFF).toByte()
@@ -583,8 +638,8 @@ class AudioSender(
         marker: Boolean = false,
     ): ByteArray {
         val header = ByteArray(RTP_HEADER_LEN)
-        header[0] = 0x80.toByte() // version=2
-        // PT 跟随流类型（catplay `payload_type = stream_type`）：100=PCM 通路、102=AAC 通路
+        header[0] = 0x80.toByte() // версия=2
+        // PT следовать за типом потока (catplay `payload_type = stream_type`): 100 = канал PCM, 102 = канал AAC
         header[1] = ((if (marker) 0x80 else 0) or (streamType.toInt() and 0x7F)).toByte()
         header[2] = ((sequence ushr 8) and 0xFF).toByte()
         header[3] = (sequence and 0xFF).toByte()

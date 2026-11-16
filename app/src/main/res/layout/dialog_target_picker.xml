@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 「选择目标车机」弹窗：深色面板 + 两组列表（已配对 / 扫描到的设备），
-     视觉与主界面一致（M3 深色令牌、24dp 圆角、胶囊按钮） -->
+<!-- Всплывающее окно «Выбрать целевой автомобиль и устройство»: темная панель + два набора списков (сопряженные/сканированные устройства),
+     Визуально соответствует основному интерфейсу (темный жетон M3, закругленные углы 24 dp, кнопка-капсула) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -39,14 +39,14 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- 模式行：不属于任何一组（auto=不指定目标） -->
+            <!-- Модельная линия: не принадлежит ни к одной группе (авто = цель не указана) -->
             <LinearLayout
                 android:id="@+id/autoRowContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
 
-            <!-- ============ 组 1：已配对 ============ -->
+            <!-- ============ Группа 1: Парные ============ -->
             <TextView
                 android:id="@+id/sectionBonded"
                 android:layout_width="match_parent"
@@ -79,7 +79,7 @@
                 android:textSize="11.5sp"
                 android:visibility="gone" />
 
-            <!-- ============ 组 2：扫描到的设备 ============ -->
+            <!-- ============ Группа 2: Сканируемые устройства ============ -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

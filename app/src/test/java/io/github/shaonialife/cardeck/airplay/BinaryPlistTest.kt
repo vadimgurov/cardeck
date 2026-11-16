@@ -7,7 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import java.util.Base64
 
-/** 用 macOS plutil 生成的真实 bplist00 向量验证解析器。 */
+/** Проверьте парсер с реальными векторами bplist00, созданными macOS plutil. */
 class BinaryPlistTest {
     private val vector =
         Base64.getDecoder().decode(
@@ -77,8 +77,10 @@ class BinaryPlistTest {
     }
 
     /**
-     * 整数宽度必须按**有符号**范围选。端口号常落在 32768..65535，按无符号阈值写成
-     * 2 字节时 Apple 端按 int16 读成负数（35449 → -30087），接收端会拒绝或绑错端口。
+     * Целочисленная ширина должна выбираться в соответствии с диапазоном **со знаком**. Номер порта обычно находится
+     * в диапазоне 32768..65535 и записывается как беззнаковый порог.
+     * Когда       равен 2 байтам, сторона Apple считывает его как отрицательное число (35449 → -30087) как int16, а
+     * принимающая сторона отклоняет его или связывает неправильный порт.
      */
     @Test
     fun encodeDecodeRoundTripsPortRangeIntegers() {
@@ -92,13 +94,13 @@ class BinaryPlistTest {
     fun encodeLongAndUnicodeStrings() {
         val longAscii = "x".repeat(300)
         assertEquals(longAscii, BinaryPlist.parse(BinaryPlist.encode(longAscii)))
-        val unicode = "奥迪车机 CarPlay 123"
+        val unicode = "Двигатель Ауди CarPlay 123"
         assertEquals(unicode, BinaryPlist.parse(BinaryPlist.encode(unicode)))
     }
 
     @Test
     fun parsesHandCraftedMinimalPlist() {
-        // 最小 bplist：唯一对象 true @8，offset 表 @9（1 字节 = 0x08），尾部 trailer
+        // Минимальный список bplist: уникальный объект true @8, список смещений @9 (1 байт = 0x08), трейлер
         val minimal =
             byteArrayOf(
                 0x62,
@@ -109,8 +111,8 @@ class BinaryPlistTest {
                 0x74,
                 0x30,
                 0x30, // bplist00
-                0x09, // object #0 = true
-                0x08, // offset 表：object#0 在偏移 8
+                0x09, // объект № 0 = правда
+                0x08, // Таблица смещений: объект № 0 со смещением 8
                 0,
                 0,
                 0,
@@ -126,7 +128,7 @@ class BinaryPlistTest {
                 0,
                 0,
                 0,
-                1, // numObjects=1
+                1, // числоОбъектов=1
                 0,
                 0,
                 0,
@@ -134,7 +136,7 @@ class BinaryPlistTest {
                 0,
                 0,
                 0,
-                0, // topObject=0
+                0, // верхнийОбъект=0
                 0,
                 0,
                 0,

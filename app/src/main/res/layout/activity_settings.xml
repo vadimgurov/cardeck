@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 车机设置（双栏：左菜单 210dp / 右内容）——对照 design/launcher-proto.html。
-     尺寸折算：应用屏超采样 ×1.5 后密度 ≈301dpi，stream 像素 ≈ dp×1.25，故原型 px ÷ 1.25 = dp。
-     右栏内容按菜单切换（管理桌面应用 / 应用超采样）。 -->
+<!-- Настройки автомобиля (две колонки: левое меню 210dp/правое содержимое) – сравните с design/launcher-proto.html.
+     Преобразование размера: после применения передискретизации экрана ×1,5 плотность составляет ≈301dpi, а количество пикселей потока — ≈ dp×1,25, поэтому прототип px ÷ 1,25 = dp.
+     Нажмите меню, чтобы переключить содержимое в правом столбце (Управление настольными приложениями/Применить суперсэмплинг). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
     android:background="#FF000000">
 
-    <!-- ===================== 左栏：菜单 ===================== -->
+    <!-- ===================== Левая колонка: Меню ==================== -->
     <LinearLayout
         android:id="@+id/settingsMenu"
         android:layout_width="210dp"
@@ -216,20 +216,20 @@
         android:layout_height="match_parent"
         android:background="#FF1E1E21" />
 
-    <!-- ===================== 右栏：内容（按菜单切换） ===================== -->
+    <!-- ==================== Правый столбец: содержимое (нажмите меню для переключения) ==================== -->
     <FrameLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1">
 
-        <!-- 右栏：内容 Fragment 容器（车机双栏 / 手机二级菜单共用面板） -->
+        <!-- Правый столбец: контейнер фрагмента контента (двойной столбец для автомобиля и телефона/общая панель для вторичного меню мобильного телефона) -->
         <FrameLayout
             android:id="@+id/settingsContainer"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_weight="1" />
 
-        <!-- 轻提示（页内 Toast；淡入淡出由代码控制） -->
+        <!-- Легкая подсказка (всплывающее сообщение на странице; появление и исчезновение контролируется кодом) -->
         <TextView
             android:id="@+id/settingsToast"
             android:layout_width="wrap_content"

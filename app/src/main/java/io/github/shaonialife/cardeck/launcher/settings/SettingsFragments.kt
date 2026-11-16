@@ -23,8 +23,8 @@ import io.github.shaonialife.cardeck.ui.DarkMessageDialog
 import io.github.shaonialife.cardeck.util.Bg
 
 /**
- * 车机设置内容面板（Fragment 化）：车机 SettingsActivity 双栏右栏、
- * 手机侧二级菜单页共用同一套面板实例，逻辑零拷贝。
+ * Панель содержимого настроек автомобиля и машины (фрагмент): Настройки автомобиля и машины, двойной правый столбец,
+ * Вторичные страницы меню мобильного телефона используют один и тот же набор экземпляров панели без логического копирования.
  */
 class DesktopPanelFragment : SettingsPanelFragment() {
     private var countText: TextView? = null
@@ -154,9 +154,11 @@ class SupersamplePanelFragment : SettingsPanelFragment() {
 
 class OrientationPanelFragment : SettingsPanelFragment() {
     /**
-     * 系统侧真正开着覆盖的包集合（面板打开时后台查一次，行绑定只做内存查表——
-     * `dumpsys platform_compat` 单次约 30ms/36KB，绝不可每行一次）。
-     * 打开面板/清除残留后刷新；行内开关点击就地更新，避免重查。
+     * Набор пакетов, который фактически охватывается на стороне системы (проверяется один раз в фоновом режиме при
+     * открытии панели, привязка строк выполняет только поиск в таблице памяти ——
+     * `dumpsys platform_compat` около 30 мс/36 КБ каждый раз, ни разу на строку).
+     * Обновить после открытия панели/сброса остатков; щелкните встроенный переключатель для обновления на месте,
+     * чтобы избежать повторной проверки.
      */
     private var systemOn: Set<String> = emptySet()
     private var systemStateLoaded = false
@@ -164,11 +166,12 @@ class OrientationPanelFragment : SettingsPanelFragment() {
     private lateinit var panelView: View
 
     /**
-     * 本机是否支持「强制横屏」——null = 探测中。
+     * Поддерживает ли эта машина «принудительное горизонтальное отображение» — ноль = обнаружение.
      *
-     * 两个 ChangeId 是 OEM 定制项（AOSP 标准表里没有）：荣耀 Android 15 注册了，
-     * 红米 Android 13 没注册。不支持时整列置灰并给出原因，否则用户会反复点开关、
-     * 每次只得到失败提示（2026-10-18 实测）。
+     * Два ChangeIds являются пользовательскими элементами OEM (не входят в стандартную таблицу AOSP): зарегистрирован Honor Android 15,
+     * Redmi Android 13 не зарегистрирован. Если он не поддерживается, весь столбец будет выделен серым цветом и
+     * будет указана причина. В противном случае пользователь будет неоднократно нажимать переключатель.
+     * каждый раз получает только сообщение об ошибке (фактическое тестирование состоялось 18 октября 2026 г.).
      */
     private var supported: Boolean? = null
 
@@ -181,9 +184,11 @@ class OrientationPanelFragment : SettingsPanelFragment() {
     override fun onViewCreated(view: View) {
         panelView = view
         listAdapter = OrientationAdapter()
-        // 应用清单就绪后重算横幅（首帧 apps 为空，全部会被误判成「不在列表」）
+        // Пересчитайте баннер после того, как список приложений будет готов (приложения в первом кадре пусты, и все
+        // будут ошибочно оценены как «нет в списке»)
+
         setupAppList(view, R.id.oriList, R.id.oriListIndex, listAdapter) { updateOrphanBanner() }
-        // 能力探测：一次 dumpsys（约 30ms，结果进程内缓存），与系统状态查询并行
+        // Обнаружение возможностей: один dumpsys (около 30 мс, результат кэшируется в процессе), параллельно с запросом состояния системы.
         Bg.run("orientation-capability") {
             val ok = AppOrientationCompat.changeIdsRegistered()
             activity?.runOnUiThread {
@@ -206,10 +211,13 @@ class OrientationPanelFragment : SettingsPanelFragment() {
     }
 
     /**
-     * 按能力探测结果调整面板：不支持时显示横幅、整列变暗且不可点。
+     * Настройте панель в соответствии с результатами обнаружения способностей: если она не поддерживается, будет
+     * отображаться баннер, весь столбец будет затемнен и на него нельзя будет нажать.
      *
-     * 置灰而不是隐藏列表：用户能看到「这台机器做不到」，而不是面对一个消失的功能
-     * 猜测原因。横幅文案说明是 ROM 缺项、换机型才能生效（避免误以为是 Shizuku 问题）。
+     * Делает список серым, а не скрывает его: пользователи могут видеть «Эта машина не может этого сделать» вместо
+     * того, чтобы столкнуться с исчезающей функцией.
+     * Угадай причину. Копия баннера объясняет, что ПЗУ отсутствует и его необходимо изменить, чтобы оно вступило в
+     * силу (чтобы не принять его за проблему Шизуку).
      */
     private fun applyCapabilityState() {
         if (!::panelView.isInitialized) return
@@ -228,21 +236,25 @@ class OrientationPanelFragment : SettingsPanelFragment() {
             "(Оба элемента совместимости с альбомной ориентацией появились на платформе только начиная с Android 14). \n" +
             "Текущая версия Android ${android.os.Build.VERSION.RELEASE}" +
             "(SDK ${android.os.Build.VERSION.SDK_INT}), переключатель неактивен и недоступен."
-        // 整列变暗表达「不可操作」；点击事件在 OriHolder 里按 supported 拦截
+        // Потемнение всей колонки означает «неработоспособен»; события щелчка перехватываются нажатием, поддерживаемым в OriHolder
         list?.alpha = 0.38f
         index?.alpha = 0.38f
     }
 
     /**
-     * 面板外残留（清单里点不到、系统侧却开着覆盖的键）横幅：点击弹窗确认后清理。
-     * 包括两类：已卸载应用（覆盖只在 rawOverrides 可见）、以及历史脏数据里的
-     * `包/组件` 键——这些在应用列表里都没有对应行，行内小字覆盖不到。
+     * Баннер , оставшийся за пределами панели (невозможно щелкнуть в списке, но клавиша наложения включена на
+     * стороне системы): щелкните всплывающее окно для подтверждения, а затем очистите его.
+     * включает две категории: неустановленные приложения (переопределения видны только в rawOverrides) и исторические грязные данные.
+     * Клавиши       `пакет/компоненты` — им нет соответствующих строк в списке приложений, и маленькие символы в
+     * строке не могут быть закрыты.
      */
     private fun updateOrphanBanner() {
         if (!::panelView.isInitialized) return
         val banner = panelView.findViewById<TextView>(R.id.oriOrphanBanner) ?: return
-        // 应用清单未就绪时先不判定：apps 为空会让所有已开启覆盖都「看起来像列表外残留」
-        // （列表真正装载后 onAppsReady 会再调一次）
+        // Не осуждайте, если список приложений не готов: пустые приложения сделают все открытые оверлеи «выглядящими как
+        // остатки из списка».
+
+        // (onAppsReady будет вызван снова после фактической загрузки списка)
         if (apps.isEmpty()) return
         val known = apps.map { it.component.packageName }.toSet()
         val orphans = systemOn.filter { it !in known }.sorted()
@@ -251,7 +263,9 @@ class OrientationPanelFragment : SettingsPanelFragment() {
             return
         }
         banner.visibility = View.VISIBLE
-        // 组件键（含 /）很长：显示时截到包名部分，完整键留给弹窗
+        // Ключ компонента (включая /) очень длинный: часть имени пакета при отображении обрезается, а полный ключ
+        // остается для всплывающего окна.
+
         val summary =
             orphans.take(3).joinToString("、") { it.substringBefore('/') } +
                 if (orphans.size > 3) " Подождите ${orphans.size}" else ""
@@ -308,31 +322,41 @@ class OrientationPanelFragment : SettingsPanelFragment() {
             val iconPx = (30 * resources.displayMetrics.density).toInt()
             icon.setImageBitmap(AppIcons.rounded(entry.icon, iconPx))
             name.text = entry.label
-            // 界面勾选状态即事实源：点击 = 取反当前显示状态（不重新读偏好，
-            // 避免读值失真导致方向算反——实测「取消」会变成再次「启用」）
+            // Источником факта является проверенный статус интерфейса: клик = инвертировать текущий статус отображения (без
+            // перечитывания настроек,
+
+            // Избегайте искажения показаний, приводящего к обратному вычислению направления - фактическое измерение «отмена»
+            // снова станет «разрешением»)
+
             shown = AppOrientationCompat.isEnabled(requireContext(), pkg())
             refresh(shown)
 
             row.setOnClickListener {
-                // 面板顶部已探测到本机不支持（ROM 未注册 ChangeId）：直接忽略点击，
-                // 不再发起注定失败的 shell 往返，也不用 toast 反复打扰。
+                // Вверху панели обнаружено, что данный аппарат его не поддерживает (ПЗУ не прописал ChangeId): просто игнорируйте щелчок.
+                // Больше никаких обреченных поездок туда и обратно, никаких надоедливых тостов.
                 if (supported == false) return@setOnClickListener
-                // **异步**：setEnabled 内部是 2 次 shell（各 4s 超时，最坏 8s），
-                // 直接同步调用会把点击回调所在的主线程卡到 ANR。
+                // **Asynchronous**: внутри setEnabled есть 2 оболочки (тайм-аут каждой 4 секунды, в худшем случае 8 секунд),
+                // Прямые синхронные вызовы приведут к тому, что основной поток, в котором находится обратный вызов щелчка, зависнет в ANR.
                 val target = !shown
                 shown = target
-                refresh(shown) // 立即回显（乐观更新），失败时回滚
+                refresh(shown) // Эхо немедленно (оптимистичное обновление), откат в случае сбоя
                 AppOrientationCompat.setEnabledAsync(requireContext(), pkg(), target) { result ->
                     if (!isAdded || isDetached) return@setEnabledAsync
                     when (result) {
                         AppOrientationCompat.WriteResult.OK -> {
-                            // 就地更新系统侧缓存（写入已同步完成，无需重查 dumpsys）
+                            // Обновить системный кеш на месте (запись выполнена синхронно, нет необходимости перепроверять dumpsys)
                             systemOn = if (target) systemOn + pkg() else systemOn - pkg()
                             refresh(target)
-                            // am compat 写入即生效：系统当场杀掉目标应用，返回时按新方向重启
-                            // （2026-10-15 实测：enable/disable 后 pid 立即消失）。旧的「查活 +
-                            // 询问是否结束」流程问的是已被系统杀掉的应用，pidof 又与击杀竞态、
-                            // 提示时对时错（「未在运行」误导），整体移除、如实告知即可。
+                            // am compat вступает в силу сразу после записи: система тут же убивает целевое приложение и при возврате
+                            // перезапускается в новом направлении.
+
+                            // (Фактическое измерение 2026-10-15: pid исчезает сразу после включения/выключения). Старый «проверка работы +»
+                            // Процесс «Спросить, закончилось ли все» спрашивает о приложениях, которые были уничтожены системой, а pidof
+                            // конкурирует с состоянием уничтожения,
+
+                            // Если подсказка верна, а иногда и неверна («не работает» вводит в заблуждение), просто удалите ее полностью и
+                            // скажите правду.
+
                             hostToast(
                                 "Альбомная ориентация «${entry.label}»: ${if (target) "вкл." else "выкл."} — " +
                                     "приложение перезапустится.",
@@ -367,10 +391,11 @@ class OrientationPanelFragment : SettingsPanelFragment() {
         private fun pkg() = entry.component.packageName
 
         /**
-         * 勾选框 + 系统侧状态小字。三种状态：
-         *   勾选开 + 系统开 → 灰字「已开启横屏（会话期间生效）」（正常）
-         *   勾选关 + 系统开 → 红字高亮「系统残留：横屏仍在生效，点击清除」（异常，可点清除）
-         *   其它            → 隐藏（勾选框本身已表达偏好，不制造噪音）
+         * Флажок  + небольшой текст о состоянии системы. Три государства:
+         * Проверка включена + Система включена → Серый текст «Горизонтальный экран включен (действителен во время сеанса)» (нормальный)
+         * Отметьте флажок + система включена → выделите красным «Остаток системы: горизонтальный экран все еще
+         * действует, щелкните, чтобы очистить» (ненормально, щелкните, чтобы очистить)
+         * Другое → Скрыть (флажок сам выражает предпочтение и не шумит)
          */
         private fun refresh(enabled: Boolean) {
             check.setImageResource(
@@ -391,7 +416,9 @@ class OrientationPanelFragment : SettingsPanelFragment() {
                     hint.setTextColor(0xFFFF6B6B.toInt())
                     hint.visibility = View.VISIBLE
                     hint.isClickable = true
-                    // 只清系统侧覆盖、不动偏好（偏好本来就是关的）；弹窗提示会重启应用
+                    // Очистите только наложения на стороне системы и оставьте настройки без изменений (изначально настройки
+                    // отключены); всплывающее окно перезапустит приложение.
+
                     hint.setOnClickListener {
                         val host = activity ?: return@setOnClickListener
                         DarkMessageDialog.show(
@@ -449,8 +476,12 @@ class DockPanelFragment : SettingsPanelFragment() {
         val scrimValue = view.findViewById<TextView>(R.id.dockScrimValue)
         val blurSeek = view.findViewById<SeekBar>(R.id.dockBlurSeek)
         val blurValue = view.findViewById<TextView>(R.id.dockBlurValue)
-        // 栏宽度（50%–100%，步进 5；**下次连接起效**——与上方 scrim/blur 的
-        // 实时生效不同：dock 虚拟屏的像素尺寸/密度按会话建立时的偏好创建）
+        // Ширина столбца (50–100 %, с шагом 5; **вступает в силу при следующем подключении** – то же, что и в случае с
+        // сеткой/размытием выше).
+
+        // Эффект в реальном времени отличается: размер/плотность пикселей виртуального экрана док-станции создается в
+        // соответствии с предпочтениями при установлении сеанса)
+
         val widthSeek = view.findViewById<SeekBar>(R.id.dockWidthSeek)
         val widthValue = view.findViewById<TextView>(R.id.dockWidthValue)
         val savedWidth = DockPrefs.widthPercent(requireContext())
@@ -600,9 +631,11 @@ class DefaultMapPanelFragment : SettingsPanelFragment() {
 }
 
 /**
- * 「显示」面板：流分辨率缩放（30%–160%，下次连接起效）+ 目标帧率（30/60，
- * 运行中实时切换）。英雄卡展示的是会话运行时生效值（SessionController 快照），
- * 与本页偏好值相区别。
+ * Панель «Дисплей»: масштабирование разрешения потока (30–160 %, вступает в силу при следующем подключении) +
+ * целевая частота кадров (30/60,
+ * переключение в реальном времени во время работы). Карта героя показывает эффективное значение во время работы
+ * сеанса (снимок SessionController).
+ * отличается от значения предпочтения на этой странице.
  */
 class DisplayPanelFragment : SettingsPanelFragment() {
     override fun onCreateView(
@@ -619,7 +652,9 @@ class DisplayPanelFragment : SettingsPanelFragment() {
         val fps30 = view.findViewById<TextView>(R.id.btnFps30)
         val fps60 = view.findViewById<TextView>(R.id.btnFps60)
 
-        // 连接时真息屏（物理面板断电）：默认开；会话中切换立即生效
+        // Истинный экран при подключении (физическая панель выключена): включен по умолчанию; переключение во время
+        // сеанса вступает в силу немедленно
+
         val screenOffOn = view.findViewById<TextView>(R.id.btnScreenOffOn)
         val screenOffOff = view.findViewById<TextView>(R.id.btnScreenOffOff)
         var screenOffEnabled = DisplayPrefs.screenOffOnConnect(ctx)
@@ -642,7 +677,7 @@ class DisplayPanelFragment : SettingsPanelFragment() {
             screenOffEnabled = enabled
             DisplayPrefs.setScreenOffOnConnect(ctx, enabled)
             refreshScreenOff(enabled)
-            // 车机屏上就能操作：立即收放，不必等下次连接
+            // Им можно управлять на экране автомобиля: сразу втягивать и втягивать, не дожидаясь следующего подключения.
             SessionController.applyScreenOffPreference(enabled)
             hostToast(
                 if (enabled) {
@@ -656,7 +691,9 @@ class DisplayPanelFragment : SettingsPanelFragment() {
         screenOffOn.setOnClickListener { applyScreenOff(true) }
         screenOffOff.setOnClickListener { applyScreenOff(false) }
 
-        // 上车自动连接（车机蓝牙 ACL 连上时自动拉起会话）：默认开
+        // Автоматически подключаться при посадке в машину (автоматически начинать сеанс при подключении списка контроля
+        // доступа Bluetooth в автомобиле): включено по умолчанию.
+
         val autoConnectOn = view.findViewById<TextView>(R.id.btnAutoConnectOn)
         val autoConnectOff = view.findViewById<TextView>(R.id.btnAutoConnectOff)
         var autoConnectEnabled = AutoConnectPrefs.enabled(ctx)
@@ -691,7 +728,9 @@ class DisplayPanelFragment : SettingsPanelFragment() {
         autoConnectOn.setOnClickListener { applyAutoConnect(true) }
         autoConnectOff.setOnClickListener { applyAutoConnect(false) }
 
-        // HID 原始日志（键位校准）：默认关；打开后每帧 hidSendReport 写一行 HID-RAW
+        // Необработанный журнал HID (калибровка ключа): по умолчанию выключен; при включении hidSendReport записывает
+        // одну строку HID-RAW для каждого кадра
+
         val hidRawOn = view.findViewById<TextView>(R.id.btnHidRawOn)
         val hidRawOff = view.findViewById<TextView>(R.id.btnHidRawOff)
         var hidRawEnabled = DisplayPrefs.hidRawLog(ctx)
@@ -719,7 +758,7 @@ class DisplayPanelFragment : SettingsPanelFragment() {
         hidRawOn.setOnClickListener { applyHidRaw(true) }
         hidRawOff.setOnClickListener { applyHidRaw(false) }
 
-        // 滑条 progress（0..26）→ 百分比（30..160，步进 5）
+        // Прогресс ползунка (0..26) → процент (30..160, шаг 5)
         fun progressOf(percent: Int) = (percent - DisplayPrefs.SCALE_MIN) / DisplayPrefs.SCALE_STEP
 
         fun percentOf(progress: Int) = DisplayPrefs.SCALE_MIN + progress * DisplayPrefs.SCALE_STEP
@@ -765,7 +804,9 @@ class DisplayPanelFragment : SettingsPanelFragment() {
         )
 
         fun refreshFps(active30: Boolean) {
-            // 未选中片用暗色底（与容器同色）而非 null 背景，避免背景重置内边距
+            // Невыделенные фрагменты используют темный фон (того же цвета, что и контейнер) вместо нулевого фона, чтобы фон
+            // не сбрасывал отступы.
+
             fps30.setBackgroundResource(
                 if (active30) R.drawable.bg_segment_sel else R.drawable.bg_segment,
             )
@@ -797,7 +838,9 @@ class DisplayPanelFragment : SettingsPanelFragment() {
         fps30.setOnClickListener { applyFps(30) }
         fps60.setOnClickListener { applyFps(60) }
 
-        // 触摸注入节流（0=关闭，步进 8ms）：缓解「交互滞后但帧率正常」的事件堆积
+        // Регулирование сенсорного ввода (0 = выключено, шаг 8 мс): уменьшает накопление событий «задержка
+        // взаимодействия, но нормальная частота кадров».
+
         val throttleSeek = view.findViewById<SeekBar>(R.id.throttleSeek)
         val throttleValue = view.findViewById<TextView>(R.id.throttleValue)
 

@@ -4,11 +4,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * `cmd wifi connect-network` 参数拼装的回归保护。
+ * `cmd wifi connect-network` Защита возврата для сборки параметров.
  *
- * 车机热点名/密码来自 0x5703（车机下发），含空格、中文、甚至单引号都可能出现；
- * 拼错一处就是「静默入网失败、退回会弹窗的 specifier」，很难从日志看出原因。
- * 这里把边界钉死，顺带锁住安全类型映射（0=NONE 1=WEP 2=WPA2 3=过渡 4=WPA3）。
+ * Имя/пароль автомобильной точки доступа   происходит от 0x5703 (выдается автомобилем и машиной) и может
+ * содержать пробелы, китайские иероглифы или даже одинарные кавычки;
+ * Единственная ошибка в написании  : «Не удалось выполнить тихий доступ к сети, и спецификатор вернулся со
+ * всплывающим окном». По журналу трудно определить причину.
+ * Здесь закреплена граница и сопоставление типов безопасности заблокировано (0=НЕТ 1=WEP 2=WPA2 3=Переход 4=WPA3).
  */
 class WifiConnectCommandTest {
     @Test
@@ -21,7 +23,7 @@ class WifiConnectCommandTest {
 
     @Test
     fun escapesSingleQuotes() {
-        // POSIX 写法：'pa'\''ss' —— 关闭引号、转义单引号、重开引号
+        // Написание POSIX: 'pa'\''ss' - закрытие кавычек, выход из одинарных кавычек, повторное открытие кавычек
         assertEquals(
             "cmd wifi connect-network 'a b' wpa2 'pa'\\''ss'",
             WifiConnectCommand.build("a b", "pa'ss", 2),
@@ -38,7 +40,9 @@ class WifiConnectCommandTest {
 
     @Test
     fun emptyPassphraseFallsBackToOpen() {
-        // 参数自相矛盾（给了 WPA2 却没密码）时不生成半条命令，按开放热点试
+        // Если параметры противоречивы (указан WPA2, но не указан пароль), половина команды не генерируется. Попробуйте
+        // открыть точку доступа.
+
         assertEquals(
             "cmd wifi connect-network 'DIRECT-BMW' open",
             WifiConnectCommand.build("DIRECT-BMW", "", 2),
@@ -55,7 +59,7 @@ class WifiConnectCommandTest {
 
     @Test
     fun wpa3TransitionAndWepFallBackToWpa2() {
-        // 过渡模式 AP 同时接受 WPA2；WEP 没有关键字，同样按 wpa2 试一次
+        // Точка доступа в переходном режиме одновременно принимает WPA2; В WEP нет ключевого слова, попробуйте также wpa2
         assertEquals(
             "cmd wifi connect-network 'DIRECT-BMW' wpa2 'secret123'",
             WifiConnectCommand.build("DIRECT-BMW", "secret123", 3),
@@ -69,8 +73,8 @@ class WifiConnectCommandTest {
     @Test
     fun keepsNonAsciiSsidIntact() {
         assertEquals(
-            "cmd wifi connect-network '车机 热点' wpa2 '密码 1234'",
-            WifiConnectCommand.build("车机 热点", "密码 1234", 2),
+            "cmd wifi connect-network 'машина машина Точка доступа' wpa2 'Пароль 1234'",
+            WifiConnectCommand.build("машина машина Точка доступа", "Пароль 1234", 2),
         )
     }
 }

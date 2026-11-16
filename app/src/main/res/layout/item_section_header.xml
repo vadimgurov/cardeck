@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页分组标题行（「在桌面的应用」/「不在桌面的应用」） -->
+<!-- Строка заголовка группы страниц настроек («Приложения на рабочем столе»/«Приложения не на рабочем столе») -->
 <TextView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"

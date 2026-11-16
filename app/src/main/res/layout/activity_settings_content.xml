@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 手机侧设置内容页：M3 头部 + 内容 Fragment 容器（与车机双栏共用面板） -->
+<!-- Установите страницу контента на стороне мобильного телефона: заголовок M3 + контейнер фрагмента контента (общая панель с двумя столбцами автомобиля и машины) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"

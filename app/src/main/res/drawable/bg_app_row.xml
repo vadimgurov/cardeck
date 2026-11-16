@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页应用行底：深灰圆角 + 按压涟漪 -->
+<!-- Нижняя строка приложения на странице настроек: темно-серые закругленные углы + рябь при нажатии -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#1FFFFFFF">
     <item>

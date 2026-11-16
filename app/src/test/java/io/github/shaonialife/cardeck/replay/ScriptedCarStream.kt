@@ -5,8 +5,8 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /**
- * 脚本化「车机」字节流：read() 依序吐出录制的 rx 字节，耗尽后保持静默
- * （等会话侧超时逻辑自然走完）；write() 捕获我们的全部输出（golden 比对用）。
+ * Поток байтов "автомобильной машины" по сценарию : read() последовательно выдает записанные байты rx и сохраняет молчание после исчерпания
+ * (дождитесь естественного завершения логики тайм-аута на стороне сеанса); write() захватывает весь наш вывод (для золотого сравнения).
  */
 class ScriptedCarStream(
     rxBytes: ByteArray,
@@ -53,7 +53,7 @@ class ScriptedCarStream(
     }
 }
 
-/** 从原始输出字节里按链路帧头（FF5A + u16 整帧长度）拆出 CSM 载荷。 */
+/** Разверните полезную нагрузку CSM из исходных выходных байтов в соответствии с заголовком кадра связи (полная длина кадра FF5A + u16). */
 internal fun extractCsmPayloads(bytes: List<ByteArray>): List<ByteArray> {
     val out = ArrayList<ByteArray>()
     val all = bytes.fold(ByteArray(0)) { acc, cur -> acc + cur }
@@ -66,7 +66,7 @@ internal fun extractCsmPayloads(bytes: List<ByteArray>): List<ByteArray> {
         val frameLen =
             ((all[off + 2].toInt() and 0xFF) shl 8) or (all[off + 3].toInt() and 0xFF)
         if (frameLen < 9 || off + frameLen > all.size) break
-        if (frameLen > 9) out.add(all.copyOfRange(off + 9, off + frameLen - 1)) // 尾字节=载荷校验
+        if (frameLen > 9) out.add(all.copyOfRange(off + 9, off + frameLen - 1)) // Последний байт = проверка полезной нагрузки
         off += frameLen
     }
     return out

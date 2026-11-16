@@ -7,20 +7,22 @@ import io.github.shaonialife.cardeck.shizuku.CarInputClient
 import io.github.shaonialife.cardeck.shizuku.ShizukuGate
 
 /**
- * 隐形屏模式：以普通 API 创建与车机同分辨率的 PUBLIC 虚拟屏（surface 即编码输入），
- * 经 Shizuku(shell) `am start --display` 把应用启动进去；手机主屏可正常息屏。
+ * Режим невидимого экрана : используйте обычный API для создания ПУБЛИЧНОГО виртуального экрана с тем же
+ * разрешением, что и у автомобиля (поверхность кодирует ввод),
+ * через Shizuku(shell) `am start --display` Запускаем приложение; Главный экран телефона можно отключить в обычном режиме.
  *
- * 启动目标优先「高德地图车机版」（天生横屏；其引导页会丢 --display，需显式启动
- * MainMapActivity 并强制 fullscreen），未安装回退手机版高德。
- * （移植自参考项目 android-auto 的 VirtualDisplaySource）
+ * отдает приоритет цели запуска «Версия автомобиля Amap» (отображается на горизонтальном экране; его загрузочная
+ * страница потеряет --display, необходимо запустить явно
+ * MainMapActivity и принудительно полноэкранный режим), резервная мобильная версия Amap не устанавливается.
+ * (перенесено из VirtualDisplaySource эталонного проекта android-auto)
  */
 class HiddenDisplaySource(
     private val context: Context,
     private val log: (String) -> Unit = {},
 ) : ScreenSource {
-    override val name: String = "隐形屏"
+    override val name: String = "Невидимый экран"
 
-    /** 兼容字段：双屏架构下指向应用屏 displayId。 */
+    /** Совместимое поле: указывает на displayId экрана приложения в двухэкранной архитектуре. */
     var displayId: Int = -1
         private set
 
@@ -31,38 +33,51 @@ class HiddenDisplaySource(
         densityDpi: Int,
     ): Boolean {
         detach()
-        // 逐状态诊断：Shizuku「开着」≠ 已授权本应用（服务端授权必须弹窗点一次）
+        // Диагностика по штатам: Shizuku «включено» ≠ Это приложение авторизовано (необходимо один раз нажать на
+        // авторизацию сервера во всплывающем окне)
+
         when (val gate = ShizukuGate.state(context)) {
             ShizukuGate.State.READY -> Unit
 
             ShizukuGate.State.NOT_INSTALLED -> {
-                log("SHIZUKU: 未安装 Shizuku App（shizuku.rikka.app）")
+                log("SHIZUKU: Приложение Shizuku (shizuku.rikka.app) не установлено.")
                 return false
             }
 
             ShizukuGate.State.NOT_RUNNING -> {
-                log("SHIZUKU: 服务未运行——打开 Shizuku App 点「启动」（手机重启后需重新启动）")
+                log(
+                    "SHIZUKU: Служба не запущена - откройте приложение Shizuku и нажмите «Пуск» (перезапустите после " +
+                        "перезагрузки телефона)",
+                )
                 return false
             }
 
             ShizukuGate.State.UNAUTHORIZED -> {
-                log("SHIZUKU: 未授权本应用——已发起授权请求，请在弹窗中点「允许」后重连")
+                log(
+                    "SHIZUKU: Это приложение не авторизовано — инициирован запрос на авторизацию, нажмите «Разрешить» во " +
+                        "всплывающем окне и переподключитесь.",
+                )
                 ShizukuGate.requestPermission()
                 return false
             }
         }
-        // 等 UserService 真正就绪再建屏：会话在 RECORD 后立刻 attach，服务可能还在
-        // spawn（调试包加载 dex 更慢）。立刻判「不可用」会白白回退到应用侧 PUBLIC 屏
-        // ——那条路径对 UserService 依赖更重，服务没起来就彻底没有触摸（2026-10-22 K60E）。
-        // 本方法已在后台线程（VideoSender.start 回调）执行，阻塞等待是安全的。
+        // Прежде чем создавать экран, подождите, пока UserService действительно не будет готов: сеанс присоединяется
+        // сразу после RECORD, и сервис все еще может присутствовать.
+
+        // spawn (декс загрузки отладочного пакета происходит медленнее). Немедленное определение «недоступно» приведет к
+        // бесполезному возврату к ПУБЛИЧНОМУ экрану приложения.
+
+        // ——Этот путь в большей степени зависит от UserService и остается полностью нетронутым до запуска службы (22 октября 2026 г. K60E).
+        // Этот метод был выполнен в фоновом потоке (обратный вызов VideoSender.start), и его можно безопасно заблокировать и подождать.
         val svc = CarInputClient.awaitReady(context, USER_SERVICE_WAIT_MS)
         if (svc == null) {
             log(
-                "SHIZUKU: UserService 在 ${USER_SERVICE_WAIT_MS}ms 内未就绪" +
-                    "——将回退应用侧 PUBLIC 屏（触摸可能不可用，请检查 Shizuku 是否被系统冻结）",
+                "ШИЗУКУ: UserService не готов в ${USER_SERVICE_WAIT_MS}ms" +
+                    "—— Вернется к ПУБЛИЧНОМУ экрану на стороне приложения (сенсорный экран может быть недоступен, " +
+                    "проверьте, не заморожен ли Shizuku системой)",
             )
         }
-        // 双屏启动器：GL 合成器（dock 屏 + 应用屏）→ 编码 Surface
+        // Панель запуска с двумя экранами: композитор GL (экран док-станции + экран приложения) → Coding Surface
         val ok =
             VirtualLauncher.attach(
                 context,
@@ -87,9 +102,11 @@ class HiddenDisplaySource(
 
     private companion object {
         /**
-         * 等 UserService 就绪的上限。取值权衡：太短会误判「不可用」而回退公屏（丢触摸），
-         * 太长会推迟首帧。车机侧对屏幕流 SETUP→激活有看门狗，但 RECORD 已完成、
-         * 视频数据口也已连上，这里多等 3s 不影响会话存活。
+         * Верхний предел готовности UserService, например . Компромисс по стоимости: если он слишком короткий, он будет
+         * ошибочно оценен как «недоступный» и вернется на общедоступный экран (теряя связь).
+         * слишком долго будет задерживать первый кадр. НАСТРОЙКА потока экрана со стороны автомобиля → активация есть
+         * сторожевой таймер, но ЗАПИСЬ завершена,
+         * Порт видеоданных           также подключен. Ожидание в течение 3 секунд не повлияет на выживание сеанса.
          */
         const val USER_SERVICE_WAIT_MS = 3_000L
     }

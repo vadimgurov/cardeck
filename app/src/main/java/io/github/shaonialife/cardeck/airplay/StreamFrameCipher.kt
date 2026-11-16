@@ -1,25 +1,26 @@
 package io.github.shaonialife.cardeck.airplay
 
 /**
- * 屏幕/音频流帧加密方式（AirPlay `et` 字段的三种形态）。
+ * метод шифрования кадров экрана/аудиопотока (три формы поля AirPlay `et`).
  *
- * catplay `ScreenFrameCodec::new` 的选择依据：
- *  - 走过 /pair-setup/pair-verify → ChaCha20-Poly1305（共享密钥派生）；
- *  - 只走过 /auth-setup（MFi-SAP）→ AES-128-CTR（会话密钥）；
- *  - 都没走（`et = NONE`，老车机 pre-HomeKit）→ **AES-128-CTR 且会话密钥全零**
- *    （catplay 注释："There was never support for unencrypted screen sessions.
- *     ET = None maps to AES session where session_key before derivation is all zeroes."）
+ * Основа выбора   Catplay `ScreenFrameCodec::new`:
+ * — прошел через /pair-setup/pair-verify → ChaCha20-Poly1305 (деривация общего ключа);
+ * — прошел только через /auth-setup (MFi-SAP) → AES-128-CTR (сессионный ключ);
+ * — нет (`et = NONE`, старая машина до HomeKit) → **AES-128-CTR и все сеансовые ключи равны нулю**
+ * (комментарий кошачьей игры: «Никогда не было поддержки незашифрованных сеансов экрана.
+ * ET = None соответствует сеансу AES, где session_key до деривации содержит все нули.")
  *
- * 2026-10-19 数据点：奥迪 4xxx（如 4851）可能属于第三类——对它强制
- * pair-setup 必然失败，而 catplay 先用明文 SETUP 起步、屏幕流走 AES 零密钥即可连上。
+ * 19 октября 2026 г. Данные: Audi 4xxx (например, 4851) может попасть в категорию 3 — заставьте это сделать.
+ * Парная установка   неизбежно завершится неудачно, но сначала начинается игра с открытым текстом SETUP, а
+ * нулевой ключ AES можно подключить после перехода на экран.
  */
 sealed class StreamFrameCipher {
-    /** 视频帧 ChaCha20-Poly1305 密封（16B tag），keepAlive/config 帧不加密。 */
+    /** Видеокадры запечатаны ChaCha20-Poly1305 (тег 16B), кадры KeepAlive/config не шифруются. */
     class ChaCha(
         val key: ByteArray,
     ) : StreamFrameCipher()
 
-    /** 视频帧 AES-128-CTR 流式加密（无 tag，密钥流跨帧连续）。 */
+    /** Потоковое шифрование видеокадров AES-128-CTR (без тегов, непрерывный поток ключей между кадрами). */
     class AesCtr(
         val key: ByteArray,
         val iv: ByteArray,
@@ -28,8 +29,8 @@ sealed class StreamFrameCipher {
 
 object AirPlayStreamKeys {
     /**
-     * ChaCha 流密钥：HKDF-SHA512(shared_secret, "DataStream-Salt<connId>", "DataStream-Output-Encryption-Key")。
-     * 与 catplay `create_chacha_ciphers` / 接收端 ScreenStream 的派生规则一致。
+     * Ключ потока ChaCha: HKDF-SHA512(shared_secret, «DataStream-Salt<connId>», «DataStream-Output-Encryption-Key»).
+     * соответствует правилам вывода Catplay `create_chacha_ciphers`/получения ScreenStream.
      */
     fun chachaStreamKey(
         sharedSecret: ByteArray,
@@ -41,13 +42,13 @@ object AirPlayStreamKeys {
             "DataStream-Output-Encryption-Key".toByteArray(Charsets.US_ASCII),
         )
 
-    /** `et=NONE` 时的会话密钥：16 字节全零（catplay ScreenFrameCodec::new 同款）。 */
+    /** Ключ сеанса по адресу `et=NONE`: 16 байт со всеми нулями (так же, как в Catplay ScreenFrameCodec::new). */
     val ZERO_SESSION_KEY: ByteArray = ByteArray(16)
 
     /**
-     * AES 流密钥/IV（catplay `derive_aes_stream_keys` 逐字节对齐）：
-     *   key = SHA512("AirPlayStreamKey" + connId(十进制) + sessionKey)[0..16]
-     *   iv  = SHA512("AirPlayStreamIV"  + connId(十进制) + sessionKey)[0..16]
+     * Ключ потока AES/IV (выровнен по байтам Catplay `derive_aes_stream_keys`):
+     * Ключ       = SHA512 («AirPlayStreamKey» + connId (десятичный) + sessionKey) [0..16]
+     * iv = SHA512("AirPlayStreamIV" + connId(десятичный) + sessionKey)[0..16]
      */
     fun aesStreamKeys(
         sessionKey: ByteArray,

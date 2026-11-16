@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 选择目标车机弹窗里的单个设备行：图标块 + 名称/地址 + 右侧状态胶囊 -->
+<!-- Выберите одну строку устройства во всплывающем окне целевого автомобиля: блок значков + имя/адрес + капсула состояния справа. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"

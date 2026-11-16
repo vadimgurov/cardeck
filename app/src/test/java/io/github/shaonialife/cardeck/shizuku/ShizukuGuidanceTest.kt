@@ -11,7 +11,9 @@ class ShizukuGuidanceTest {
     fun notRunningTellsUserToStartService() {
         val guidance = ShizukuGate.guidanceOf(ShizukuGate.State.NOT_RUNNING)
         assertTrue(guidance.title.contains("не запущена"))
-        // 必须给出可执行动作（打开 Shizuku App 启动），否则用户无从下手
+        // Должно быть задано исполняемое действие (для запуска откройте приложение Shizuku), иначе у пользователя не
+        // будет возможности запуститься.
+
         assertEquals("Открыть Shizuku", guidance.primaryLabel)
         assertTrue(guidance.message.contains("Запустить"))
     }
@@ -28,14 +30,16 @@ class ShizukuGuidanceTest {
     fun notInstalledHasNoFakeAction() {
         val guidance = ShizukuGate.guidanceOf(ShizukuGate.State.NOT_INSTALLED)
         assertTrue(guidance.title.contains("установите"))
-        // 未安装时不该给一个编造的跳转/下载按钮
+        // Не должно отображаться вымышленная кнопка перехода/загрузки, если она не установлена.
         assertNull(guidance.primaryLabel)
         assertTrue(guidance.message.contains("Shizuku"))
     }
 
     @Test
     fun eachStateExplainsConsequenceOthersDoNotAllLookSame() {
-        // 三态文案必须互不相同：混成一句「Shizuku 未就绪」用户无法判断该装/启动/授权
+        // Три состояния копирайтинга должны отличаться друг от друга: смешанные в одно предложение «Шизуку не готова»
+        // пользователь не может определить установку/запуск/авторизацию
+
         val titles =
             listOf(
                 ShizukuGate.State.NOT_INSTALLED,
@@ -43,7 +47,9 @@ class ShizukuGuidanceTest {
                 ShizukuGate.State.UNAUTHORIZED,
             ).map { ShizukuGate.guidanceOf(it).title }
         assertEquals(titles.size, titles.toSet().size)
-        // 三种未就绪状态都要说明「连接会失败」的后果（否则用户以为能连）
+        // Три состояния неготовности должны объяснить последствия «соединения не удастся» (в противном случае
+        // пользователь думает, что может подключиться)
+
         listOf(
             ShizukuGate.State.NOT_RUNNING,
             ShizukuGate.State.UNAUTHORIZED,

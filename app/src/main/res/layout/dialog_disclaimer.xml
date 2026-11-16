@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 免责声明弹窗：标题固定 → 正文可滚动 → 底部按钮固定。
-     视觉与「选择目标车机」弹窗一致（bg_dialog_panel / M3 深色令牌 / 胶囊按钮）。 -->
+<!-- Всплывающее окно с отказом от ответственности: исправлен заголовок → прокручиваемый текст → исправлена нижняя кнопка.
+     Визуализация соответствует всплывающему окну «Выбрать целевой автомобиль» (bg_dialog_panel/темный жетон M3/кнопка капсулы). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -28,7 +28,7 @@
         android:textColor="@color/m3_on_var"
         android:textSize="11.5sp" />
 
-    <!-- 正文：高度受限（屏高约 60%），必须滚动才能看完 -->
+    <!-- Текст: Высота ограничена (около 60% высоты экрана), необходимо прокрутить, чтобы закончить. -->
     <ScrollView
         android:id="@+id/disclaimerScroll"
         android:layout_width="match_parent"
@@ -46,7 +46,7 @@
             android:paddingEnd="4dp" />
     </ScrollView>
 
-    <!-- 阻止接受的原因（倒计时 / 未滑到底）；可接受时隐藏 -->
+    <!-- Причина отказа от принятия (обратный отсчет/еще не достигнута нижняя граница); скрыть, когда это приемлемо -->
     <TextView
         android:id="@+id/disclaimerBlockHint"
         android:layout_width="match_parent"
@@ -63,7 +63,7 @@
         android:layout_marginTop="10dp"
         android:orientation="horizontal">
 
-        <!-- 放弃使用：不受倒计时/滚动约束（拒绝不应被阻拦） -->
+        <!-- Отклонение: не подлежит обратному отсчету/прокачке (отклонение не должно блокироваться) -->
         <TextView
             android:id="@+id/btnDecline"
             android:layout_width="0dp"

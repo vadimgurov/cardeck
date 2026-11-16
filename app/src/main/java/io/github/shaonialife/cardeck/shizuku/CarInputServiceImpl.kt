@@ -16,35 +16,42 @@ import android.view.SurfaceControl
 import java.lang.reflect.Method
 
 /**
- * Shizuku UserService 实现：运行在常驻 shell 进程（uid 2000），
- * 通过反射 InputManager.injectInputEvent 直接注入触摸事件到指定 display。
+ * Реализация Shizuku UserService: запуск в резидентном процессе оболочки (uid 2000),
+ * напрямую вводит события касания в указанный дисплей посредством отражения InputManager.injectInputEvent.
  *
- * injectInputEvent 的位置随版本变化：
- * - Android 13 及以下：InputManager 实例方法；
- * - Android 14+：迁移到 InputManagerGlobal.getInstance() 单例。
- * 部分版本签名带第三参 targetDisplayId，按形参类型自适应；
- * 老签名（两参）依赖 InputEvent.setDisplayId 指定目标屏。
+ * Местоположение   injectInputEvent меняется в зависимости от версии:
+ * — Android 13 и более ранние версии: метод экземпляра InputManager;
+ * — Android 14+: перейдите на одноэлементный метод InputManagerGlobal.getInstance().
+ * В сигнатуре некоторых версий   имеется третий параметр targetDisplayId, который является адаптивным по типу формального параметра;
+ * Старая подпись   (два параметра) использует InputEvent.setDisplayId для указания целевого экрана.
  *
- * 反射失败（ROM hidden API 差异）由 ping()/diag() 暴露，调用方回退 `input -d`。
- * （移植自参考项目 android-auto 的 CarInputServiceImpl）
+ * Ошибка отражения   (скрытая разница API в ПЗУ), обнаруженная с помощью ping()/diag(), вызывающая сторона возвращается к `input -d`.
+ * (перенесено из CarInputServiceImpl эталонного проекта android-auto)
  */
 class CarInputServiceImpl(
     private val context: Context,
 ) : ICarInput.Stub() {
     /**
-     * 物理屏是否被我们置为 OFF。服务自尽（APK 升级导致的过期自清）前必须恢复，
-     * 否则手机会停在一块「逻辑醒着、物理黑着」的屏上（按电源键两次可恢复）。
+     * Выключен ли нами физический экран. Службу необходимо восстановить до того, как она совершит самоубийство
+     * (самоочистка из-за истечения срока действия из-за обновления APK).
+     * В противном случае телефон остановится на «логически активном, физически черном» экране (для восстановления
+     * нажмите кнопку питания дважды).
      */
     @Volatile
     private var physicalScreenOff = false
 
     /**
-     * 僵尸自清（治本，2026-10-16）：Shizuku 按「组件+进程名+版本(APK lastUpdateTime)」复用
-     * 常驻 UserService 进程。重装 APK 后旧版本进程既不受 force-stop 影响、Shizuku 也不回收；
-     * 而它创建的虚拟屏**只有它自己能释放**（releaseDisplay 只查本进程的 map）——表现为
-     * 「重启后检测到残留屏，点清理却释放 0/N」。本进程周期性比对「启动时读到的
-     * lastUpdateTime」与当前安装值：不一致即自身 dex 已过期，自尽交系统回收进程，
-     * 它持有的全部虚拟屏随之释放。
+     * Самоочистка зомби (основная причина, 16 октября 2026 г.): повторное использование Shizuku в соответствии с
+     * «компонент + имя процесса + версия (APK LastUpdateTime)»
+     * Резидентный процесс UserService      . После переустановки APK на процесс старой версии не влияет
+     * принудительная остановка и не перерабатывается Shizuku;
+     * А виртуальный экран, который он создает, можно освободить только сам по себе (releaseDisplay проверяет только
+     * карту этого процесса) - производительность следующая
+     * «После перезапуска обнаружен остаточный экран, нажмите «Очистить», но отпустите 0/N». Этот процесс
+     * периодически сравнивает данные, считанные при запуске.
+     * LastUpdateTime" не соответствует текущему установочному значению, то есть срок действия его собственного dex
+     * истек и он будет передан в процесс переработки системы.
+     * Все виртуальные экраны, которые он содержит, освобождаются.
      */
     private val startupLastUpdateTime: Long =
         runCatching {
@@ -67,15 +74,21 @@ class CarInputServiceImpl(
                         context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
                     }.getOrDefault(-1L)
                 if (startupLastUpdateTime > 0 && now > 0 && now != startupLastUpdateTime) {
-                    // 物理屏若被我们置为 OFF，自尽前必须恢复：否则新版本进程还没起来，
-                    // 手机就停在一块「逻辑醒着、物理黑着」的屏上（按电源键两次才恢复）。
+                    // Если физический экран отключен нами, его необходимо восстановить, прежде чем совершить самоубийство: в
+                    // противном случае процесс новой версии еще не начался.
+
+                    // Телефон завис на «логически активном, физически черном» экране (дважды нажмите кнопку питания, чтобы восстановиться).
                     if (physicalScreenOff) {
-                        fileLog("stale self-reap: 恢复物理屏点亮（避免升级后停在黑屏）")
+                        fileLog(
+                            "устаревшее самопожертвование: восстановите светлый физический экран (чтобы не " +
+                                "останавливаться на черном экране после обновления)",
+                        )
                         runCatching { setPhysicalScreenPower(true) }
                     }
                     fileLog(
                         "stale self-reap: lastUpdateTime $startupLastUpdateTime -> $now，" +
-                            "exiting pid=${android.os.Process.myPid()}（其持有的虚拟屏随进程回收）",
+                            "выход pid=${android.os.Process.myPid()} (виртуальный экран, который он содержит, " +
+                            "перерабатывается вместе с процессом)",
                     )
                     android.os.Process.killProcess(android.os.Process.myPid())
                     return@Thread
@@ -97,7 +110,7 @@ class CarInputServiceImpl(
             try {
                 context.getSystemService(Context.INPUT_SERVICE) as? InputManager
             } catch (t: Throwable) {
-                Log.d(TAG, "probe getSystemService(INPUT_SERVICE) 异常", t)
+                Log.d(TAG, "проверить исключение getSystemService(INPUT_SERVICE)", t)
                 null
             }
         if (im != null) {
@@ -110,7 +123,7 @@ class CarInputServiceImpl(
             val m = findInjectMethod(cls.methods)
             if (m != null) return@lazy Injector(global, m)
         } catch (t: Throwable) {
-            Log.d(TAG, "probe InputManagerGlobal 异常", t)
+            Log.d(TAG, "проверка исключения InputManagerGlobal", t)
         }
         null
     }
@@ -150,13 +163,13 @@ class CarInputServiceImpl(
                 }
             if (!result && !injectFailLogged) {
                 injectFailLogged = true
-                Log.d(TAG, "injectInputEvent 返回 false method=$m")
+                Log.d(TAG, "injectInputEvent возвращает ложный метод = $m")
             }
             result
         } catch (t: Throwable) {
             if (!injectFailLogged) {
                 injectFailLogged = true
-                Log.d(TAG, "inject 异常 method=${inj.method}", t)
+                Log.d(TAG, "метод внедрения исключения = ${inj.method}", t)
             }
             false
         } finally {
@@ -164,14 +177,15 @@ class CarInputServiceImpl(
         }
     }
 
-    /** KeyEvent 没有可复用的池化语义（recycle 已废弃），只有 MotionEvent 需要回收。 */
+    /** KeyEvent не имеет семантики многократного использования пула (переработка устарела), необходимо перерабатывать только MotionEvent. */
     private fun recycle(event: InputEvent) {
         (event as? MotionEvent)?.recycle()
     }
 
     /**
-     * 按键注入（iDrive 旋钮 → 方向键/确认键）：与触摸共用 injectInputEvent，
-     * 差别只是 event 换成 KeyEvent 且同样 setDisplayId 到目标虚拟屏。
+     * Вставка ключа  (ручка iDrive → клавиша направления/клавиша подтверждения): используется совместно с touch injectInputEvent,
+     * Разница между       заключается в том, что событие заменяется на KeyEvent, а setDisplayId также
+     * устанавливается на целевой виртуальный экран.
      */
     override fun keyEvent(
         displayId: Int,
@@ -211,7 +225,7 @@ class CarInputServiceImpl(
             e.setSource(InputDevice.SOURCE_TOUCHSCREEN)
             e
         } catch (t: Throwable) {
-            Log.d(TAG, "build MotionEvent 异常", t)
+            Log.d(TAG, "buildMotionEventException", t)
             null
         }
 
@@ -289,20 +303,24 @@ class CarInputServiceImpl(
         return inject(up, displayId)
     }
 
-    // ---- 受信虚拟屏 ----
+    // ---- Доверенный виртуальный экран ----
 
-    // VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 << 30（@hide/@SystemApi，编译期不可引用，写原始值）
+    // VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 << 30 (@hide/@SystemApi, во время компиляции нельзя заключать в кавычки, запишите исходное значение)
     private val virtualDisplays = HashMap<Int, android.hardware.display.VirtualDisplay>()
 
-    // ---- IME 展示策略 ----
+    // ---- Стратегия отображения IME ----
 
     /**
-     * 受信虚拟屏的 IME 策略默认是 FALLBACK——键盘被系统路由到手机默认屏，车机侧永远
-     * 看不到（2026-10-17 定谳，车机「设置」搜索框点击无键盘根因）。创建受信屏后显式
-     * 设 LOCAL 让键盘画进本屏、随合成流推给车机。
+     * Политика IME по умолчанию для доверенного виртуального экрана  — FALLBACK — клавиатура направляется системой
+     * на экран мобильного телефона по умолчанию, а сторона автомобиля всегда
+     * не виден (17 октября 2026 г., Динчен, нажмите на окно поиска «Настройки» автомобиля, чтобы найти основную
+     * причину отсутствия клавиатуры). Явно после создания доверенного экрана
+     * Установите LOCAL, чтобы клавиатура отображалась на этом экране и пересылалась на машину вместе с потоком синтеза.
      *
-     * 枚举值反射自 SystemApi 常量而非硬编码 0：厂商 ROM 有魔改枚举值的风险（2026-10-17
-     * 排查时按此防御；本机实测与 AOSP 一致 = 0）。读不到时回落 0 并记日志。
+     * Значение перечисления       отражается из констант SystemApi, а не жестко запрограммированного 0: ПЗУ
+     * производителя имеет риск волшебного изменения значения перечисления (17 октября 2026 г.)
+     * Используйте эту защиту при устранении неполадок      ; фактические измерения этой машины соответствуют AOSP =
+     * 0). Если его невозможно прочитать, он возвращается к 0 и записывается в журнал.
      */
     private val imePolicyLocal: Int by lazy {
         val value =
@@ -312,7 +330,7 @@ class CarInputServiceImpl(
                     .getField("DISPLAY_IME_POLICY_LOCAL")
                     .getInt(null)
             } catch (t: Throwable) {
-                fileLog("DISPLAY_IME_POLICY_LOCAL 反射失败，回退 AOSP 值 0：$t")
+                fileLog("Отражение DISPLAY_IME_POLICY_LOCAL не выполнено, резервное значение AOSP 0: $t")
                 0
             }
         fileLog("DISPLAY_IME_POLICY_LOCAL=$value")
@@ -320,9 +338,9 @@ class CarInputServiceImpl(
     }
 
     /**
-     * IWindowManager 代理（按方法名反射，不依赖 AIDL 事务号）。
-     * 该 ROM 上走 ServiceManager+Stub.asInterface；WindowManagerGlobal.getWindowManagerService
-     * 路径会致进程被杀（2026-10-17 实测），勿用。
+     * Агент IWindowManager (отражается именем метода, не зависит от номера транзакции AIDL).
+     * В этом ПЗУ используется ServiceManager+Stub.asInterface; WindowManagerGlobal.getWindowManagerService
+     * Путь       приведет к завершению процесса (фактическое тестирование состоялось 17 октября 2026 г.), поэтому не используйте его.
      */
     private val windowManagerProxy: Any? by lazy {
         try {
@@ -336,14 +354,15 @@ class CarInputServiceImpl(
                 .getMethod("asInterface", IBinder::class.java)
                 .invoke(null, binder)
         } catch (t: Throwable) {
-            fileLog("IWindowManager 反射失败（IME 策略将不生效）：$t")
+            fileLog("Ошибка отражения IWindowManager (политика IME не вступит в силу): $t")
             null
         }
     }
 
     /**
-     * 把受信虚拟屏的 IME 策略设为 LOCAL（键盘画进本屏）。
-     * 失败不影响主链路：最坏情况与改动前一致——键盘留在手机主屏、车机侧不可见。
+     * Установите для политики IME доверенного виртуального экрана значение LOCAL (клавиатура отображается на этом экране).
+     * Сбой       не влияет на основное звено: худший сценарий тот же, что и до изменения - клавиатура остается на
+     * главном экране телефона и невидима со стороны автомобиля.
      */
     private fun applyImePolicyLocal(displayId: Int) {
         val proxy = windowManagerProxy ?: return
@@ -357,13 +376,13 @@ class CarInputServiceImpl(
                         .getMethod("getDisplayImePolicy", Integer.TYPE)
                         .invoke(proxy, displayId)
                 }.getOrNull()
-            fileLog("setDisplayImePolicy($displayId, LOCAL=$imePolicyLocal) ok, 读回=$readBack")
+            fileLog("setDisplayImePolicy($displayId, LOCAL=$imePolicyLocal) ок, читаем обратно=$readBack")
         } catch (t: Throwable) {
-            fileLog("setDisplayImePolicy($displayId, LOCAL=$imePolicyLocal) 失败：$t")
+            fileLog("setDisplayImePolicy($displayId, LOCAL=$imePolicyLocal) не удалось: $t")
         }
     }
 
-    /** 文件日志：shell 进程 logcat 被 HKS 加密，写 /data/local/tmp 供 adb 读取。 */
+    /** Журнал файла: logcat процесса оболочки шифруется HKS и записывается в /data/local/tmp для чтения adb. */
     private fun fileLog(message: String) {
         try {
             java.io.FileWriter("/data/local/tmp/carinput_svc.log", true).use { w ->
@@ -380,8 +399,8 @@ class CarInputServiceImpl(
         }
     }
 
-    // WrongConstant：flags 里的 TRUSTED/ALWAYS_UNLOCKED/OWN_DISPLAY_GROUP 是 @hide 常量
-    // （运行时可行性已真机实证），lint 的 IntDef 模型只认公开 API。
+    // WrongConstant: TRUSTED/ALWAYS_UNLOCKED/OWN_DISPLAY_GROUP в флагах является константой @hide.
+    // (Реализация во время выполнения была доказана на реальных машинах), модель IntDef lint распознает только общедоступные API.
     @android.annotation.SuppressLint("WrongConstant")
     override fun createDisplay(
         name: String,
@@ -393,40 +412,60 @@ class CarInputServiceImpl(
     ): Int {
         return try {
             fileLog("createDisplay $name ${width}x$height@$dpi start")
-            // 关键：必须用「shell 包的 Context」——系统检查 packageName 与调用 uid(2000) 匹配，
-            // 用本 app 的 Context 会报 SecurityException('packageName must match the owner uid')
+            // Ключ: необходимо использовать «Контекст пакета оболочки» — система проверяет, соответствует ли packageName
+            // вызывающему uid(2000),
+
+            // Использование контекста этого приложения сообщит об исключении SecurityException («имя пакета должно
+            // соответствовать uid владельца»)
+
             val shellContext =
                 try {
                     context.createPackageContext("com.android.shell", 0)
                 } catch (t: Throwable) {
-                    fileLog("createPackageContext(com.android.shell) 失败：$t，回退本 app context")
+                    fileLog("Ошибка createPackageContext(com.android.shell): $t, откатитесь к этому контексту приложения.")
                     context
                 }
             fileLog("ctx package=${shellContext.packageName}")
             val dm = shellContext.getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
-            // VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 << 6（@hide）：
-            // 不声明时应用看到 "-touch" 配置（无触摸设备）→ 部分应用（如头条）
-            // 切 TV/桌面式大头部布局（2026-10-11 实测：搜索区占满半屏的根因）。
+            // VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 << 6 (@hide):
+            // Если не объявлено, приложение будет видеть конфигурацию «-touch» (без сенсорного устройства) → некоторые
+            // приложения (например, Toutiao)
+
+            // Вырезанный макет большой головы в стиле телевизора/настольного компьютера (фактический тест 11 октября 2026
+            // г.: причина, по которой область поиска занимает половину экрана).
+
             //
-            // VIRTUAL_DISPLAY_FLAG_PUBLIC（公开 API = 1）必须随受信屏一起声明（2026-10-17 定谳）：
-            // 不声明时 DisplayDeviceInfo 带 FLAG_PRIVATE（owner=shell 2000），而 WMS.addWindow
-            // 的访问闸 displayContent.hasAccess(session.mUid) → Display.hasAccess 对私有屏只放行
-            // owner/system/root/UID-present——第三方输入法（uid 10xxx）的键盘窗口会被
-            // ADD_INVALID_DISPLAY(-9) 拒绝，永远加不进该屏（车机侧「设置」点搜索框无键盘的
-            // 最终根因：策略已 LOCAL、令牌已迁屏，IME 服务也 showWindow 了，但窗口加不进）。
-            // 公开化只放宽窗口访问；ROM 的「公开屏默认自动镜像」仅在未声明
-            // OWN_CONTENT_ONLY 时生效，我们已声明，不受影响。dock 屏不受信、无输入场景，
-            // 维持私有（也避免无关窗口挂上去）。
+            // VIRTUAL_DISPLAY_FLAG_PUBLIC (Public API = 1) должен быть объявлен с доверенным экраном (решено 17 октября 2026 г.):
+            // Если DisplayDeviceInfo не объявлен с помощью FLAG_PRIVATE (владелец = оболочка 2000), WMS.addWindow
+            // Шлюз доступа displayContent.hasAccess(session.mUid) → Display.hasAccess разрешает только частные экраны.
+            // Owner/system/root/UID-present — Окно клавиатуры стороннего метода ввода (uid 10xxx) будет
+            // ADD_INVALID_DISPLAY(-9) отклонен и никогда не будет добавлен на этот экран (в поле поиска «Настройки» со
+            // стороны автомобиля нет клавиатуры)
+
+            // Последняя основная причина: политика была ЛОКАЛЬНОЙ, токен был перемещен на экран, а служба IME также
+            // показывала окно, но окно добавить невозможно).
+
+            // Публикация только ослабляет доступ к окну; «Автоматическое зеркалирование общедоступного экрана по умолчанию»
+            // в ПЗУ доступно только в том случае, если оно не объявлено.
+
+            // Вступает в силу, когда OWN_CONTENT_ONLY, мы заявили, что это не будет затронуто. Экран док-станции не является
+            // доверенным, и сцена ввода отсутствует.
+
+            // Держите это в секрете (и избегайте зависания несвязанных окон).
             val baseFlags =
                 (if (trusted) FLAG_TRUSTED or android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC else 0) or
                     FLAG_SUPPORTS_TOUCH or
                     android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-            // 受信屏额外要「独立显示组 + 永远已解锁」：
-            //  · OWN_DISPLAY_GROUP：手机主屏休眠时虚拟屏不跟着休眠（物理屏断电后仍出帧）；
-            //  · ALWAYS_UNLOCKED：设备锁屏时该屏不画 Keyguard（否则车机看到锁屏/黑屏）。
-            // OWN_DISPLAY_GROUP 复用 ADD_TRUSTED_DISPLAY（受信屏本来就要）；ALWAYS_UNLOCKED
-            // 另需 ADD_ALWAYS_UNLOCKED_DISPLAY——部分 ROM 未授予 shell，带上会抛
-            // SecurityException 把整块屏打挂，因此逐级降级重试。
+            // Для доверенного экрана дополнительно требуется «независимая группа дисплеев + всегда разблокирована»:
+            // · OWN_DISPLAY_GROUP: виртуальный экран не переходит в спящий режим, когда основной экран телефона спит
+            // (физический экран все еще выводит кадры после выключения питания);
+
+            // · ALWAYS_UNLOCKED: Keyguard не будет отображаться на экране, когда устройство заблокировано (в противном
+            // случае автомобиль увидит заблокированный/черный экран).
+
+            // OWN_DISPLAY_GROUP мультиплексирует ADD_TRUSTED_DISPLAY (требуется доверенный экран); ВСЕГДА_РАЗБЛОКИРОВАНО
+            // Также требуется ADD_ALWAYS_UNLOCKED_DISPLAY — некоторые ПЗУ не имеют оболочки и будут выдавать
+            // SecurityException зависает весь экран, поэтому понизьте его версию и повторите попытку.
             var vd: android.hardware.display.VirtualDisplay? = null
             if (trusted) {
                 vd =
@@ -438,10 +477,13 @@ class CarInputServiceImpl(
                         dpi,
                         surface,
                         baseFlags or FLAG_OWN_DISPLAY_GROUP or FLAG_ALWAYS_UNLOCKED,
-                        "受信+独立组+ALWAYS_UNLOCKED",
+                        "ДОВЕРЕННАЯ+НЕЗАВИСИМАЯ ГРУППА+ВСЕГДА_РАЗБЛОКИРОВАНА",
                     )
                 if (vd == null) {
-                    fileLog("$name 带 ALWAYS_UNLOCKED 失败——降级为独立组（ROM 可能未给 shell 该权限）")
+                    fileLog(
+                        "$name не удалось использовать ALWAYS_UNLOCKED — понижение до независимой группы (ROM может не " +
+                            "предоставить оболочке это разрешение)",
+                    )
                     vd =
                         createVirtualDisplayAttempt(
                             dm,
@@ -451,21 +493,27 @@ class CarInputServiceImpl(
                             dpi,
                             surface,
                             baseFlags or FLAG_OWN_DISPLAY_GROUP,
-                            "受信+独立组",
+                            "Доверенная + независимая группа",
                         )
                 }
                 if (vd == null) {
-                    fileLog("$name 带 OWN_DISPLAY_GROUP 失败——回退基础 flags")
-                    vd = createVirtualDisplayAttempt(dm, name, width, height, dpi, surface, baseFlags, "受信基础")
+                    fileLog("$name не удалось использовать OWN_DISPLAY_GROUP — возврат к базовым флагам")
+                    vd = createVirtualDisplayAttempt(dm, name, width, height, dpi, surface, baseFlags, "Надежная основа")
                 }
             } else {
-                // dock 屏（不受信）默认落在**默认显示组**：物理主屏断电/锁屏时整组跟着灭，
-                // 车机侧表现为「app 屏正常、dock 栏全黑」，解锁后恢复（2026-10-23 实测）。
-                // 与受信屏同款三级降级：组+解锁 → 组 → 基础。
-                //  · AOSP 只在 AUTO_MIRROR 时清掉 OWN_DISPLAY_GROUP，而 AUTO_MIRROR 只随
-                //    PUBLIC 自动置上；dock 没声明 PUBLIC，所以该 flag 会保留；
-                //  · 两者都只要求权限（ADD_TRUSTED_DISPLAY / ADD_ALWAYS_UNLOCKED_DISPLAY），
-                //    不改变 dock「不受信」的语义（第三方任务仍然上不去）。
+                // Экран док-станции (ненадежный) по умолчанию попадает в **группу дисплеев по умолчанию**: когда физический
+                // главный экран выключается/блокируется, вся группа гаснет.
+
+                // Производительность автомобиля: «Экран приложения нормальный, а док-панель полностью черная», и все
+                // восстанавливается после разблокировки (фактическое тестирование 23 октября 2026 г.).
+
+                // То же понижение на три уровня, что и доверенный экран: Группа + Разблокировка → Группа → Базовый.
+                // · AOSP очищает OWN_DISPLAY_GROUP только тогда, когда AUTO_MIRROR, а AUTO_MIRROR очищает OWN_DISPLAY_GROUP
+                // только тогда, когда
+
+                //    ПУБЛИЧНЫЙ устанавливается автоматически; док не объявляет PUBLIC, поэтому этот флаг будет сохранен;
+                //  · Оба требуют только разрешений (ADD_TRUSTED_DISPLAY / ADD_ALWAYS_UNLOCKED_DISPLAY),
+                //    "Недоверенная" семантика дока не изменена (сторонние задачи по-прежнему нельзя загружать).
                 vd =
                     createVirtualDisplayAttempt(
                         dm,
@@ -475,10 +523,13 @@ class CarInputServiceImpl(
                         dpi,
                         surface,
                         baseFlags or FLAG_OWN_DISPLAY_GROUP or FLAG_ALWAYS_UNLOCKED,
-                        "非受信+独立组+ALWAYS_UNLOCKED",
+                        "Ненадежный+Независимая группа+ALWAYS_UNLOCKED",
                     )
                 if (vd == null) {
-                    fileLog("$name 带 ALWAYS_UNLOCKED 失败——降级为独立组（ROM 可能未给 shell 该权限）")
+                    fileLog(
+                        "$name не удалось использовать ALWAYS_UNLOCKED — понижение до независимой группы (ROM может не " +
+                            "предоставить оболочке это разрешение)",
+                    )
                     vd =
                         createVirtualDisplayAttempt(
                             dm,
@@ -488,20 +539,27 @@ class CarInputServiceImpl(
                             dpi,
                             surface,
                             baseFlags or FLAG_OWN_DISPLAY_GROUP,
-                            "非受信+独立组",
+                            "Ненадежная + независимая группа",
                         )
                 }
                 if (vd == null) {
-                    fileLog("$name 带 OWN_DISPLAY_GROUP 失败——回退基础 flags（主屏断电时该屏会跟着休眠）")
-                    vd = createVirtualDisplayAttempt(dm, name, width, height, dpi, surface, baseFlags, "非受信")
+                    fileLog(
+                        "$name не удалось использовать OWN_DISPLAY_GROUP — вернуться к базовым флагам (экран перейдет в " +
+                            "спящий режим, когда главный экран выключен)",
+                    )
+                    vd = createVirtualDisplayAttempt(dm, name, width, height, dpi, surface, baseFlags, "ненадежный")
                 }
             }
             val created = vd
             val id = created?.display?.displayId ?: -1
             fileLog("createVirtualDisplay -> vd=$created id=$id")
-            // 读回校验（2026-10-23 荣耀实测）：flag 生效时 Display 层 flags 应带
-            // ALWAYS_UNLOCKED（1 << 9）——不带 OWN_DISPLAY_GROUP 时系统会静默剥掉
-            // ALWAYS_UNLOCKED（创建成功无异常但读回没有），必须靠读回才能发现。
+            // Считайте обратное подтверждение (учитывайте фактическое измерение 23 октября 2026 г.): Когда флаг вступит в
+            // силу, флаги слоя отображения должны быть
+
+            // ALWAYS_UNLOCKED (1 << 9) — Система отключится автоматически без OWN_DISPLAY_GROUP
+            // ALWAYS_UNLOCKED (создан успешно без исключений, но без исключений прочитан обратно), должен быть найден путем
+            // обратного чтения.
+
             if (id >= 0) {
                 val realFlags =
                     try {
@@ -511,8 +569,8 @@ class CarInputServiceImpl(
                     }
                 val effective = (realFlags and 0x200) != 0
                 fileLog(
-                    "ALWAYS_UNLOCKED 读回 display.flags=0x${realFlags.toString(16)} -> " +
-                        if (effective) "生效" else "未生效（锁屏仍会影响该屏）",
+                    "ALWAYS_UNLOCKED прочитайте display.flags=0x${realFlags.toString(16)} ->" +
+                        if (effective) "Вступить в силу" else "Неэффективно (блокировка экрана по-прежнему повлияет на экран)",
                 )
             }
             if (created == null || id < 0) {
@@ -520,8 +578,10 @@ class CarInputServiceImpl(
                 return -1
             }
             synchronized(virtualDisplays) { virtualDisplays[id] = created }
-            // 只有受信屏能设 IME 策略（WMS 对非受信屏抛 SecurityException），且正需要它：
-            // dock 屏只承载自有 DockActivity，无输入场景
+            // Только доверенные экраны могут устанавливать политики IME (WMS генерирует SecurityException для ненадежных
+            // экранов), и это необходимо:
+
+            // Экран док-станции содержит только собственную DockActivity и не имеет сцен ввода.
             if (trusted) applyImePolicyLocal(id)
             Log.i(TAG, "createDisplay $name id=$id size=${width}x$height@$dpi")
             id
@@ -552,9 +612,11 @@ class CarInputServiceImpl(
     override fun releaseDisplay(displayId: Int): Boolean {
         val vd = synchronized(virtualDisplays) { virtualDisplays.remove(displayId) }
         if (vd == null) {
-            // 不在本进程 map：该屏由其它（旧版本）UserService 进程创建，只有创建者能释放。
-            // 应用侧兜底见 CarInputClient.reapStaleUserServices（杀持有进程）。
-            fileLog("releaseDisplay id=$displayId -> 非本进程持有（跨进程无法释放）")
+            // Не в этой карте процесса: этот экран был создан другим (более старой версией) процессом UserService, и только
+            // создатель может его освободить.
+
+            // См. CarInputClient.reapStaleUserServices (завершить процесс удержания) в нижней части приложения.
+            fileLog("ReleaseDisplay id=$displayId -> Не удерживается этим процессом (не может быть выпущено между процессами)")
             return false
         }
         return try {
@@ -567,7 +629,7 @@ class CarInputServiceImpl(
         }
     }
 
-    /** 创建一次虚拟屏；失败（含 SecurityException / ROM 静默返回 null）返回 null 并留痕。 */
+    /** Создать виртуальный экран; в случае сбоя (включая SecurityException / ROM молча возвращает ноль), он возвращает ноль и оставляет след. */
     private fun createVirtualDisplayAttempt(
         dm: android.hardware.display.DisplayManager,
         name: String,
@@ -582,16 +644,17 @@ class CarInputServiceImpl(
             fileLog("createDisplay($name) $label flags=0x${flags.toString(16)}")
             dm.createVirtualDisplay(name, width, height, dpi, surface, flags, null, null)
         } catch (t: Throwable) {
-            fileLog("createDisplay($name) $label 异常：$t")
+            fileLog("createDisplay($name) $label исключение: $t")
             null
         }
 
-    // ---- 物理主屏电源（真息屏；系统保持唤醒） ----
+    // ----Физический источник питания главного экрана (настоящий экран; система бодрствует) ----
 
     /**
-     * 对**物理主屏**做硬件级断电/点亮（同 scrcpy `-S/--turn-screen-off`）：
-     * 不按电源键（那会锁屏），而是直接调 SurfaceFlinger 的 setDisplayPowerMode。
-     * 系统仍认为屏幕亮着 → 不锁屏、不进 Doze，虚拟屏继续出帧。
+     * выполняет аппаратное выключение и включение питания для **физического главного экрана** (так же, как scrcpy `-S/--turn-screen-off`):
+     * не нажимает кнопку питания (которая блокирует экран), а напрямую настраивает setDisplayPowerMode SurfaceFlinger.
+     * Система по-прежнему считает, что экран включен → не блокирует экран, не входит в режим дремоты, а виртуальный
+     * экран продолжает кадрировать.
      */
     override fun setPhysicalScreenPower(on: Boolean): Boolean {
         val ok = setPanelPower(on)
@@ -601,14 +664,15 @@ class CarInputServiceImpl(
     }
 
     /**
-     * 面板电源统一核心（两套实现的合并点，2026-10-24）：
-     * token 三路枚举按「实测通过率」排序（任何 ROM 只要有一路可用就能工作）；
-     * 断电/点亮统一走 SurfaceControl.setDisplayPowerMode 反射。
+     * Унифицированное ядро панели управления питанием  (точка слияния двух наборов реализаций, 24 октября 2026 г.):
+     * Трехстороннее перечисление токена       сортируется по «измеренной скорости прохождения» (любое ПЗУ может
+     * работать, пока доступен один путь);
+     * использует отражение SurfaceControl.setDisplayPowerMode при выключении/включении питания.
      */
     private fun setPanelPower(on: Boolean): Boolean {
         val token =
             physicalDisplayToken() ?: run {
-                fileLog("setPanelPower($on) 失败：各入口都拿不到内置屏 token")
+                fileLog("setPanelPower($on) не удалось: встроенный токен экрана невозможно получить при каждом входе")
                 return false
             }
         val mode = if (on) POWER_MODE_NORMAL else POWER_MODE_OFF
@@ -619,34 +683,37 @@ class CarInputServiceImpl(
                 .invoke(null, token, mode)
             true
         } catch (t: Throwable) {
-            fileLog("setPanelPower($on) 失败：$t")
+            fileLog("setPanelPower($on) не удалось: $t")
             false
         }
     }
 
     /**
-     * 物理主屏 token，三路按序回退（不同 ROM 删改面不同，全试最稳）：
-     * ① SurfaceControl.getInternalDisplayToken——荣耀 A17（SDK 37）实测唯一可用，
-     *    放首位（MagicOS 保留了这条「更老」API）；
-     * ② DisplayControl 类加载器——SDK 34+ 的正统入口（scrcpy 同款：services.jar 里的
-     *    类要 ClassLoaderFactory + android_servers JNI 才可见）；
-     * ③ SurfaceControl.getPhysicalDisplayIds/getPhysicalDisplayToken——Android 11~14 旧入口。
-     * 首个物理屏 id 即内置屏（AOSP 约定数组首元素为默认屏）。
+     * токен физического главного экрана, трехсторонний последовательный откат (разные ПЗУ имеют разные аспекты
+     * удаления и модификации, наиболее стабильные во всем тесте):
+     * ① SurfaceControl.getInternalDisplayToken — единственный доступный в реальном тесте Honor A17 (SDK 37),
+     * ставится первым (MagicOS сохраняет этот «старый» API);
+     * ② Загрузчик классов DisplayControl — традиционный вход в SDK 34+ (то же самое, что scrcpy: в Services.jar
+     * Класс       требует, чтобы ClassLoaderFactory + android_servers JNI был видимым);
+     * ③ SurfaceControl.getPhysicalDisplayIds/getPhysicalDisplayToken — старый вход для Android 11–14.
+     * Первый идентификатор физического экрана — это встроенный экран (AOSP согласен, что первый элемент массива — это экран по умолчанию).
      */
-    // BlockedPrivateApi/DEPRECATION：本方法刻意走隐藏/废弃 API（UserService 跑在 shell
-    // 域不受应用层 hidden API 强制约束；三路回退的运行时行为已真机实证）。
+    // BlockedPrivateApi/DEPRECATION: этот метод намеренно скрывает/отменяет API (UserService запускается в оболочке).
+    // Домены не контролируются скрытыми API-интерфейсами прикладного уровня; поведение трехстороннего резервного
+    // копирования во время выполнения было доказано).
+
     @android.annotation.SuppressLint("BlockedPrivateApi")
     @Suppress("DEPRECATION")
     private fun physicalDisplayToken(): IBinder? {
-        // ① getInternalDisplayToken（部分 ROM 的 SurfaceControl 仍保留）
+        // ① getInternalDisplayToken (SurfaceControl некоторых ПЗУ все еще сохраняется)
         runCatching {
             val sc = SurfaceControl::class.java
             (sc.getDeclaredMethod("getInternalDisplayToken").invoke(null) as? IBinder)?.let {
                 fileLog("token via getInternalDisplayToken")
                 return it
             }
-        }.onFailure { fileLog("getInternalDisplayToken 入口失败：${it.message}") }
-        // ② DisplayControl（新系统：方法已从 SurfaceControl 迁出）
+        }.onFailure { fileLog("Ошибка записи getInternalDisplayToken: ${it.message}") }
+        // ② DisplayControl (новая система: методы перенесены из SurfaceControl)
         displayControlClass?.let { cls ->
             runCatching {
                 val ids = cls.getMethod("getPhysicalDisplayIds").invoke(null) as LongArray
@@ -655,9 +722,9 @@ class CarInputServiceImpl(
                     fileLog("token via DisplayControl id=$id")
                     return it
                 }
-            }.onFailure { fileLog("DisplayControl token 入口失败：${it.message}") }
+            }.onFailure { fileLog("Ошибка записи токена DisplayControl: ${it.message}") }
         }
-        // ③ getPhysicalDisplayIds/getPhysicalDisplayToken（Android 11~14）
+        // ③ getPhysicalDisplayIds/getPhysicalDisplayToken (Android 11–14)
         runCatching {
             val sc = SurfaceControl::class.java
             val ids = sc.getDeclaredMethod("getPhysicalDisplayIds").invoke(null) as LongArray
@@ -666,11 +733,11 @@ class CarInputServiceImpl(
                 fileLog("token via SurfaceControl.getPhysicalDisplayToken id=$id")
                 return it
             }
-        }.onFailure { fileLog("getPhysicalDisplayToken 入口失败：${it.message}") }
+        }.onFailure { fileLog("Ошибка записи getPhysicalDisplayToken: ${it.message}") }
         return null
     }
 
-    /** DisplayControl 类加载器（真息屏用）：只运行在 Shizuku UserService（shell uid）里。 */
+    /** Загрузчик классов DisplayControl (для истинного экрана): работает только в Shizuku UserService (uid оболочки). */
     private val displayControlClass: Class<*>? by lazy {
         try {
             val factory = Class.forName("com.android.internal.os.ClassLoaderFactory")
@@ -687,7 +754,7 @@ class CarInputServiceImpl(
                 )
             val classpath = System.getenv("SYSTEMSERVERCLASSPATH")
             if (classpath.isNullOrEmpty()) {
-                fileLog("SYSTEMSERVERCLASSPATH 为空——无法加载 DisplayControl")
+                fileLog("SYSTEMSERVERCLASSPATH пуст — невозможно загрузить DisplayControl")
                 return@lazy null
             }
             val loader =
@@ -702,21 +769,21 @@ class CarInputServiceImpl(
                     null,
                 ) as ClassLoader
             val cls = loader.loadClass("com.android.server.display.DisplayControl")
-            // 静态 JNI 方法在 libandroid_servers.so 里注册；必须加载进这个 ClassLoader
+            // Статические методы JNI регистрируются в libandroid_servers.so; они должны быть загружены в этот ClassLoader
             registerAndroidServersLibrary(cls)
-            fileLog("DisplayControl 已就绪")
+            fileLog("ДисплейКонтроль готов.")
             cls
         } catch (t: Throwable) {
-            fileLog("DisplayControl 加载失败（SDK ${Build.VERSION.SDK_INT}）：$t")
+            fileLog("Не удалось загрузить DisplayControl (SDK ${Build.VERSION.SDK_INT}): $t.")
             null
         }
     }
 
     /**
-     * 把 libandroid_servers.so 的 JNI 注册进 [cls] 所在的 ClassLoader（scrcpy 同款路径）。
+     * регистрирует JNI libandroid_servers.so в ClassLoader, где находится [cls] (тот же путь, что и scrcpy).
      *
-     * 本类只运行在 Shizuku UserService（shell uid 2000 的 app_process），不受应用进程的
-     * hidden-API 限制；lint 的 BlockedPrivateApi 按 targetSdk 应用进程判定，故此处豁免。
+     * Этот класс работает только в Shizuku UserService (app_process оболочки uid 2000) и не зависит от процесса приложения.
+     * Ограничение скрытого API      ; BlockedPrivateApi lint определяется процессом приложения targetSdk, поэтому здесь он исключен.
      */
     @SuppressLint("BlockedPrivateApi")
     private fun registerAndroidServersLibrary(cls: Class<*>) {
@@ -743,33 +810,35 @@ class CarInputServiceImpl(
     companion object {
         private const val TAG = "CarInputSvc"
 
-        /** 自清巡检周期：重装 APK 后旧进程最迟约 15s 内自行退出（成本仅一次 PM 查询）。 */
+        /** Цикл проверки самоочистки: после переустановки APK старый процесс завершится самостоятельно не позднее чем через 15 секунд (стоимость — всего один запрос в личку). */
         private const val STALE_CHECK_INTERVAL_MS = 15_000L
 
-        /** VIRTUAL_DISPLAY_FLAG_TRUSTED（@hide；AOSP 定义 = 1 << 10 = 0x400）。 */
+        /** VIRTUAL_DISPLAY_FLAG_TRUSTED (@hide; определение AOSP = 1 << 10 = 0x400). */
         private const val FLAG_TRUSTED = 1 shl 10
 
-        /** VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH（@hide；AOSP 定义 = 1 << 6 = 0x40）。 */
+        /** VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH (@hide; определение AOSP = 1 << 6 = 0x40). */
         private const val FLAG_SUPPORTS_TOUCH = 1 shl 6
 
         /**
-         * VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP（@hide；AOSP 定义 = 1 << 11 = 0x800）。
-         * 虚拟屏进自己的 DisplayGroup：手机主屏休眠/断电时，它不跟着进入 OFF。
-         * 需要 ADD_TRUSTED_DISPLAY（受信屏本来就要）——见 DisplayManagerService 的校验。
+         * VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP (@hide; определение AOSP = 1 << 11 = 0x800).
+         * Виртуальный экран           переходит в собственную группу отображения: когда главный экран мобильного
+         * телефона находится в спящем режиме или выключен, он не отключается.
+         * требует ADD_TRUSTED_DISPLAY (требуется доверенный экран) — см. проверку DisplayManagerService.
          */
         private const val FLAG_OWN_DISPLAY_GROUP = 1 shl 11
 
         /**
-         * VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED（@hide；AOSP 定义 = 1 << 12 = 0x1000）。
-         * 锁屏状态下该屏不显示 Keyguard。**另需 ADD_ALWAYS_UNLOCKED_DISPLAY**，
-         * 部分 ROM 未授予 shell——createDisplay 里必须能降级重试，否则整块屏创建失败。
+         * VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED (@hide; определение AOSP = 1 << 12 = 0x1000).
+         * Keyguard не отображается на экране, когда экран заблокирован. **Также требуется ADD_ALWAYS_UNLOCKED_DISPLAY**,
+         * Некоторым ПЗУ не предоставляется оболочка — необходимо, чтобы у createDisplay была возможность перейти на
+         * более раннюю версию и повторить попытку, иначе создание всего экрана завершится неудачно.
          */
         private const val FLAG_ALWAYS_UNLOCKED = 1 shl 12
 
-        /** SurfaceControl 显示电源模式：OFF=硬件断电，NORMAL=正常点亮。 */
+        /** SurfaceControl отображает режим питания: ВЫКЛ = оборудование выключено, НОРМАЛЬНЫЙ = светится нормально. */
         private const val POWER_MODE_OFF = 0
         private const val POWER_MODE_NORMAL = 2
 
-        /** SurfaceControl 显示电源模式（@hide；AOSP 定义 OFF=0 / NORMAL=2，反射失败时兜底用）。 */
+        /** SurfaceControl отображает режим питания (@hide; AOSP определяет OFF=0/NORMAL=2, используемый в качестве резервного при сбое отражения). */
     }
 }

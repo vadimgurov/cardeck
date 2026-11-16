@@ -10,7 +10,7 @@ import io.github.shaonialife.cardeck.R
 import io.github.shaonialife.cardeck.launcher.DesktopApps
 import io.github.shaonialife.cardeck.launcher.VirtualLauncher
 
-/** 设置列表行：分组标题 / 拼音字母标题 / 应用（三个应用列表共用）。 */
+/** Установите строку списка: заголовок группы/заголовок пиньинь/приложение (общее для трех списков приложений). */
 sealed class SettingsRow {
     abstract val id: Long
 
@@ -29,12 +29,16 @@ sealed class SettingsRow {
 }
 
 /**
- * 行构建与字母导航条（管理桌面 / 应用超采样 / 应用横屏共用）：
- * 两级分组——先按桌面勾选（「在桌面的应用」→「不在桌面的应用」）。
- * 仅「不在桌面」组内按拼音首字母分节（A/B/…/#，数字应用归 #），字母导航条
- * 也只对应后者——**在桌面组不分节**：其数量通常少，若分节，其字母会出现在
- * 导航条首位（排在 #/A 之前），而后面分节里不再出现该字母，导航条看起来
- * 「排序错误」（2026-10-16 用户反馈：高德在桌面 → G 排在导航条第一个）。
+ * построение строк и панель навигации по буквам (совместно с рабочим столом управления/суперсэмплированием
+ * приложения/горизонтальным экраном приложения):
+ * Двухуровневая группировка - сначала проверка по рабочему столу («Приложения на рабочем столе» → «Приложения не на рабочем столе»).
+ * Только группа «Не на рабочем столе» разделена на разделы по первой букве пиньинь (A/B/…/#, номер приложения
+ * принадлежит #), и алфавитной панели навигации.
+ * соответствует только последнему - **не разделен на разделы в группе рабочего стола**: число обычно небольшое,
+ * если разделить на разделы, его буквы появятся в
+ * находится вверху панели навигации (ранг до #/A), и эта буква больше не отображается в последующих разделах, а
+ * панель навигации выглядит так:
+ * «Ошибка сортировки» (отзыв пользователя 16 октября 2026 г.: Amap на рабочем столе → G занимает первое место на панели навигации).
  */
 object SettingsRows {
     fun build(
@@ -47,7 +51,9 @@ object SettingsRows {
         val rows = ArrayList<SettingsRow>(apps.size * 2)
         if (onDesktop.isNotEmpty()) {
             rows += SettingsRow.Header("Приложение на рабочем столе (${onDesktop.size})", "on")
-            // 扁平直出（清单本身按拼音有序，过滤后仍有序），不分字母节、不进导航条
+            // Плоский и прямой (сам список упорядочен по пиньинь, и после фильтрации он остается в порядке), без деления на
+            // алфавитные разделы и входа в панель навигации.
+
             rows += onDesktop.map { SettingsRow.App(it) }
         }
         if (offDesktop.isNotEmpty()) {
@@ -72,7 +78,7 @@ object SettingsRows {
         return rows
     }
 
-    /** 右侧字母导航条：行集合变化时由 AdapterDataObserver 驱动重建。 */
+    /** Панель навигации с буквами справа: управляется AdapterDataObserver для перестроения при изменении набора строк. */
     fun setupIndexBar(
         fragment: androidx.fragment.app.Fragment,
         bar: LinearLayout,
@@ -138,7 +144,7 @@ object SettingsRows {
         )
     }
 
-    /** 分组标题行复用 ViewHolder。 */
+    /** Строка заголовка группы повторно использует ViewHolder. */
     class HeaderHolder(
         val title: TextView,
     ) : RecyclerView.ViewHolder(title) {
@@ -154,22 +160,24 @@ object SettingsRows {
 }
 
 /**
- * 应用清单列表的通用适配器骨架（桌面/超采样/横屏三面板共用）：两级分组头由骨架
- * 统一渲染，应用行的布局与绑定由子类提供——替代此前三份近乎复制的适配器样板。
+ * Универсальный адаптер-скелет списка приложений (общий для рабочего стола/суперсэмплинга/горизонтальных трех
+ * панелей): двухуровневый группирующий заголовок состоит из скелета
+ * Унифицированный рендеринг  , расположение и привязка строк приложения обеспечиваются подклассами — заменяя
+ * предыдущие три почти скопированных шаблона адаптера.
  */
 abstract class AppRowsAdapter(
     private val fragment: androidx.fragment.app.Fragment,
     private val rowLayout: Int,
     private val appsProvider: () -> List<VirtualLauncher.AppEntry>,
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-    /** 应用行 Holder（分组头之外的内容行）。 */
+    /** Держатель строки приложения (строка содержимого вне заголовка группы). */
     abstract class AppHolder(
         row: android.view.View,
     ) : RecyclerView.ViewHolder(row) {
         abstract fun bind(entry: VirtualLauncher.AppEntry)
     }
 
-    /** 创建应用行 Holder（[rowLayout] 已 inflate 好，无需再关心 viewType）。 */
+    /** Создайте держатель строки приложения ([rowLayout] был раздут, не нужно заботиться о viewType). */
     protected abstract fun onCreateAppHolder(row: android.view.View): AppHolder
 
     val rows: List<SettingsRow>

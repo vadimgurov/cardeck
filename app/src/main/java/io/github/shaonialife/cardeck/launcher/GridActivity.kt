@@ -23,16 +23,20 @@ import io.github.shaonialife.cardeck.ui.WallpaperStore
 import io.github.shaonialife.cardeck.util.Bg
 
 /**
- * CarPlay 主区桌面：纯黑背景 + 图标分页网格（横屏 4×3 CarPlay 规格；竖屏按格子
- * 高宽比自适应、最多 6 行，见 computeCellMetrics）+ 底部页点。
- * 布局声明在 res/layout（activity_grid / item_grid_page / item_app_cell），
- * 代码只做动态格子尺寸计算与数据绑定。无字母导航（对照 CarPlay 主屏）。
+ * Основная область рабочего стола CarPlay: чистый черный фон + сетка прокрутки значков (горизонтальный экран
+ * 4×3, характеристики CarPlay; вертикальный экран в соответствии с сеткой)
+ * адаптивное соотношение сторон, до 6 строк, см. ComputeCellMetrics) + нижняя точка страницы.
+ * Макет   объявлен в res/layout (activity_grid / item_grid_page / item_app_cell),
+ * Код   выполняет только динамический расчет размера сетки и привязку данных. Нет алфавитной навигации (по
+ * сравнению с главным экраном CarPlay).
  *
- * 默认只显示地图类应用（DesktopApps 默认选择），第一格固定「车机设置」入口；
- * 用户可在设置页勾选要显示的应用，返回桌面（onResume）即时刷新。
+ * по умолчанию отображает только приложения карты (по умолчанию выбрано DesktopApps), а вход в «Настройки
+ * автомобиля» зафиксирован в первом кадре;
+ * Пользователи могут проверить приложения, которые будут отображаться на странице настроек, и вернуться на
+ * рабочий стол (onResume) для немедленного обновления.
  */
 class GridActivity : AppCompatActivity() {
-    /** 桌面格子：仪表盘页（第 0 页）/ 固定设置入口 / 普通应用。 */
+    /** Сетка рабочего стола: Страница панели управления (страница 0)/Вход с фиксированными настройками/Общие приложения. */
     private sealed interface Cell {
         object Dashboard : Cell
 
@@ -50,36 +54,36 @@ class GridActivity : AppCompatActivity() {
     private var cellHeightPx = 0
     private var iconSizePx = 0
 
-    /** 当前行数（横屏 3；竖屏按格子高宽比自适应，分页容量 = COLUMNS × rows）。 */
+    /** Текущее количество строк (горизонтальный экран 3; вертикальный экран адаптируется в соответствии с соотношением сторон сетки, емкость страниц = СТОЛБЦЫ × строки). */
     private var rows = ROWS_MIN
 
-    /** 应用清单缓存（每次 resume 重扫 packageManager 会拖慢回桌面——仅在首次载入时扫描）。 */
+    /** Кэш манифеста приложения (возобновление PackageManager каждый раз замедляется до рабочего стола - сканируется только при первой загрузке). */
     private var appsCache: List<VirtualLauncher.AppEntry>? = null
 
-    /** 壁纸背景层（对齐全流画布的切片；版本变化时后台换图）。 */
+    /** Фоновый слой обоев (фрагмент полнопоточного холста; изменение изображения на заднем плане при смене версии). */
     private var wallpaperView: ImageView? = null
     private var wallpaperShownVersion = -1L
 
-    /** 壁纸变更监听（WallpaperStore 主线程回调；解码在本类自行切后台线程）。 */
+    /** Мониторинг смены обоев (обратный вызов основного потока WallpaperStore; декодирование само переключается на фоновый поток в этом классе). */
     private val wallpaperListener = { _: Long -> refreshWallpaperIfChanged() }
 
-    /** 仪表盘模式面板（分屏时显示在应用区右半；左半由地图 tile 覆盖）。 */
+    /** Панель режима информационной панели (отображается в правой половине области приложения при разделенном экране; левая половина закрыта плиткой карты). */
     private var dashboardView: android.view.View? = null
 
-    /** 仪表盘模式变化（VirtualLauncher 通知）。 */
+    /** Изменение режима приборной панели (уведомление VirtualLauncher). */
     private val dashboardListener = { dashboard: Boolean ->
         runOnUiThread { applyDashboardMode(dashboard) }
     }
 
-    /** 媒体状态监听（MediaSessionsState 主线程回调）。 */
+    /** Мониторинг состояния мультимедиа (обратный вызов основного потока MediaSessionsState). */
     private val mediaStateListener = {
         runOnUiThread { renderMediaCard() }
     }
 
-    /** 全画布位图就绪（WallpaperStore 首次构建/重建后回调）。 */
+    /** Полное растровое изображение холста готово (обратный вызов после первой сборки/перестройки WallpaperStore). */
     private val canvasReadyListener = { _: Long -> runOnUiThread { refreshDashWallpaper() } }
 
-    /** 卡片视觉（暗幕透明度/模糊）——与 dock 一致（DockPrefs）。 */
+    /** Визуализация карты (прозрачность/размытие темного экрана) — соответствует док-станции (DockPrefs). */
     private val dockPrefsListener = {
         runOnUiThread {
             applyDashCardChrome()
@@ -87,14 +91,14 @@ class GridActivity : AppCompatActivity() {
         }
     }
 
-    /** 地图布局变化（全屏/分屏切换改变音乐卡壁纸切片区域）。
-     *  具名字段（勿内联匿名 lambda）：onDestroy 才能对称移除，否则桌面重建累积泄漏。 */
+    /** Изменения макета карты (переключение полноэкранного/разделенного экрана меняет область фрагмента обоев музыкальной карты).
+     */
     private val mapLayoutListener: (Boolean) -> Unit =
         { _ -> runOnUiThread { refreshDashWallpaper() } }
 
     /**
-     * 应用卡片视觉：暗幕 alpha 与壁纸模糊半径（RenderEffect，半径随网格屏
-     * 密度放大 1.5 倍以与 dock 视觉一致）。
+     * зрение карты приложения: альфа-темный экран и радиус размытия обоев (RenderEffect, радиус меняется вместе с сеткой экрана)
+     * Плотность       увеличена в 1,5 раза, чтобы визуально соответствовать док-станции).
      */
     private fun applyDashCardChrome() {
         val panel = dashboardView ?: return
@@ -121,8 +125,9 @@ class GridActivity : AppCompatActivity() {
     }
 
     /**
-     * 音乐卡壁纸：全画布切片中「音乐卡区域」的裁剪（与全屏壁纸同映射，
-     * 区域 = 地图卡右侧至卡片右边距）。
+     * Обои с музыкальной картой: обрезка «области музыкальной карты» в полном фрагменте холста (то же отображение,
+     * что и у полноэкранных обоев,
+     * Область       = от правой стороны карты карты до правого края карты).
      */
     private fun refreshDashWallpaper() {
         val panel = dashboardView ?: return
@@ -142,8 +147,12 @@ class GridActivity : AppCompatActivity() {
                     )
                 }.getOrNull() ?: return@run
             val margin = (CARD_MARGIN_PX * scale).toInt()
-            // 裁出音乐卡对应区域的壁纸切片（与卡片实际位置一致，随分屏把手位置走）：
-            //  横屏：右侧（左缘=把手中心+半把手）；竖屏：下方（顶缘同式）
+            // Вырежьте фрагмент обоев, соответствующий области музыкальной карты (в соответствии с фактическим положением
+            // карты, следите за положением маркера разделенного экрана):
+
+            // Горизонтальный экран: правая сторона (левый край = центр ручки + половина ручки); вертикальный экран: нижний
+            // (тот же стиль, что и верхний край)
+
             val musicStart = VirtualLauncher.dashMusicStartScreen()
             val cropX: Int
             val cropY: Int
@@ -169,13 +178,15 @@ class GridActivity : AppCompatActivity() {
                 wallpaper.setImageBitmap(
                     Bitmap.createBitmap(bitmap, cropX, cropY, cropW, cropH),
                 )
-                // 位图就绪后重申 RenderEffect（视图特效在位图更新后仍需生效）
+                // Повторите RenderEffect после того, как растровое изображение будет готово (эффекты просмотра все равно должны
+                // вступить в силу после обновления растрового изображения).
+
                 applyDashCardChrome()
             }
         }
     }
 
-    /** 音乐卡进度自刷新（1s；渲染尾部续调度，位置由锚点+速度推算）。 */
+    /** Прогресс музыкальной карты автоматически обновляется (1 с; хвост рендеринга продолжает планироваться, а позиция рассчитывается на основе точки привязки + скорости). */
     private val mediaTick =
         object : Runnable {
             override fun run() {
@@ -186,7 +197,7 @@ class GridActivity : AppCompatActivity() {
 
     private val tickHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
-    /** mm:ss（超 1 小时 h:mm:ss）。 */
+    /** мм:сс (более 1 часа ч:мм:сс). */
     private fun formatTime(ms: Long): String {
         val totalSec = ms / 1_000
         val h = totalSec / 3_600
@@ -200,24 +211,26 @@ class GridActivity : AppCompatActivity() {
     }
 
     /**
-     * 音乐卡渲染：封面/标题/歌手/进度/播放暂停按钮（播放中=暂停图标，暂停=播放图标）。
+     * Рендеринг музыкальной карты: кнопка обложки/названия/певца/прогресса/воспроизведения (воспроизведение = значок
+     * паузы, пауза = значок воспроизведения).
      *
-     * 文案要区分三种「没有歌名」的成因，否则会误导：
-     *  1. 有会话在播、但**没拿到通知使用权** → metadata 恒为 null（会话与播放状态
-     *     仍然可见）。此时显示「无法读取播放信息」并提示去哪里开；
-     *  2. 有会话但暂停/无元数据 → 「未在播放」；
-     *  3. 完全没有会话 → 同样「未在播放」。
+     * В копирайтинге следует различать три причины «отсутствия названия песни», иначе это будет вводить в заблуждение:
+     * 1. Сеанс воспроизводится, но **нет прав на уведомление** → метаданные всегда равны нулю (статус сеанса и воспроизведения).
+     * все еще виден). В это время отображается сообщение «Невозможно прочитать информацию о воспроизведении» и
+     * предлагается указать, где воспроизвести;
+     * 2. Сеанс есть, но он приостановлен/нет метаданных → «Не воспроизводится»;
+     * 3. Никакого разговора → То же, что «не играть».
      *
-     * 标题与副标题必须成对决定：曾出现标题「正在播放」（布局静态文案）配副标题
-     * 「未在播放」的自相矛盾显示（截图实测），静态文案已改为「媒体」，这里再按
-     * 状态统一写死两行，避免二者来自不同来源。
+     * Заголовок и подзаголовок должны определяться парами: был заголовок «Сейчас исполняется» (статическая копия макета) с подзаголовком.
+     * Противоречивое отображение «Не играет» (скриншот фактического теста), статическая копия изменена на «Медиа», нажмите здесь еще раз.
+     * Статус       жестко запрограммирован в две строки, чтобы они не попадали из разных источников.
      */
     private fun renderMediaCard() {
         val panel = dashboardView ?: return
         val now = MediaSessionsState.nowPlaying
         val title = now?.title?.takeIf { it.isNotBlank() }
         val artist = now?.artist?.takeIf { it.isNotBlank() }
-        // 有会话但读不到任何元数据 + 未授权 → 权限问题，不是「没在播放」
+        // Сеанс есть, но метаданные не читаются + Несанкционировано → Проблема с разрешением, а не «не играет».
         val missingDueToPermission =
             now != null && title == null && !MediaSessionsState.accessGranted
         panel.findViewById<TextView>(R.id.dashMediaTitle).text =
@@ -258,7 +271,7 @@ class GridActivity : AppCompatActivity() {
             if (art != null) {
                 cover.setImageBitmap(art)
                 cover.visibility = View.VISIBLE
-                // 封面圆角裁剪（outline 一次性设置）
+                // Обрезка закругленных углов (одноразовая настройка контура)
                 if (cover.clipToOutline != true) {
                     cover.clipToOutline = true
                     val dp = resources.displayMetrics.density
@@ -278,7 +291,9 @@ class GridActivity : AppCompatActivity() {
                             }
                         }
                 }
-                // 点击封面 → 拉回正在播放的应用（任务复用：回到其播放界面）
+                // Нажмите на обложку → Откатите воспроизводящее приложение (повторное использование задачи: возврат к интерфейсу
+                // воспроизведения)
+
                 cover.setOnClickListener {
                     val pkg = now.pkg ?: return@setOnClickListener
                     val component =
@@ -291,24 +306,26 @@ class GridActivity : AppCompatActivity() {
                     Bg.run("launch-app") { VirtualLauncher.launchApp(component) }
                 }
             } else {
-                // 占位不消失（INVISIBLE）：封面异步加载/切歌间隙内容不上下跳动
+                // Заполнитель не исчезает (НЕВИДИМЫЙ): обложка загружается асинхронно/контент не прыгает между песнями.
                 cover.visibility = View.INVISIBLE
                 cover.setOnClickListener(null)
             }
         }
-        // 进度显示需要持续走秒：渲染尾部续调度（防重：先移除）
+        // Отображение прогресса должно длиться несколько секунд: продолжайте планирование в конце рендеринга
+        // (антирепликация: сначала удалите)
+
         tickHandler.removeCallbacks(mediaTick)
         tickHandler.postDelayed(mediaTick, 1_000)
     }
 
-    /** 仪表盘模式 → pager 位置同步（0=仪表盘，1+=桌面；已在目标位则不动）。 */
+    /** Режим панели управления → синхронизация положения пейджера (0 = панель мониторинга, 1+ = рабочий стол; он не будет перемещаться, если находится в целевой позиции). */
     private fun applyDashboardMode(dashboard: Boolean) {
         val pager = findViewById<ViewPager2>(R.id.gridPager)
         if (dashboard && pager.currentItem != 0) pager.setCurrentItem(0, false)
         if (!dashboard && pager.currentItem == 0) pager.setCurrentItem(1, false)
     }
 
-    /** 音乐控制：系统媒体键（AudioManager 全局路由给活跃媒体会话，无需权限）。 */
+    /** Управление музыкой: системные мультимедийные клавиши (AudioManager глобально маршрутизируется к активным мультимедийным сеансам, разрешения не требуются). */
     private fun dispatchMediaKey(keyCode: Int) {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         audioManager.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode))
@@ -319,10 +336,16 @@ class GridActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_grid)
 
-        // 格子尺寸/行数按屏幕动态计算（布局关系在 XML，尺寸测量在代码）
+        // Размер сетки/количество строк рассчитываются динамически в зависимости от экрана (отношения макета указаны в
+        // XML, измерение размера — в коде).
+
         computeCellMetrics()
-        // 虚拟屏重建竞态：dm 短暂为 0 时 cell/icon 尺寸会算出 0，首帧绑定即崩
-        // （Bitmap.createBitmap 0 宽高）。夹最小值保底，并在 pager 首帧布局后重算+重绑。
+        // Условие гонки реконструкции виртуального экрана: когда dm временно равен 0, размер ячейки/значка будет
+        // рассчитан как 0, и привязка первого кадра рухнет.
+
+        // (Ширина и высота Bitmap.createBitmap 0). Зажимаем минимальное значение, чтобы обеспечить низ, и пересчитываем
+        // + перепривязываем после выкладки первого кадра пейджера.
+
         if (iconSizePx <= 0) {
             iconSizePx = 48
             findViewById<ViewPager2>(R.id.gridPager).post {
@@ -332,10 +355,14 @@ class GridActivity : AppCompatActivity() {
             }
         }
 
-        // 壁纸背景（index 0 = 最底）：窗口必须不透明——透明窗口压在应用窗口前面时
-        // 会把应用内容透出来（点 home 后桌面图标叠在头条上的根因）。
-        // 切片映射：把「整个视频流画布」的 aspectFill 壁纸按 dock 位置偏移，
-        // 本窗口正好露出应用区的切片，与 dock 处的切片逐像素连续（同一渲染路径）。
+        // Фон обоев (индекс 0 = внизу): окно должно быть непрозрачным — при нажатии прозрачного окна перед окном приложения
+        // Будет раскрыто содержимое приложения (причина, по которой значок на рабочем столе накладывается на заголовок
+        // после нажатия кнопки «Домой»).
+
+        // Отображение фрагментов: смещайте обои аспектной заливки «всего холста видеопотока» в соответствии с положением закрепления.
+        // Это окно просто отображает фрагменты в области приложения, которые являются непрерывными попиксельно с
+        // фрагментами на доке (тот же путь рендеринга).
+
         val scale = VirtualLauncher.gridScale()
         val canvasWidth = (VirtualLauncher.streamWidthPx * scale).toInt()
         val canvasHeight = (VirtualLauncher.streamHeightPx * scale).toInt()
@@ -351,24 +378,34 @@ class GridActivity : AppCompatActivity() {
                                 canvasHeight,
                             ).apply {
                                 if (VirtualLauncher.dockAtBottom) {
-                                    // 竖屏车机：dock 在底部，桌面切片 = 画布顶部
+                                    // Автомобильная машина с вертикальным экраном: док-станция находится внизу, часть рабочего стола =
+                                    // верхняя
+                                    // часть
+                                    // холста.
+
                                     leftMargin = 0
                                     topMargin = 0
                                 } else {
-                                    // 横屏车机：dock 在左侧，桌面切片 = 画布右部
+                                    // Автомобиль с горизонтальным экраном: док-станция находится слева, часть рабочего стола = правая часть
+                                    // холста.
+
                                     leftMargin = -(VirtualLauncher.dockWidthPx * scale).toInt()
                                     topMargin = 0
                                 }
                             }
                 }
             root.addView(wallpaperView, 0)
-            // 注册变更通知 + 立即对账一次（兜底注册前发生的更换——事件不补发）
+            // Уведомление об изменении регистрации + немедленная сверка (охватывает изменения, произошедшие до регистрации –
+            // события не будут переизданы)
+
             WallpaperStore
                 .addListener(wallpaperListener)
             refreshWallpaperIfChanged()
 
-            // 仪表盘面板已改为 ViewPager2 首页（PageAdapter 绑定时创建），
-            // 此处仅注册全局监听：卡片视觉/媒体状态/壁纸切片/仪表盘模式。
+            // Панель информационной панели изменена на домашнюю страницу ViewPager2 (создается при привязке PageAdapter),
+            // Здесь зарегистрированы только глобальные прослушиватели: визуальная карта/статус мультимедиа/фрагмент
+            // обоев/режим информационной панели.
+
             DockPrefs.addListener(dockPrefsListener)
             MediaSessionsState
                 .addListener(mediaStateListener)
@@ -389,7 +426,9 @@ class GridActivity : AppCompatActivity() {
             object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
                     updateDots(position)
-                    // 用户滑动切换仪表盘/桌面：回写 launcher（含地图任务与 tile 布局）
+                    // Пользовательские слайды для переключения панели управления/рабочего стола: панель запуска обратной записи
+                    // (включая задачи карты и макет плитки)
+
                     if (position == 0 && !VirtualLauncher.dashboardMode) VirtualLauncher.showDashboard()
                     if (position != 0 && VirtualLauncher.dashboardMode) VirtualLauncher.showDesktop()
                 }
@@ -399,8 +438,12 @@ class GridActivity : AppCompatActivity() {
                     positionOffset: Float,
                     offsetPixels: Int,
                 ) {
-                    // 滑动过程中 tile 跟随手指平移（合成器采样位置随进度左移/右移）；
-                    // 回滑进仪表盘时提前显示 tile（纯视觉，状态在落定 IDLE 时统一对账）
+                    // Во время процесса скольжения плитка следует за перемещением пальца (положение семплирования синтезатора
+                    // перемещается влево/вправо по мере продвижения);
+
+                    // Отображение плиток заранее при возвращении на панель управления (чисто визуально, статус будет согласован при
+                    // установке IDLE)
+
                     if (position == 0) {
                         VirtualLauncher.setTileSlide(positionOffset)
                         if (positionOffset < 1f) VirtualLauncher.showMapTile()
@@ -410,7 +453,9 @@ class GridActivity : AppCompatActivity() {
                 override fun onPageScrollStateChanged(state: Int) {
                     if (state == androidx.viewpager2.widget.ViewPager2.SCROLL_STATE_IDLE) {
                         VirtualLauncher.setTileSlide(0f)
-                        // 落定对账：仪表盘模式与所在页一致（含异常中断的对账恢复）
+                        // Завершенная выверка: режим информационной панели соответствует странице, на которой она расположена (включая
+                        // восстановление выверки после аварийного прерывания).
+
                         VirtualLauncher.syncDashboard(pager?.currentItem == 0)
                     }
                 }
@@ -418,7 +463,7 @@ class GridActivity : AppCompatActivity() {
         )
     }
 
-    /** 壁纸版本变化时后台重解码并换图（手机侧换壁纸后 ≤2s 桌面更新）。 */
+    /** При изменении версии обоев фон перекодируется и меняет изображение (рабочий стол обновится через ≤2 секунды после смены обоев на мобильном телефоне). */
     private fun refreshWallpaperIfChanged() {
         val view = wallpaperView ?: return
         val current = WallpaperStore.version
@@ -435,8 +480,10 @@ class GridActivity : AppCompatActivity() {
                     )
                 }.getOrNull()
             if (bitmap != null) {
-                // 诊断：bitmap 三点采样（中线上 25%/50%/75% 宽）——区分「bitmap 内容缺失」
-                // 与「视图/合成问题」（本机 logcat 受抑制，走 logSink 落文件日志）
+                // Диагностика: выборка растрового изображения по трем точкам (ширина 25%/50%/75% по центральной линии) –
+                // распознавание «отсутствует содержимое растрового изображения»
+
+                // И «проблема просмотра/синтеза» (локальный logcat подавлен, logSink используется для удаления журналов файлов)
                 val samples =
                     listOf(0.25f, 0.5f, 0.75f).joinToString(",") {
                         "%06x".format(bitmap.getPixel((bitmap.width * it).toInt(), bitmap.height / 2))
@@ -455,24 +502,26 @@ class GridActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 也覆盖从设置页返回：勾选变化即时反映
+        // Также переопределяет возврат со страницы настроек: установите флажок «Изменения отражаются немедленно».
         reload()
         refreshWallpaperIfChanged()
     }
 
     /**
-     * 计算格子尺寸与行数：
-     * 横屏（CarPlay 规格）：固定 4 列 × 3 行，行为与此前一致。
-     * 竖屏：固定 3 行会把格子拉成 ~1:2.5 的瘦高条（图标只占三成、满屏空框，
-     * 2026-10-17 用户开「显示布局边界」截图暴露）；按「格子高 ≈ 宽 × 1.25」
-     * 自适应加行（上限 6，对齐 iPhone 竖屏主屏 4×6 的观感），图标尺寸同步
-     * 跟随格子宽，避免格子过大/图标过小的比例失衡。
+     * Рассчитайте размер сетки и количество строк:
+     * ландшафт (спецификация CarPlay): исправлено 4 столбца × 3 строки, поведение такое же, как и раньше.
+     * Вертикальный экран: фиксированные 3 ряда растягивают сетку в тонкую и высокую полосу размером ~ 1:2,5 (значки
+     * занимают только 30%, полноэкранный пустой кадр,
+     * 17 октября 2026 г. Пользователь открыл «Показать границу макета», и снимок экрана был открыт); нажмите «Высота сетки ≈ Ширина × 1,25»
+     * адаптивное добавление строк (верхний предел 6, соответствует внешнему виду вертикального главного экрана
+     * iPhone 4×6), синхронизация размеров значков
+     * соответствует ширине сетки, чтобы избежать дисбаланса в соотношении слишком большой сетки и слишком маленького значка.
      */
     private fun computeCellMetrics() {
         val dm = resources.displayMetrics
         val density = dm.density
-        val chromeHorizontalPx = (2 * 10 * density).toInt() // item_grid_page 左右 padding
-        val chromeVerticalPx = ((8 + 26 + 16) * density).toInt() // 上/下 padding + 页点区
+        val chromeHorizontalPx = (2 * 10 * density).toInt() // item_grid_page отступы слева и справа
+        val chromeVerticalPx = ((8 + 26 + 16) * density).toInt() // Отступы сверху/снизу + область точек страницы
         val usableW = dm.widthPixels - chromeHorizontalPx
         val usableH = dm.heightPixels - chromeVerticalPx
         if (usableW <= 0 || usableH <= 0) {
@@ -482,7 +531,9 @@ class GridActivity : AppCompatActivity() {
             return
         }
         cellWidthPx = usableW / COLUMNS
-        // 横竖屏统一：先按 3 行试算，格子过高（竖屏）时加行收敛到目标比例
+        // Объедините горизонтальные и вертикальные экраны: сначала нажмите 3 ряда для пробного расчета. Если сетка
+        // слишком высокая (вертикальный экран), добавьте строки, чтобы они сходились к целевому соотношению.
+
         var rowCount = ROWS_MIN
         if (cellWidthPx > 0) {
             rowCount = (usableH / (cellWidthPx * CELL_HEIGHT_RATIO)).toInt().coerceIn(ROWS_MIN, ROWS_MAX)
@@ -495,18 +546,22 @@ class GridActivity : AppCompatActivity() {
                 .coerceAtMost((cellWidthPx * 0.72f).toInt())
     }
 
-    /** 重新读取应用清单与桌面选择（首帧与每次回到桌面时调用）。 */
+    /** Перечитать список приложений и выбор рабочего стола (вызывается на первом кадре и каждый раз при возврате на рабочий стол). */
     private fun reload() {
         val apps =
             appsCache ?: run {
                 val scanned = VirtualLauncher.launchableApps(this)
-                // iconCache 供 dock 运行中图标使用：整表换新——dock 在另一块屏的主线程
-                // 并发读，clear+逐条写入共享 HashMap 无同步会损坏（坏味道审查 P1）
+                // iconCache используется для запуска иконок в доке: обновляется вся таблица - основной поток дока на другом экране
+                // Одновременное чтение, очистка + запись по одному в общий HashMap без синхронизации будет повреждено (обзор
+                // неприятного запаха P1)
+
                 VirtualLauncher.replaceIconCache(
                     scanned.associate { it.component to it.icon },
                 )
                 appsCache = scanned
-                // 纳入进程级共享缓存：桌面扫过之后，车机设置首次打开即秒开
+                // Включите общий кеш на уровне процесса: после сканирования рабочего стола настройки автомобиля будут открыты
+                // мгновенно при первом открытии.
+
                 VirtualLauncher.adoptAppsCache(scanned)
                 scanned
             }
@@ -514,17 +569,23 @@ class GridActivity : AppCompatActivity() {
         val selected = DesktopApps.selected(this, apps)
         val cells =
             buildList {
-                add(Cell.Pinned) // 桌面第一格：车机设置（固定，不可取消）
+                add(Cell.Pinned) // Первая сетка на рабочем столе: настройки автомобиля и машины (исправлено, отменить нельзя)
                 apps.filter { it.component.flattenToString() in selected }.forEach { add(Cell.App(it)) }
             }
-        // 第 0 页 = 仪表盘，其后为桌面网格页：左右滑动即互相切换
+        // Страница 0 = Панель мониторинга, за которой следует страница сетки рабочего стола: проведите пальцем влево или
+        // вправо, чтобы переключаться между собой.
+
         pages = listOf(listOf<Cell>(Cell.Dashboard)) + cells.chunked(COLUMNS * rows)
 
         val current = pager?.currentItem ?: 0
         pager?.adapter?.notifyDataSetChanged()
         rebuildDots()
-        // 位置与仪表盘模式对账（home 键循环/应用启动会改 dashboardMode）：
-        // 仅纠偏方向，不把停在桌面第 N 页的用户拽回第 1 页
+        // Согласование между местоположением и режимом информационной панели (цикл домашнего ключа/запуск приложения
+        // изменит режим информационной панели):
+
+        // Только исправьте направление, не перетаскивайте пользователя, который запарковался на странице N на рабочем
+        // столе, обратно на страницу 1.
+
         if (VirtualLauncher.dashboardMode && current != 0) pager?.setCurrentItem(0, false)
         if (!VirtualLauncher.dashboardMode && current == 0) pager?.setCurrentItem(1, false)
         if ((pager?.currentItem ?: 0) >= pages.size) pager?.setCurrentItem(pages.size - 1, false)
@@ -541,8 +602,12 @@ class GridActivity : AppCompatActivity() {
             viewType: Int,
         ): RecyclerView.ViewHolder =
             if (viewType == 0) {
-                // 仪表盘页 = 无边距容器：音乐卡面板 + 分屏拖拽把手（把手落在加宽的
-                // 中缝内、不被合成器叠画的地图 tile 遮挡，触摸走应用屏正常派发）
+                // Страница информационной панели = контейнер без полей: панель музыкальной карты + маркер перетаскивания
+                // разделенного экрана (дескриптор падает на расширенную область экрана).
+
+                // В пределах центрального шва и не заблокированный фрагментами карты, наложенными синтезатором, экран приложения
+                // Touch-and-go будет распределяться нормально)
+
                 val container = android.widget.FrameLayout(parent.context)
                 container.layoutParams =
                     ViewGroup.LayoutParams(
@@ -556,7 +621,9 @@ class GridActivity : AppCompatActivity() {
             } else {
                 val grid = layoutInflater.inflate(R.layout.item_grid_page, parent, false) as GridLayout
                 grid.columnCount = COLUMNS
-                // 行数由 computeCellMetrics 按横竖屏决定（横屏 3、竖屏最多 6）
+                // Количество строк определяется с помощью CompeCellMetrics в соответствии с горизонтальным и вертикальным
+                // экранами (горизонтальный экран — 3, вертикальный экран — до 6).
+
                 grid.rowCount = rows
                 PageHolder(grid)
             }
@@ -572,7 +639,7 @@ class GridActivity : AppCompatActivity() {
         }
     }
 
-    /** 仪表盘页 Holder：无边距容器（音乐卡面板 + 分屏把手）随页面创建。 */
+    /** Держатель страницы информационной панели: вместе со страницей создается контейнер без полей (панель музыкальной карты + маркер разделенного экрана). */
     private inner class DashboardHolder(
         container: View,
         val panel: View,
@@ -617,8 +684,10 @@ class GridActivity : AppCompatActivity() {
                 dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
             }
             panel.findViewById<ImageView>(R.id.dashPlayPause).setOnClickListener {
-                // 按当前状态显式发播放/暂停；乐观翻转图标（状态回调可能滞后），
-                // 400ms 后请求监听服务重新同步真实状态
+                // Явно запускать воспроизведение/паузу в соответствии с текущим состоянием; оптимистичный перевернутый значок
+                // (обратный вызов состояния может задерживаться),
+
+                // Запросите службу прослушивания для повторной синхронизации реального статуса через 400 мс.
                 val state = MediaSessionsState.nowPlaying
                 val playing = state?.playing == true
                 dispatchMediaKey(
@@ -628,7 +697,7 @@ class GridActivity : AppCompatActivity() {
                         android.view.KeyEvent.KEYCODE_MEDIA_PLAY
                     },
                 )
-                // 乐观更新保留封面等其它字段（copy）；400ms 后重同步真实状态
+                // Оптимистичные обновления сохраняют обложку и другие поля (копия); повторно синхронизировать истинный статус через 400 мс
                 MediaSessionsState.publish(
                     state
                         ?.copy(playing = !playing)
@@ -646,21 +715,23 @@ class GridActivity : AppCompatActivity() {
                     400,
                 )
             }
-            // 全屏地图的退出走 dock 的 home 按钮（showDashboard 路由闸门会自动
-            // setMapFullscreen(false)），仪表盘卡上不再放「全屏地图」按钮
+            // Чтобы выйти из полноэкранного режима карты, нажмите кнопку «Домой» на доке (ворота маршрутизации showDashboard автоматически
+            // setMapFullscreen(false)), кнопка «Полноэкранная карта» больше не размещается на карточке дашборда
             bindSplitHandle(scale)
             applyDashCardChrome()
             renderMediaCard()
             refreshDashWallpaper()
         }
 
-        /** 配置分屏把手（方向/尺寸/拖拽回调）并按当前分屏摆放面板与把手。 */
+        /** Настройте маркеры разделения экрана (обратные вызовы направления/размера/перетаскивания) и разместите панели и маркеры в соответствии с текущим разделенным экраном. */
         private fun bindSplitHandle(scale: Float) {
             val child = (itemView as? android.widget.FrameLayout)?.getChildAt(1) as? DashSplitHandle
             handle = child ?: return
             val portrait = VirtualLauncher.dockAtBottom
-            // 触达条比视觉中缝宽（DASH_HANDLE_TOUCH_PX > DASH_GAP_PX）：两侧各溢出
-            // 一段压在卡片上扩大触控目标——地图侧溢出段被 tile 盖住不可见但可触摸
+            // Сенсорная полоса шире, чем визуальный центральный зазор (DASH_HANDLE_TOUCH_PX > DASH_GAP_PX): переполнение с обеих сторон
+            // На карте нажимается раздел, чтобы расширить сенсорную цель — раздел переполнения на стороне карты покрыт
+            // плитками и невидим, но доступен для касания.
+
             val thickness = (DASH_HANDLE_TOUCH_PX * scale).toInt()
             child.layoutParams =
                 android.widget.FrameLayout
@@ -670,8 +741,10 @@ class GridActivity : AppCompatActivity() {
                     )
             child.configure(portrait) { centerScreen, final ->
                 if (final) {
-                    // commit 内部钳制并真实 resize 地图屏；notifyMapLayout 会触发
-                    // 壁纸切片重切。commit 返回钳后值，据此校正 margin 防漂移。
+                    // зафиксируйте внутренние ограничения и действительно измените размеры экрана карты; notifyMapLayout сработает
+                    // Обои нарезаны и перерезаны. commit возвращает значение после ограничения, на основе которого корректируется
+                    // запас, чтобы предотвратить дрейф.
+
                     layoutSplit(VirtualLauncher.commitDashSplitScreen(centerScreen), scale)
                 } else {
                     layoutSplit(centerScreen, scale)
@@ -681,7 +754,7 @@ class GridActivity : AppCompatActivity() {
             layoutSplit(VirtualLauncher.dashHandleCenterScreen(), scale)
         }
 
-        /** 把手中心（应用屏像素）→ 音乐卡与把手的 margin。未 attach（<0）时兜底中线。 */
+        /** Центр ручки (пиксели экрана приложения) → поля музыкальной карты и ручка. Если она не прикреплена (<0), используется нижняя осевая линия. */
         private fun layoutSplit(
             centerScreen: Float,
             scale: Float,
@@ -691,10 +764,12 @@ class GridActivity : AppCompatActivity() {
                 if (centerScreen >= 0) {
                     centerScreen
                 } else {
-                    // 兜底：应用区中线（与旧版固定分屏一致）
+                    // Внизу: центральная линия области приложения (в соответствии со старой версией фиксированного разделенного экрана)
                     ((if (portrait) VirtualLauncher.appAreaHeight else VirtualLauncher.appAreaWidth) / 2f) * scale
                 }
-            // 音乐卡让位按视觉缝；把手按触达宽居中（比缝宽、压在两侧卡片上）
+            // Музыкальная карта уступает место визуальному шву; ручка нажимается до достижения ширины и центра (шире шва,
+            // нажимается на карты с обеих сторон)
+
             val halfGap = DASH_GAP_PX / 2f * scale
             val halfTouch = DASH_HANDLE_TOUCH_PX / 2f * scale
             (panel.layoutParams as? android.widget.FrameLayout.LayoutParams)?.let { lp ->
@@ -731,7 +806,7 @@ class GridActivity : AppCompatActivity() {
                     }
                 val label = view.findViewById<TextView>(R.id.cellLabel)
                 when (cell) {
-                    is Cell.Dashboard -> Unit // 仪表盘独立成页，不进网格
+                    is Cell.Dashboard -> Unit // Дашборд представляет собой самостоятельную страницу и не входит в сетку.
                     is Cell.Pinned -> {
                         icon.setImageResource(R.drawable.ic_app_settings)
                         label.text = getString(R.string.car_settings)
@@ -742,14 +817,18 @@ class GridActivity : AppCompatActivity() {
                         icon.setImageBitmap(AppIcons.rounded(cell.entry.icon, iconSizePx))
                         label.text = cell.entry.label
                         view.setOnClickListener {
-                            // 不用系统 Toast：虚拟屏上显示位置不可控（SettingsToastHost 的由来）；
-                            // 应用拉起本身就是反馈
+                            // Никакой системный Toast не используется: положение отображения на виртуальном экране неконтролируемо
+                            // (происхождение SettingsToastHost);
+
+                            // Само приложение является обратной связью
                             Bg.run("launch-app") { VirtualLauncher.launchApp(cell.entry.component) }
                         }
                     }
                 }
-                // 焦点：iDrive 旋钮/方向盘方向键注入的 DPAD 事件靠焦点系统落地，
-                // 网格单元必须可聚焦 + 有可见高亮框（按键会自动退出 touch mode）。
+                // Фокус: события DPAD, вводимые в ручку iDrive/клавиши направления на рулевом колесе, зависят от системы фокуса.
+                // Ячейки сетки должны быть фокусируемыми + иметь видимую рамку выделения (нажатие клавиши автоматически выйдет
+                // из сенсорного режима).
+
                 view.isFocusable = true
                 view.isFocusableInTouchMode = false
                 view.foreground =
@@ -767,14 +846,14 @@ class GridActivity : AppCompatActivity() {
     }
 
     private fun openSettings() {
-        // 滑动转场由 SettingsActivity 主题的 windowAnimationStyle 提供
+        // Скользящие переходы предоставляются windowAnimationStyle темы SettingsActivity.
         startActivity(Intent(this, SettingsActivity::class.java))
     }
 
     private fun rebuildDots() {
         val row = dotsRow ?: return
         row.removeAllViews()
-        if (pages.size < 2) return // 单页不显示页点（对照原型）
+        if (pages.size < 2) return // На одной странице не отображаются точки страницы (сравните с прототипом)
         val density = resources.displayMetrics.density
         repeat(pages.size) {
             row.addView(
@@ -816,18 +895,18 @@ class GridActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    override fun onBackPressed() = Unit // 桌面不退出
+    override fun onBackPressed() = Unit // Рабочий стол не выходит
 
     private companion object {
-        const val COLUMNS = 4 // CarPlay 规格：强制 4 列
+        const val COLUMNS = 4 // Характеристики CarPlay: обязательные 4 столбца.
 
-        /** 横屏 CarPlay 规格行数（竖屏自适应时用作下限）。 */
+        /** Количество горизонтальных строк спецификации CarPlay (используется как нижний предел при адаптации к вертикальному экрану). */
         const val ROWS_MIN = 3
 
-        /** 竖屏自适应行数上限（对齐 iPhone 竖屏主屏 4×6 的观感）。 */
+        /** Верхний предел адаптивных строк вертикального экрана (согласован с внешним видом вертикального основного экрана iPhone 4×6). */
         const val ROWS_MAX = 6
 
-        /** 格子目标高宽比（高/宽）：竖屏加行的收敛目标。 */
+        /** Целевое соотношение сторон сетки (высота/ширина): цель конвергенции для вертикального экрана и строк. */
         const val CELL_HEIGHT_RATIO = 1.25f
     }
 }

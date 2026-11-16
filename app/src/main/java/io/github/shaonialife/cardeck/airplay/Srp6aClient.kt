@@ -4,11 +4,11 @@ import java.math.BigInteger
 import java.security.SecureRandom
 
 /**
- * SRP-6a 客户端（RFC 5054 3072-bit 组，SHA-512）——AirPlay pair-setup 变体。
- * 与参考接收端 Srp6a.kt 的约定逐项对齐：
- *  - x = SHA512(salt, SHA512(I || ":" || P))，I = "Pair-Setup"，P = 固定码 "3939"
- *  - k = SHA512(pad(N), pad(g))
- *  - 会话密钥 K = SHA512(bytes(S))；客户端证明 M1 = SHA512(H(N)^H(g), H(I), salt, pad(A), pad(B), K)
+ * Клиент  SRP-6a (3072-битная группа RFC 5054, SHA-512) — вариант парной настройки AirPlay.
+ * поэлементно выравнивается в соответствии с соглашением приемника ссылок Srp6a.kt:
+ * - x = SHA512(соль, SHA512(I || ":" || P)), I = "Настройка пары", P = фиксированный код "3939"
+ * - k = SHA512(площадка(N), площадка(г))
+ * — сеансовый ключ K = SHA512(байт(S)); доказательство клиента M1 = SHA512(H(N)^H(g), H(I), соль, площадка(A), площадка(B), K)
  */
 object Srp6aClient {
     private val random = SecureRandom()
@@ -33,11 +33,11 @@ object Srp6aClient {
         private val salt: ByteArray,
         private val identifier: ByteArray,
     ) {
-        /** K = SHA512(bytes(S))，在首次 [clientProof] 成功后可用。 */
+        /** K = SHA512(байты(S)), доступен после первого успеха [clientProof]. */
         var sessionKey: ByteArray? = null
             private set
 
-        /** 生成客户端证明 M1；若 B 非法则返回 null。 */
+        /** Создать доказательство клиента M1; верните ноль, если B недействителен. */
         fun clientProof(): ByteArray? {
             val bigB = toBigInt(b)
             if (bigB.mod(n).signum() == 0) return null
@@ -59,7 +59,7 @@ object Srp6aClient {
             return AirPlayCrypto.sha512(hashXor, AirPlayCrypto.sha512(identifier), salt, publicKeyA, pad(bigB), key)
         }
 
-        /** 服务器证明 HAMK = SHA512(pad(A), M1, K)。 */
+        /** Сервер подтверждает HAMK = SHA512(pad(A), M1, K). */
         fun serverProofValid(serverProof: ByteArray): Boolean {
             val m1 = clientProof() ?: return false
             val key = sessionKey ?: return false
@@ -96,7 +96,7 @@ object Srp6aClient {
         return ByteArray(384).also { bytes.copyInto(it, 384 - bytes.size) }
     }
 
-    /** RFC 5054 3072-bit 素数（与参考实现一致）。 */
+    /** RFC 5054, 3072-битное простое число (согласно эталонной реализации). */
     private const val N_HEX =
         "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74" +
             "020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437" +

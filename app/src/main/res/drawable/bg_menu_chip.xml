@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页菜单项左侧图标片：蓝色圆角 -->
+<!-- Изображение значка в левой части пункта меню страницы настроек: синий закругленный угол. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#FF0A84FF" />

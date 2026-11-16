@@ -2,7 +2,7 @@
 <resources>
     <color name="ic_launcher_background">#0D1117</color>
 
-    <!-- 手机侧 Material 3 色调令牌（与 design/phone-ui-proto.html 一一对应） -->
+    <!-- Материальный 3-х тональный токен на стороне мобильного телефона (однозначное соответствие с design/phone-ui-proto.html) -->
     <color name="m3_surface">#0E1415</color>
     <color name="m3_surface_low">#151B1C</color>
     <color name="m3_surface_high">#232A2C</color>

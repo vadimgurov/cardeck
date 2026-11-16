@@ -7,8 +7,9 @@ import android.content.pm.PackageInstaller
 import io.github.shaonialife.cardeck.util.DebugFileLog
 
 /**
- * PackageInstaller 结果接收：STATUS_PENDING_USER_ACTION 时把系统确认 Intent
- * 拉到手机主屏（此时会话已停、虚拟屏已释放，弹窗不会再落到车机侧）。
+ * Когда  PackageInstaller получает результат: STATUS_PENDING_USER_ACTION, система подтверждает намерение.
+ * Перетащите   на главный экран телефона (в этот момент сеанс остановлен, виртуальный экран освобожден, и
+ * всплывающее окно больше не будет опускаться в сторону автомобиля).
  */
 class InstallReceiver : BroadcastReceiver() {
     override fun onReceive(
@@ -18,7 +19,9 @@ class InstallReceiver : BroadcastReceiver() {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, Integer.MIN_VALUE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
         val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
-        // 只认本次提交的会话：遗留会话的迟到广播会把确认 Intent 串成旧包
+        // Распознавайте только сеанс, отправленный на этот раз: поздняя трансляция устаревшего сеанса приведет к тому,
+        // что намерение подтверждения будет помещено в старый пакет.
+
         if (ReinstallFlow.currentInstallSessionId != -1 && sessionId != ReinstallFlow.currentInstallSessionId) {
             DebugFileLog.append(
                 context,
@@ -35,15 +38,23 @@ class InstallReceiver : BroadcastReceiver() {
                 DebugFileLog.append(context, "МОСТ: требуется подтверждение пользователя → ${confirm.component}")
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 ReinstallFlow.pendingConfirmIntent = confirm
-                // 只走前台转发单一路径：Receiver 直启 + 前台转发会双启动同一确认
-                // Intent，荣耀安装器被打进怪状态（2026-10-24 实拍「旧版成功页」）。
-                // 悬浮窗权限（后台启动豁免）已由用户开启，前台转发必然可达。
+                // Используйте только один путь для внешней переадресации: прямой запуск получателя + внешняя переадресация
+                // дважды запустят одно и то же подтверждение.
+
+                // На самом деле установщик Honor оказался в странном состоянии (реальный снимок «страницы успешной версии старой
+                // версии» от 24 октября 2026 г.).
+
+                // Разрешение плавающего окна (исключение фонового запуска) включено пользователем, и интерфейсная переадресация
+                // должна быть доступна.
+
                 BridgeSetupActivity.startForConfirm(context)
             }
 
             PackageInstaller.STATUS_SUCCESS -> {
                 DebugFileLog.append(context, "МОСТ: Установка прошла успешно.")
-                // 安装完成后拉起设置页弹「继续调试」询问，闭环不断在人手上
+                // После завершения установки откройте страницу настроек и спросите «продолжить отладку». Замкнутый контур
+                // постоянно находится под рукой.
+
                 BridgeSetupActivity.startForResume(context)
             }
 

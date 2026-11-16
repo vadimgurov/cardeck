@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 弹窗面板：与主界面卡片同款深色表面 + 24dp 圆角（比卡片略亮，浮在暗色遮罩上） -->
+<!-- Всплывающая панель: такая же темная поверхность, как у основной интерфейсной карты + закругленные углы 24dp (немного светлее карты, плавающей на темной маске) -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <solid android:color="#1A2122" />
     <corners android:radius="24dp" />

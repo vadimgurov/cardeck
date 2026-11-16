@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 两个链路引擎通过直接交换输出字节完成握手与数据往返（无线程、无 I/O）。 */
+/** Два механизма связи выполняют согласование и передачу данных путем прямого обмена выходными байтами (без потоков, без ввода-вывода). */
 class Iap2LinkEngineTest {
     @Test
     fun handshakeReachesNormalOnBothSides() {
@@ -26,41 +26,50 @@ class Iap2LinkEngineTest {
     }
 
     /**
-     * 事件通道形态：车机只反复发 marker、一条同步包都不发（Honda HFT 2026-10-20 实测
-     * 60 秒 60 个 marker），说明它卡在探测态、在等**我们**的会话表。
-     * 已处于 NEGOTIATING 时 [Iap2LinkEngine.initiate] 必须仍能发出「marker + FF5A SYN」，
-     * 双方随即收敛到 NORMAL——这是切歌按键通路的入口。
+     * Форма канала событий : автомобиль повторно отправляет маркеры и не отправляет ни одного пакета синхронизации
+     * (фактическое измерение Honda HFT 2026-10-20).
+     * 60 маркеров за 60 секунд), что указывает на то, что он завис в состоянии обнаружения и ожидает **нашей** таблицы сеансов.
+     * Когда       уже находится в режиме ПЕРЕГОВОРОВ, [Iap2LinkEngine.initiate] все еще должен иметь возможность
+     * отправлять «маркер + FF5A SYN».
+     * Обе стороны сразу сошлись на NORMAL — это вход на путь к клавишам вырезания песни.
      */
     @Test
     fun initiateFromNegotiatingSendsMarkerAndSynThenReachesNormal() {
         val phone = Iap2LinkEngine()
         val accessory = Iap2LinkEngine()
-        // 双方都是静默待命（只发 marker 不发起协商）
+        // Обе стороны молча находятся в режиме ожидания (только отправляют маркеры, но не начинают переговоры)
         phone.enterNegotiating()
         accessory.enterNegotiating()
 
         phone.initiate(0)
         val out = phone.takeOutput()
-        assertArrayEquals("首帧必须是 marker", Iap2LinkEngine.MARKER, out.copyOfRange(0, 6))
+        assertArrayEquals("Первый кадр должен быть marker", Iap2LinkEngine.MARKER, out.copyOfRange(0, 6))
         val frames = parseFrames(out)
-        assertEquals("marker 之后必须紧跟一条同步包", 1, frames.size)
-        assertTrue("同步包 control 必须带 SYN 位（0x80）", frames[0].control and 0x80 != 0)
+        assertEquals("marker За ним должен следовать пакет синхронизации", 1, frames.size)
+        assertTrue("Пакет синхронизации control Должен принести SYN Бит（0x80）", frames[0].control and 0x80 != 0)
 
-        // 车机侧收到「marker + 本表 SYN」→ 回 SYN|ACK（这就是日志里应当出现的推进）
+        // Сторона автомобиля получает «маркер + эти часы SYN» → возвращает SYN|ACK (это прогресс, который должен отображаться в журнале)
         accessory.feed(out, tick())
-        assertEquals("车机侧收到我们的会话表后必须进入 NORMAL", Iap2LinkEngine.State.NORMAL, accessory.state)
+        assertEquals(
+            "Сторона автомобиля и машины должна войти после получения нашей формы сеанса. NORMAL",
+            Iap2LinkEngine.State.NORMAL,
+            accessory.state,
+        )
         phone.feed(accessory.takeOutput(), tick())
-        assertEquals("实际 phone=${phone.state}", Iap2LinkEngine.State.NORMAL, phone.state)
+        assertEquals("фактический phone=${phone.state}", Iap2LinkEngine.State.NORMAL, phone.state)
         assertTrue(
-            "双方都必须采纳对方的会话表",
+            "Обе стороны должны принять список разговоров другой стороны.",
             phone.peerSynchronization != null && accessory.peerSynchronization != null,
         )
     }
 
     /**
-     * 轮次用尽后必须能停手：控制通道上无限 500ms 打点会把车机 CarPlay 栈刷懵，
-     * 所以上层按轮次重开、轮次用尽后调 [Iap2LinkEngine.stopNegotiationRetries]。
-     * 停手后不得再产出任何出站字节，状态保持 NEGOTIATING（等车机自己发 CSM）。
+     * должен иметь возможность остановиться после окончания раундов: неограниченное количество точек длительностью
+     * 500 мс на канале управления сбивает с толку стек CarPlay автомобиля.
+     * Таким образом, верхний уровень повторно открывается в соответствии с раундом, а
+     * [Iap2LinkEngine.stopNegotiationRetries] корректируется после того, как раунд исчерпан.
+     * После остановки       он не должен выдавать никаких исходящих байтов, и статус остается ПЕРЕГОВОРЫ (ожидание,
+     * пока поезд сам отправит CSM).
      */
     @Test
     fun stopNegotiationRetriesSilencesResends() {
@@ -70,11 +79,14 @@ class Iap2LinkEngineTest {
         phone.takeOutput()
 
         phone.advanceTime(1_000L)
-        assertTrue("未停手时必须仍在重发 marker/同步包", phone.takeOutput().isNotEmpty())
+        assertTrue(
+            "Прежде чем остановиться, вам все равно придется отправить сообщение повторно. marker/Пакет синхронизации",
+            phone.takeOutput().isNotEmpty(),
+        )
 
         phone.stopNegotiationRetries()
         phone.advanceTime(60_000L)
-        assertTrue("停手后不得再有任何出站字节", phone.takeOutput().isEmpty())
+        assertTrue("После остановки не должно быть больше исходящих байтов.", phone.takeOutput().isEmpty())
         assertEquals(Iap2LinkEngine.State.NEGOTIATING, phone.state)
     }
 
@@ -111,7 +123,7 @@ class Iap2LinkEngineTest {
 
         val payload = Iap2Csm.encode(0x1D02)
         assertTrue(phone.sendControl(payload, 1))
-        // 截获 phone 输出的数据帧，重复喂给 accessory 两次
+        // Перехватите вывод кадра данных с телефона и дважды передайте его на аксессуар.
         val dataFrame = phone.takeOutput()
         accessory.feed(dataFrame, 2)
         accessory.feed(dataFrame, 3)
@@ -129,7 +141,9 @@ class Iap2LinkEngineTest {
 
         val frames = (0 until 5).map { Iap2Csm.encode(0x5000 + it) }
         frames.forEach { assertTrue(phone.sendControl(it, 10)) }
-        // 窗口 2：只有前 2 帧立即发出，其余积压；ACK 后由 handleAcknowledgement 冲刷
+        // Окно 2: немедленно отправляются только первые 2 кадра, а остальные задерживаются; ACK сбрасывается с помощью
+        // handleAcknowledgement
+
         var now = 11L
         while (pollControls(accessory).size < 5) {
             exchange(phone, accessory)
@@ -140,34 +154,37 @@ class Iap2LinkEngineTest {
         }
     }
 
-    // ---- 协商细节回归 ----
+    // ---- Возврат деталей переговоров ----
 
     /**
-     * SYN-ACK 必须使用**新的**发送序号（对端按 `SYN.seq + 1` 校验）。
+     * SYN-ACK должен использовать **новый** порядковый номер отправки (партнер проверяет `SYN.seq + 1`).
      *
-     * 2026-10-19 BMW 87866 实车日志：我方 SYN 与 SYN-ACK 同为 seq=99，车机判为重复帧
-     * 丢弃，14 轮协商全部超时、133 条 SYN 未换回一条 ACK。catplay 用 `take_own_seq()`
-     * 消耗新序号，这里锁死该行为。
+     * 19 октября 2026 г. Журнал реального автомобиля BMW 87866: наши SYN и SYN-ACK имеют seq=99, и автомобиль и
+     * машина считают это дубликатом кадра.
+     * был отброшен, время ожидания всех 14 раундов согласования истекло, а 133 SYN не были обменены на ACK. кошачья
+     * игра использует `take_own_seq()`
+     * использует новые серийные номера, и это поведение здесь заблокировано.
      */
     @Test
     fun synAckUsesFreshSequenceNumber() {
         val phone = Iap2LinkEngine()
         phone.start(0)
-        phone.takeOutput() // marker + 我方 SYN（seq=99）
+        phone.takeOutput() // маркер + наш SYN (seq=99)
 
         phone.feed(synFrame(peerSequence = 161), 1)
         val frames = parseFrames(phone.takeOutput())
         val synAck = frames.single { it.control == 0xC0 }
 
-        assertEquals("ack 必须回显对端 SYN 序号", 161, synAck.ack)
-        assertEquals("SYN-ACK 序号必须比 SYN 大 1", 100, synAck.sequence)
+        assertEquals("ack Должен повторить сверстника SYN серийный номер", 161, synAck.ack)
+        assertEquals("SYN-ACK Серийный номер должен быть больше SYN Большой 1", 100, synAck.sequence)
     }
 
     /**
-     * 协商期间**每一条** SYN 都要回 SYN|ACK。
+     * В течение периода переговоров SYN|ACK должен быть возвращен для **каждого** SYN.
      *
-     * BMW 每轮重试都用新序号重开协商；旧实现只在首次采纳时回显，其余只回裸 ACK，
-     * 车机永远走不完协商。catplay `on_recv_neg_host` 对每条 SYN 都发 SYN+ACK。
+     * BMW возобновляет переговоры с новым серийным номером в каждом раунде повторных попыток; старая реализация
+     * отображает эхо только при первом принятии и возвращает только голый ACK в остальных случаях.
+     * Автомобиль-машина никогда не завершит переговоры. catplay `on_recv_neg_host` отправляет SYN+ACK для каждого SYN.
      */
     @Test
     fun everySynGetsASynAckReply() {
@@ -175,9 +192,11 @@ class Iap2LinkEngineTest {
         phone.start(0)
         phone.takeOutput()
 
-        // 车机连续三轮用不同序号重开协商（复刻日志 161 → 191 → 40）
+        // Автомобиль и машина возобновили переговоры с разными серийными номерами в течение трех последовательных
+        // раундов (журнал воспроизведения 161 → 191 → 40)
+
         val sequences = listOf(161, 191, 40)
-        val replies = ArrayList<Pair<Int, Int>>() // (synAckSeq, ack)
+        val replies = ArrayList<Pair<Int, Int>>() // (synAckSeq, подтверждение)
         sequences.forEachIndexed { index, peerSeq ->
             phone.feed(synFrame(peerSequence = peerSeq), (index + 1).toLong())
             parseFrames(phone.takeOutput())
@@ -185,13 +204,13 @@ class Iap2LinkEngineTest {
                 .forEach { replies += it.sequence to it.ack }
         }
 
-        assertEquals("每条 SYN 都应有 SYN|ACK", sequences.size, replies.size)
+        assertEquals("каждый SYN У всех есть SYN|ACK", sequences.size, replies.size)
         assertEquals(sequences, replies.map { it.second })
-        // 序号逐次递增（99 → 100 → 101 → 102）
+        // Серийный номер увеличивается постепенно (99 → 100 → 101 → 102).
         assertEquals(listOf(100, 101, 102), replies.map { it.first })
     }
 
-    /** 同一个 SYN 的字节级重发必须幂等：整对帧原样重放，不推进序号、不产生新序号。 */
+    /** Повторные передачи одного и того же SYN на уровне байтов должны быть идемпотентными: вся пара кадров воспроизводится без изменений, без каких-либо дополнительных порядковых номеров или создания новых порядковых номеров. */
     @Test
     fun retransmittedSynKeepsTheSameEcho() {
         val phone = Iap2LinkEngine()
@@ -203,11 +222,11 @@ class Iap2LinkEngineTest {
         phone.feed(synFrame(peerSequence = 77), 2)
         val again = phone.takeOutput()
 
-        assertArrayEquals("重传同一 SYN 应原样重放", first, again)
+        assertArrayEquals("Повторно передать то же самое SYN надо переиграть как есть", first, again)
         assertEquals(100, parseFrames(first).single { it.control == 0xC0 }.sequence)
     }
 
-    /** 裸 ACK 不能与已发出的 SYN|ACK 撞序号（BMW 会把同序号帧当重复丢弃）。 */
+    /** «Голый» ACK не может конфликтовать с порядковым номером отправленного SYN|ACK (BMW будет отбрасывать кадры с тем же порядковым номером как дубликаты). */
     @Test
     fun ackSequenceNeverDuplicatesTheSynAck() {
         val phone = Iap2LinkEngine()
@@ -219,11 +238,11 @@ class Iap2LinkEngineTest {
             phone.feed(synFrame(peerSequence = peerSeq), (index + 1).toLong())
             emitted += parseFrames(phone.takeOutput()).map { it.sequence }
         }
-        assertEquals("序号必须严格递增且无重复", emitted.size, emitted.distinct().size)
+        assertEquals("Серийные номера должны быть строго возрастающими и не иметь дубликатов.", emitted.size, emitted.distinct().size)
         assertEquals(emitted.sorted(), emitted)
     }
 
-    // ---- 工具 ----
+    // ---- Инструменты ----
 
     private class ParsedFrame(
         val control: Int,
@@ -232,7 +251,7 @@ class Iap2LinkEngineTest {
         val frameLength: Int,
     )
 
-    /** 解析一段输出里的所有 FF5A 帧（跳过前置 marker）。 */
+    /** Разобрать все кадры FF5A в сегменте вывода (пропуская ведущие маркеры). */
     private fun parseFrames(bytes: ByteArray): List<ParsedFrame> {
         val frames = ArrayList<ParsedFrame>()
         var offset = 0
@@ -248,13 +267,13 @@ class Iap2LinkEngineTest {
         return frames
     }
 
-    /** 解析一帧 FF5A（长度含 9 字节头 + 载荷 + 载荷校验和）。 */
+    /** Разобрать кадр FF5A (длина включает 9-байтовый заголовок + полезную нагрузку + контрольную сумму полезной нагрузки). */
     private fun parseFrame(
         bytes: ByteArray,
         offset: Int,
     ): ParsedFrame {
         require(bytes[offset] == 0xFF.toByte() && bytes[offset + 1] == 0x5A.toByte()) {
-            "offset=$offset 不是 FF5A 帧头"
+            "offset=$offset Нет FF5A Заголовок кадра"
         }
         val length = ((bytes[offset + 2].toInt() and 0xFF) shl 8) or (bytes[offset + 3].toInt() and 0xFF)
         return ParsedFrame(
@@ -266,18 +285,20 @@ class Iap2LinkEngineTest {
     }
 
     /**
-     * 构造车机侧的 SYN 帧（含 marker）。
+     * создает кадр SYN (включая маркер) на стороне транспортного средства.
      *
-     * 帧头是 **9 字节**：`FF5A | u16 长度 | u8 控制 | u8 seq | u8 ack | u8 会话 | u8 头校验和`，
-     * 所以 seq 在帧内偏移 5、头校验和在偏移 8（不是 7——那一位是会话 ID）。
+     * Заголовок кадра       имеет длину **9 байт**: `FF5A | u16 длина | u8 контроль | u8 seq | u8 ack | u8 сессия |
+     * u8 контрольная сумма заголовка`,
+     * Таким образом, последовательность находится по смещению 5 внутри кадра, а контрольная сумма заголовка
+     * находится по смещению 8 (а не 7 - этот бит является идентификатором сеанса).
      */
     private fun synFrame(peerSequence: Int): ByteArray {
         val engine = Iap2LinkEngine()
         engine.start(0)
         val raw = engine.takeOutput()
-        val synOffset = 6 // 前置 marker 6 字节
+        val synOffset = 6 // Префиксный маркер 6 байт
         raw[synOffset + 5] = peerSequence.toByte()
-        // 头校验和 = 前 8 字节之和的补码
+        // Контрольная сумма заголовка = дополнение суммы первых 8 байтов.
         var sum = 0
         for (index in synOffset until synOffset + 8) sum += raw[index].toInt() and 0xFF
         raw[synOffset + 8] = (-sum and 0xFF).toByte()

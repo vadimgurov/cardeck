@@ -14,36 +14,38 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 用车机热点承载 CarPlay 流量。
+ * использует точку доступа автомобиля для передачи трафика CarPlay.
  *
- * **两种入网方式（2026-10-22 起默认静默命令行）**：
- *  - 静默路径（默认，见 `SessionController.joinCarWifiSilently`）：Shizuku 执行
- *    `cmd wifi connect-network`，系统直接把热点连上（**0 弹窗**），随后
- *    [bindCurrentWifi] 用**不带 specifier** 的 `requestNetwork` 捕获 `Network` 句柄并绑定。
- *  - [joinCarPlayNetwork]：`WifiNetworkSpecifier` 应用专属网络——静默路径不可用时的兜底。
- *    网络只对本进程可见（不保存、不成为默认网络），但首次加入会弹系统确认框。
+ * **Два способа доступа к сети (автоматическая командная строка по умолчанию, начиная с 22 октября 2026 г.)**:
+ * — Тихий путь (по умолчанию, см. `SessionController.joinCarWifiSilently`): выполнение Шизуку.
+ * `cmd wifi connect-network`, система напрямую подключается к точке доступа (**0 всплывающих окон**), а затем
+ * [bindCurrentWifi] захватывает дескриптор `Network` и связывает его с `requestNetwork` без спецификатора.
+ * - [joinCarPlayNetwork]: `WifiNetworkSpecifier` Сеть для конкретного приложения - запасной вариант, когда молчащие пути недоступны.
+ * Сеть   видна только этому процессу (она не сохраняется и не становится сетью по умолчанию), но при первом
+ * присоединении появится окно подтверждения системы.
  *
- * 关键点：
- *  - 请求不带 `NET_CAPABILITY_INTERNET`，系统不会因「无互联网」拆连接；
- *  - 两条路径都必须 `bindProcessToNetwork` 后再建 socket / 注册 mDNS——mDNS 广播
- *    (`NsdManager.registerService`) 没有 Network 参数，只能跟随进程默认网络；
- *  - SSID 必须精确匹配（热点名可能带空格/中文）：静默路径用 `cmd wifi status` 核对。
+ * Ключевые моменты:
+ * - Если в запросе не указан `NET_CAPABILITY_INTERNET`, то система не отключится по причине "нет интернета";
+ * — перед созданием сокета/регистрацией mDNS оба пути должны быть `bindProcessToNetwork` — широковещательная рассылка mDNS
+ * (`NsdManager.registerService`) не имеет параметра сети и может использовать только сеть по умолчанию процесса;
+ * — SSID должен точно совпадать (имя точки доступа может содержать пробелы/китайский язык): тихий путь
+ * проверяется с помощью `cmd wifi status`.
  */
 class WifiCarPlayConnector(
     private val context: Context,
     private val log: (String) -> Unit,
 ) {
-    /** 应用专属网络的连接结果。 */
+    /** Результаты подключения для сетей конкретного приложения. */
     sealed interface JoinResult {
-        /** 已连接并绑定到本进程；[network] 可用于 NSD/端点判断。 */
+        /** Связан и связан с этим процессом; [network] может использоваться для определения NSD/конечной точки. */
         data class Joined(
             val network: Network,
         ) : JoinResult
 
-        /** 系统未允许（用户拒绝/热点不在范围/超时）。可重试。 */
+        /** Система не разрешена (пользователь запрещен/точка доступа вне диапазона/время ожидания истекло). Вы можете попробовать еще раз. */
         data object Unavailable : JoinResult
 
-        /** 该安全类型无法用 WifiNetworkSpecifier 表达（WEP）——调用方走旧路径。 */
+        /** Этот тип безопасности не может быть выражен с помощью WifiNetworkSpecifier (WEP) — вызывающая сторона использует старый путь. */
         data object Unsupported : JoinResult
     }
 
@@ -56,15 +58,16 @@ class WifiCarPlayConnector(
     private val boundNetwork = AtomicReference<Network?>(null)
 
     /**
-     * 应用专属网络被系统断开（热点关闭/离开范围）时回调。会话层据此提示用户；
-     * 空实现 = 不关心（例如手动绑定路径）。
+     * Вызывается, когда сеть конкретного приложения отключена системой (точка доступа отключена или находится вне
+     * зоны действия). Сеансовый уровень предлагает пользователю соответствующие запросы;
+     * пустая реализация = все равно (например, привязать пути вручную).
      */
     @Volatile
     var onNetworkLost: ((ssid: String) -> Unit)? = null
 
     /**
-     * 当前绑定网络的网关地址（车机热点场景 = 车机 IP）。
-     * mDNS 发现失败时的兜底路径。
+     * — это адрес шлюза текущей подключенной сети (сценарий точки доступа автомобиля = IP-адрес автомобиля).
+     * Резервный путь в случае сбоя обнаружения mDNS.
      */
     fun gatewayAddress(): String? {
         val network = boundNetwork.get() ?: return null
@@ -81,9 +84,10 @@ class WifiCarPlayConnector(
     }
 
     /**
-     * 本机在当前绑定网络上的 IPv4 地址（如 10.174.189.57）。
-     * 用于 mDNS 结果过滤：手机双归属（连车机热点 + 自己开热点共享给电脑）时，
-     * mDNS 会跨网发现电脑的 AirPlay 接收器——非本网段地址一律不是车机。
+     * IPv4-адрес этого компьютера в текущей подключенной сети (например, 10.174.189.57).
+     * используется для фильтрации результатов mDNS: когда мобильный телефон имеет двойное подключение (подключен к
+     * автомобильной точке доступа + собственная точка доступа для совместного использования с компьютером),
+     * mDNS обнаружит приемник AirPlay компьютера в сети — адреса за пределами этого сегмента сети не являются автомобильными компьютерами.
      */
     fun localIpv4Address(): String? {
         val network = boundNetwork.get() ?: return null
@@ -100,10 +104,11 @@ class WifiCarPlayConnector(
     }
 
     /**
-     * 本机在当前绑定网络上的全部 IPv6 地址。
+     * Все IPv6-адреса этого компьютера в текущей связанной сети.
      *
-     * mDNS 结果的网段验收用：奥迪 4xxx 的 `_airplay._tcp` 常只发链路本地 IPv6，
-     * 旧过滤只按 IPv4 前缀判定，会把车机本身也当成「非本网段」丢掉（2026-10-19）。
+     * Принятие сегментом сети результатов       mDNS: `_airplay._tcp` Audi 4xxx часто отправляет только локальный IPv6,
+     * Старый фильтр определяет только на основе префикса IPv4 и отбрасывает само транспортное средство как
+     * «нелокальный сегмент сети» (19 октября 2026 г.).
      */
     fun localIpv6Addresses(): List<String> {
         val network = boundNetwork.get() ?: return emptyList()
@@ -121,15 +126,19 @@ class WifiCarPlayConnector(
     }
 
     /**
-     * 用应用专属网络（`WifiNetworkSpecifier`）加入车机热点——**静默路径不可用时的兜底**。
-     * 首次加入会弹一次系统确认框；网络不保存、不成为默认网络。
+     * использует сеть конкретного приложения (`WifiNetworkSpecifier`) для подключения к автомобильной точке доступа
+     * — **прикрытие, когда бесшумный путь недоступен**.
+     * Когда       присоединяется в первый раз, появляется всплывающее окно подтверждения системы; сеть не будет
+     * сохранена и не станет сетью по умолчанию.
      *
-     * 阻塞直到连接成功/系统拒绝/超时（内部 200ms 分片，[isCancelled] 可即时退出）。
-     * 成功后进程网络已绑定，调用方可直接注册 mDNS / 建 socket。
+     * блокируется до тех пор, пока соединение не будет успешным/система не отклонит/истечет время ожидания
+     * (внутренняя фрагментация 200 мс, [isCancelled] может выйти немедленно).
+     * После успешного завершения       сеть процесса будет привязана, и вызывающая сторона сможет напрямую
+     * зарегистрировать mDNS/создать сокет.
      *
-     * 安全类型映射按 0x5703（xcertplay Iap2WirelessSecurity）：
-     * 0=NONE 1=WEP 2=WPA/WPA2 3=WPA3 过渡 4=WPA3 仅。
-     * WEP 无对应 API（返回 [JoinResult.Unsupported]，调用方走旧路径）。
+     * Сопоставление типов безопасности       в соответствии с 0x5703 (xcertplay Iap2WirelessSecurity):
+     * 0=НЕТ 1=WEP 2=WPA/WPA2 3=переход WPA3 4=только WPA3.
+     * WEP не имеет соответствующего API (возврат к [JoinResult.Unsupported], вызывающая сторона выбирает старый путь).
      */
     fun joinCarPlayNetwork(
         ssid: String,
@@ -137,9 +146,9 @@ class WifiCarPlayConnector(
         securityType: Int,
         timeoutMillis: Long = 120_000L,
         isCancelled: () -> Boolean = { false },
-        /** 首窗无回调时的快速探测（毫秒级 shell 往返 + ≤3s 绑定，必须不阻塞重发）。 */
+        /** Быстрое обнаружение при отсутствии обратного вызова в первом окне (обращение оболочки в миллисекундах + привязка ≤3 с, не должно блокировать повторную передачу). */
         quickFallback: (() -> Network?)? = null,
-        /** 重发窗也无回调后的深度兜底（connect-network，10s 量级——本轮窗口已过，为下一轮省时间）。 */
+        /** Окно перевыпуска также не имеет глубины после обратного звонка (connect-network, уровень 10s - окно этого раунда прошло, экономия времени для следующего раунда). */
         deepFallback: (() -> Network?)? = null,
     ): JoinResult {
         val specifier =
@@ -152,61 +161,85 @@ class WifiCarPlayConnector(
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .setNetworkSpecifier(specifier)
                 .build()
-        // 等待节奏按「车机窗口」设计（2026-10-23 奥迪 3315 真机日志定谳）：0x4301 后
-        // 车机 ~15s 拆 BT、~21s 后 AirPlay 服务窗关闭（晚到即 ECONNREFUSED，BT 再健康
-        // 也无法激活）——从 0x5703 起算的入网预算只有 ~9-14s。 specifier 挂起形态下
-        // （「系统已保存该 SSID + 部分 ROM（Android 16/小米实测）」或 forget→request
-        // 紧邻操作，请求**永久 pending** 零回调）各阶段的预算：
-        //  ① 首窗 5s（正常入网实测 0.03~3s；5s 零回调即挂起特征）；
-        //  ② 快速探测（quickFallback：系统已自己连上该 SSID 则直接绑定，≤3s）；
-        //  ③ 重发 specifier（实测挂起后 release→重发 1.6s 即入网——**被验证有效的
-        //     恢复手段，必须紧跟探测**），20s 窗；
-        //  ④ 深度兜底（deepFallback：connect-network 直连，10s 量级）——本轮窗口必然
-        //     已过，价值是让手机先挂上热点，下一轮（车机 0.17s 即重连 BT）走「已连着」近路。
-        // 旧 20s 首窗的教训：第 1 轮首窗没走完车机就拆链（15.2s），排在首窗**之后**的
-        // 任何兜底都轮不到执行；第 2 轮 20s+1.6s=21.6s 入网时 7000 端口已拒绝连接。
-        // 已知代价：首次连接的系统授权弹窗若被用户攥过 5s，本轮请求会被撤回重发、
-        // 弹窗重出一次——一次性 UX 代价，远小于整车连接失败。
+        // Ритм ожидания разработан в соответствии с «окном машины» (определен реальный журнал машины Audi 3315 2026-10-23): 0x4301
+        // Сервисное окно AirPlay закрывается примерно через 15 секунд демонтажа BT на автомобиле и примерно через
+        // 21 секунду (опоздание означает ECONNREFUSED, и BT снова будет исправен.
+
+        // Также нельзя активировать) - Бюджет доступа к сети, начиная с 0x5703, составляет всего ~9-14 секунд.
+        // спецификатор в приостановленном состоянии
+
+        // («Система сохранила SSID + часть ПЗУ (фактическое тестирование Android 16/Xiaomi)» или забудьте → запросить
+        // Сразу после операции запрашивается бюджет **постоянного ожидания** без обратных вызовов) для каждого этапа:
+        //  ① Первое окно 5 с (измеряется 0,03–3 с при обычном доступе к сети; отсутствие обратного вызова 5 с означает зависание);
+        //  ② Быстрое обнаружение (быстрый возврат: если система самостоятельно подключилась к SSID, она будет привязана напрямую, ≤3 с);
+        // ③ Спецификатор повторной отправки (освобождается после зависания фактического теста → повторная отправка через
+        // 1,6 с, а затем подключение к сети - ** проверено как действительное)
+
+        //     Средства восстановления должны следовать за обнаружением**), окно 20 с;
+        //  ④ Deep Fallback (deepFallback: прямое подключение к сети, уровень 10 с) — этот раунд окон неизбежен.
+        // Это прошло. Значение состоит в том, чтобы сначала позволить телефону подключиться к точке доступа, а в
+        // следующем раунде (телефон повторно подключится к BT через 0,17 с) использовать ярлык «уже подключено».
+
+        // Уроки первого окна в старые 20-е годы: цепочка была удалена до того, как было завершено первое окно первого
+        // раунда (15,2 секунды), что занимает место после первого окна **
+
+        // Попытка выполнения не будет предпринята; во втором раунде 20с+1,6с=21,6с порт 7000 отказался подключаться к сети.
+        // Известная стоимость: если пользователь удерживает всплывающее окно авторизации системы при первом подключении
+        // более 5 секунд, этот раунд запросов будет отозван и отправлен повторно.
+
+        // Всплывающее окно появляется один раз — единовременные затраты на UX намного меньше, чем сбой всего подключения автомобиля.
         val firstWindowMs = minOf(timeoutMillis, 5_000L)
         val secondWindowMs = minOf(timeoutMillis - firstWindowMs, 20_000L).coerceAtLeast(0)
         val unavailable = AtomicBoolean(false)
         var network = requestAndAwait(ssid, request, firstWindowMs, isCancelled, unavailable)
-        // 系统明确拒绝（onUnavailable：用户拒了授权框/热点不在范围）后重发无意义，
-        // 只会再拒一次——与挂起（零回调）必须区分开。
+        // Повторная отправка бессмысленна после того, как система явно отклоняет ее (onUnavailable: пользователь
+        // отклонил поле авторизации/точка доступа находится вне зоны действия).
+
+        // Только еще один отказ - надо отличать от pending (нулевой обратный вызов).
         if (network == null && !isCancelled() && !unavailable.get() && secondWindowMs > 0) {
             release()
             if (!isCancelled()) {
-                // 快速兜底成功 = 已绑定到车机热点（系统自动重连的场景），直接返回；
-                // 对「系统已保存并连着热点」的车型重发 specifier 只会再挂（已保存
-                // SSID 正是挂起条件之一），短路是正确行为。
+                // Успешный быстрый поиск = привязан к точке доступа автомобиля (система автоматически переподключается) и
+                // возвращается напрямую;
+
+                // Повторный выпуск спецификатора модели автомобиля, который «сохранен в системе и подключен к точке доступа»,
+                // приведет только к повторному зависанию системы (сохранение
+
+                // SSID — одно из условий зависания), короткое замыкание — правильное поведение.
                 quickFallback?.invoke()?.let { fallback ->
-                    log("WiFi: 快速兜底入网成功（$fallback）——跳过 specifier 重发")
+                    log("Wi-Fi: быстрый доступ к сети успешен ($fallback) — пропустить спецификатор и отправить повторно")
                     return JoinResult.Joined(fallback)
                 }
             }
             if (!isCancelled()) {
-                log("WiFi: 首窗 ${firstWindowMs / 1000}s 零回调——specifier 可能挂起，重发网络请求（实测重发 1.6s 可入网）")
+                log(
+                    "WiFi: Нулевой обратный вызов в первом окне ${firstWindowMs / 1000}s - спецификатор может зависнуть, " +
+                        "повторно отправить сетевой запрос (измеренная повторная отправка занимает 1,6 с для подключения к сети)",
+                )
                 network = requestAndAwait(ssid, request, secondWindowMs, isCancelled, unavailable)
             }
             if (network == null && !isCancelled() && !unavailable.get()) {
                 release()
                 if (!isCancelled()) {
                     deepFallback?.invoke()?.let { fallback ->
-                        log("WiFi: 深度兜底入网成功（$fallback）")
+                        log("WiFi: успешное глубокое погружение в сеть ($fallback)")
                         return JoinResult.Joined(fallback)
                     }
                 }
             }
         }
         if (network == null) {
-            log("WiFi: 等待加入 \"$ssid\" 失败（首窗 ${firstWindowMs / 1000}s + 重发窗 ${secondWindowMs / 1000}s + 两级兜底）")
+            log(
+                "WiFi: Ожидание присоединения к \"$ssid\" не удалось (первое окно ${firstWindowMs / 1000}s + окно " +
+                    "повторной передачи ${secondWindowMs / 1000}s + двухуровневая крышка)",
+            )
             release()
             return JoinResult.Unavailable
         }
         return JoinResult.Joined(network)
     }
 
-    /** 发起一次 requestNetwork 并等待到窗口结束/成功/取消；调用方负责 release。 */
+    /** Инициируйте requestNetwork и подождите, пока окно не завершится/успех/отменится; за освобождение отвечает вызывающий абонент. */
     private fun requestAndAwait(
         ssid: String,
         request: NetworkRequest,
@@ -222,25 +255,33 @@ class WifiCarPlayConnector(
                     val bound = connectivityManager.bindProcessToNetwork(network)
                     boundNetwork.set(network)
                     result.set(network)
-                    log("WiFi: 已加入应用专属网络 \"$ssid\"（$network bindProcessToNetwork=$bound）——不影响其它应用联网")
+                    log(
+                        "WiFi: подключен к сети приложения \"$ssid\" ($network, bindProcessToNetwork=$bound) – не влияет " +
+                            "на работу других приложений в сети",
+                    )
                     latch.countDown()
                 }
 
                 override fun onUnavailable() {
-                    log("WiFi: 系统未允许加入 \"$ssid\"（用户拒绝或热点不在范围内）")
+                    log(
+                        "WiFi: Система не позволяет подключиться к \"$ssid\" (пользователь отказывается или точка " +
+                            "доступа находится вне зоны действия)",
+                    )
                     latch.countDown()
                 }
 
                 override fun onLost(network: Network) {
                     if (boundNetwork.compareAndSet(network, null)) {
                         connectivityManager.bindProcessToNetwork(null)
-                        log("WiFi: 应用专属网络 \"$ssid\" 已断开（$network）")
+                        log("Wi-Fi: сеть приложения \"$ssid\" отключена ($network)")
                         onNetworkLost?.invoke(ssid)
                     }
                 }
             }
-        // 先撤上一任回调：快速兜底的 bindCurrentWifi 与本请求共用 callback 槽位，
-        // 直接覆盖会让旧 callback 滞留在 ConnectivityManager 里直到 disconnect。
+        // Сначала отмените предыдущий обратный вызов: быстрый методbindCurrentWifi использует слот обратного вызова
+        // совместно с этим запросом.
+
+        // Прямая перезапись приведет к тому, что старый обратный вызов останется в ConnectivityManager до тех пор, пока не будет отключен.
         callback.getAndSet(null)?.let {
             runCatching { connectivityManager.unregisterNetworkCallback(it) }
         }
@@ -250,7 +291,10 @@ class WifiCarPlayConnector(
                 connectivityManager.requestNetwork(request, newCallback)
                 true
             } catch (error: Exception) {
-                log("WiFi: 发起应用专属网络请求失败（${error.message}）——可能需要位置权限或系统不支持")
+                log(
+                    "Wi-Fi: не удалось инициировать сетевой запрос для конкретного приложения (${error.message}) — может " +
+                        "потребоваться разрешение на определение местоположения или система его не поддерживает.",
+                )
                 false
             }
         if (!accepted) return null
@@ -266,7 +310,7 @@ class WifiCarPlayConnector(
         return result.get()
     }
 
-    /** 构造 specifier；WEP 或参数不合法返回 null（走旧路径）。 */
+    /** Создает спецификатор; возвращает значение NULL, если WEP или аргумент недействителен (используется старый путь). */
     private fun buildSpecifier(
         ssid: String,
         passphrase: String,
@@ -275,21 +319,21 @@ class WifiCarPlayConnector(
         return try {
             val builder = WifiNetworkSpecifier.Builder().setSsid(ssid)
             when (securityType) {
-                // 开放热点：无密码
+                // Открыть точку доступа: без пароля
                 0 -> Unit
-                // WEP：WifiNetworkSpecifier 无对应 API（现代车机不再使用）
+                // WEP: WifiNetworkSpecifier не имеет соответствующего API (больше не используется в современных автомобилях).
                 1 -> return null
-                // WPA/WPA2 与 WPA3 过渡模式：过渡模式 AP 同时接受 WPA2-PSK
+                // Режим перехода WPA/WPA2 и WPA3: точка доступа в переходном режиме также принимает WPA2-PSK.
                 2, 3 -> {
                     if (passphrase.isEmpty()) return null
                     builder.setWpa2Passphrase(passphrase)
                 }
-                // WPA3 仅
+                // только WPA3
                 4 -> {
                     if (passphrase.isEmpty()) return null
                     builder.setWpa3Passphrase(passphrase)
                 }
-                // 未知类型：按有密码的 WPA2 尝试（比直接放弃更可能成功）
+                // Неизвестный тип: попробуйте WPA2 с паролем (скорее получится, чем отказаться).
                 else -> {
                     if (passphrase.isEmpty()) return null
                     builder.setWpa2Passphrase(passphrase)
@@ -297,22 +341,27 @@ class WifiCarPlayConnector(
             }
             builder.build()
         } catch (error: Exception) {
-            log("WiFi: 构造应用专属网络参数失败（${error.message}）")
+            log("Wi-Fi: не удалось создать параметры сети для конкретного приложения (${error.message}).")
             null
         }
     }
 
     /**
-     * 绑定「当前已连接的 WiFi」——静默命令行连网成功后用它捕获 `Network` 句柄。
+     * привязывает «подключенный в данный момент Wi-Fi» — используйте его для захвата дескриптора `Network` после
+     * успешного подключения к Интернету из тихой командной строки.
      *
-     * 请求**不带 specifier**（只声明 TRANSPORT_WIFI、移除 INTERNET），所以系统不会弹
-     * 任何确认框，也会把刚连上的车机 WiFi 立刻回调过来。热点无互联网时系统可能不把它
-     * 设为默认网络，必须显式 bindProcessToNetwork，我们的 socket / mDNS 才会走 WiFi。
-     * 带看门狗：WiFi 未连接时 requestNetwork 会无限静默挂起——5 秒无果给出明确指引
-     * （请求保持挂起，用户加入热点后仍会自动完成绑定并回调）。
+     * Запрос       **без спецификатора** (объявить только TRANSPORT_WIFI, удалить INTERNET), чтобы система не отскочила
+     * Любое окно подтверждения также немедленно перезвонит недавно подключенному автомобильному Wi-Fi. Если в точке
+     * доступа нет Интернета, система может не
+     * установлен в качестве сети по умолчанию и должен быть явно указан в параметреbindProcessToNetwork, чтобы наш
+     * сокет/mDNS использовал Wi-Fi.
+     * со сторожевым таймером: когда Wi-Fi не подключен, requestNetwork будет молча зависать на неопределенный срок -
+     * никаких четких указаний не будет дано через 5 секунд.
+     * (запрос остается в ожидании, привязка по-прежнему будет автоматически завершена, а обратный вызов будет
+     * выполнен после того, как пользователь присоединится к точке доступа).
      */
     fun bindCurrentWifi(
-        /** 绑定目标热点的 SSID——断开通知（[onNetworkLost]）需要它；未知则传 null（不断开通知）。 */
+        /** Привязать SSID целевой точки доступа — требуется для уведомлений об отключении ([onNetworkLost]); передать значение null, если неизвестно (нет уведомлений об отключении). */
         ssidHint: String? = null,
         onResult: (Boolean) -> Unit = {},
     ) {
@@ -323,7 +372,9 @@ class WifiCarPlayConnector(
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .build()
-        // 网络回调线程与 Bg 看门狗线程并发读写——原子标志保证可见性与单次投递
+        // Одновременное чтение и запись потока обратного вызова сети и потока сторожевого таймера Bg — атомарный флаг
+        // обеспечивает видимость и однократную доставку.
+
         val reported =
             java.util.concurrent.atomic
                 .AtomicBoolean(false)
@@ -332,34 +383,42 @@ class WifiCarPlayConnector(
                 override fun onAvailable(network: Network) {
                     boundNetwork.set(network)
                     val bound = connectivityManager.bindProcessToNetwork(network)
-                    log("WiFi: 已绑定当前WiFi网络 $network bindProcessToNetwork=$bound")
+                    log("WiFi: текущая сеть Wi-Fi привязана к $network, bindProcessToNetwork=$bound.")
                     if (reported.compareAndSet(false, true)) onResult(true)
                 }
 
                 override fun onUnavailable() {
-                    log("WiFi: 没有可用的WiFi连接——请先在系统设置里加入接收端热点")
+                    log("Wi-Fi: соединение Wi-Fi отсутствует. Сначала добавьте принимающую точку доступа в настройках системы.")
                     if (reported.compareAndSet(false, true)) onResult(false)
                 }
 
                 override fun onLost(network: Network) {
                     if (boundNetwork.compareAndSet(network, null)) {
-                        // 熄火/离开范围：解绑进程网络，否则所有 socket 继续指向死网络；
-                        // 并通知会话层（英雄卡不能停在「已连接」）。
-                        // 与 specifier 路径同语义：兜底入网（bindCurrentWifi）是奥迪 3315
-                        // 的主路径，不转发 onLost 会停在假「已连接」拖到心跳超时才死
-                        // （2026-10-23 审阅定谳）。
+                        // Завершить работу/выйти из области действия: отмените привязку сети процесса, иначе все сокеты продолжат
+                        // указывать на мертвую сеть;
+
+                        // И уведомите уровень сеанса (карточка героя не может остановиться на «Подключено»).
+                        // Та же семантика, что и у пути спецификатора:bindCurrentWifi — это Audi 3315.
+                        // Основной путь, если onLost не пересылается, он остановится на ложном «Подключено», пока не истечет время
+                        // контрольного сигнала.
+
+                        // (Проверено и определено 23 октября 2026 г.).
                         connectivityManager.bindProcessToNetwork(null)
-                        log("WiFi: 绑定的 WiFi 网络已断开（$network）")
+                        log("Wi-Fi: привязанная сеть Wi-Fi отключена ($network)")
                         ssidHint?.let { onNetworkLost?.invoke(it) }
                     }
                 }
             }
         callback.set(newCallback)
         connectivityManager.requestNetwork(request, newCallback)
-        // 提示性看门狗（**不决定成败**）：requestNetwork 在「手机尚未连上 WiFi」时
-        // 会一直挂起，等系统关联+DCHP 完成才回调 onAvailable——实测用户手动加入
-        // 热点时可达 10s+。这里只在 5s 时给用户一句指引，超时判定由调用方的
-        // WIFI_BIND_WAIT_S 负责；不要在这里取消请求（回调晚到仍会正确绑定）。
+        // Подскажите сторожевой таймер (**не определяет успех или неудачу**): запрос сети, когда «телефон не подключен к WiFi»
+        // Он будет зависать до тех пор, пока не завершится привязка системы + DCHP, прежде чем перезвонить в Доступном —
+        // измеренные пользователи присоединяются вручную
+
+        // До 10 с+ в точке доступа. Здесь мы только даем пользователю ориентир в 5 секунд. Тайм-аут определяется
+        // пользователем вызывающего абонента.
+
+        // WIFI_BIND_WAIT_S несет ответственность; не отменяйте запрос здесь (поздний обратный вызов все равно будет привязан правильно).
         Bg.run("wifi-bind-watchdog") {
             try {
                 Thread.sleep(5_000)
@@ -367,7 +426,11 @@ class WifiCarPlayConnector(
                 return@run
             }
             if (!reported.get()) {
-                log("WiFi: 5 秒尚未绑定（手机可能还没连上热点）——请到 设置>WLAN 加入接收端热点，加入后本轮绑定会自动完成")
+                log(
+                    "Wi-Fi: он не был привязан в течение 5 секунд (возможно, телефон еще не подключен к точке доступа) — " +
+                        "перейдите в «Настройки» > «WLAN», чтобы присоединиться к принимающей точке доступа. После " +
+                        "присоединения этот раунд привязки будет завершен автоматически.",
+                )
             }
         }
     }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 弹窗里的设备行：与设置页应用行同款深色圆角 + 按压涟漪 -->
+<!-- Строка устройства во всплывающем окне: такие же темные закругленные углы, как и строка приложения на странице настроек + пульсация нажатия -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#1FFFFFFF">
     <item>

@@ -1,73 +1,75 @@
 package io.github.shaonialife.cardeck.iap2
 
 /**
- * 无线 CarPlay 会话中「发送端（iPhone 角色）」视角的消息目录。
+ * Каталог сообщений с точки зрения «Отправитель (символ iPhone)» в беспроводном сеансе CarPlay.
  *
- * 完整无线时序（对照 reference/xcertplay Iap2WirelessControlClient 与
- * reference/carplay-wifi-extractor README 的抓包流程）：
+ * полная синхронизация беспроводной сети (сравните эталон/xcertplay Iap2WirelessControlClient с
+ * Процесс захвата пакетов эталонного/carplay-wifi-extractor   README):
  *
- *  1. 蓝牙 RFCOMM 建链（两台设备需先完成系统级蓝牙配对）
- *  2. 链路层握手：对端发 FF55 SYN → 我方 SYN-ACK → 双方 FF5A 参数协商
- *  3. 手机 → 配件: StartIdentification(0x1D00)
- *     配件 → 手机: IdentificationInformation(0x1D01)   // 车机身份 + 能力清单
- *     手机 → 配件: IdentificationAccepted(0x1D02)
- *  4. MFi 认证（0xAA00 段，配件证明自己；手机侧可跳过校验）
- *  5. 手机 → 配件: RequestAccessoryWiFiConfiguration(0x5702)
- *     配件 → 手机: AccessoryWiFiConfiguration(0x5703)   // 明文 TLV：SSID/密码/信道
- *  6. 手机加入热点，mDNS 解析配件的 _airplay._tcp
- *  7. 手机 → 配件: CarPlayAvailability(0x4300)
- *     配件 → 手机: CarPlayStartSession(0x4301)          // AirPlay 端口/地址/公钥
- *  8. 手机 → 配件: WirelessCarPlayUpdate(0x4E0D)、DeviceTransportIdentifier(0x4E0E)
- *  9. AirPlay 主会话（RTSP 风格 + H.264 流 + HID 触摸回传）—— Phase 2
+ * 1. Установление связи Bluetooth RFCOMM (сначала два устройства должны выполнить сопряжение Bluetooth на системном уровне)
+ * 2. Подтверждение канального уровня: узел отправляет FF55 SYN → Наш SYN-ACK → Обе стороны согласовывают параметры FF5A.
+ * 3. Мобильный телефон → Аксессуары: StartIdentification(0x1D00)
+ * Аксессуары   → мобильный телефон: IdentificationInformation(0x1D01) // Идентификация автомобиля и машины + список возможностей
+ * Мобильный телефон   → Аксессуары: Идентификация принята(0x1D02)
+ * 4. Сертификация MFi (сегмент 0xAA00, аксессуары зарекомендовали себя; на стороне мобильного телефона проверку можно пропустить)
+ * 5. Мобильный телефон → Аксессуары: RequestAccessoryWiFiConfiguration(0x5702)
+ * Аксессуар → Мобильный телефон: AccessoryWiFiConfiguration(0x5703) // TLV в виде обычного текста: SSID/пароль/канал
+ * 6. Мобильный телефон подключается к точке доступа, mDNS разрешает _airplay._tcp аксессуара.
+ * 7. Мобильный телефон → Аксессуары: CarPlayAvailability(0x4300)
+ * Аксессуары   → мобильный телефон: CarPlayStartSession(0x4301) // Порт/адрес/открытый ключ AirPlay
+ * 8. Мобильный телефон → Аксессуары: WirelessCarPlayUpdate(0x4E0D), DeviceTransportIdentifier(0x4E0E)
+ * 9. Основной сеанс AirPlay (стиль RTSP + потоковая передача H.264 + обратная передача HID Touch) — этап 2
  */
 object Iap2MessageIds {
-    // ---- 识别（Identification）----
-    const val START_IDENTIFICATION = 0x1D00 // 手机 → 配件
-    const val IDENTIFICATION_INFORMATION = 0x1D01 // 配件 → 手机
-    const val IDENTIFICATION_ACCEPTED = 0x1D02 // 手机 → 配件
-    const val IDENTIFICATION_REJECTED = 0x1D03 // 配件 → 手机
+    // ----Идентификация----
+    const val START_IDENTIFICATION = 0x1D00 // Мобильный телефон → Аксессуары
+    const val IDENTIFICATION_INFORMATION = 0x1D01 // Аксессуары → Мобильные телефоны
+    const val IDENTIFICATION_ACCEPTED = 0x1D02 // Мобильный телефон → Аксессуары
+    const val IDENTIFICATION_REJECTED = 0x1D03 // Аксессуары → Мобильные телефоны
 
-    // ---- 无线 CarPlay ----
-    const val CARPLAY_AVAILABILITY = 0x4300 // 手机 → 配件：询问能否开始
-    const val CARPLAY_START_SESSION = 0x4301 // 配件 → 手机：无线参数 + AirPlay 端点
-    const val WIRELESS_CARPLAY_UPDATE = 0x4E0D // 手机 → 配件：无线可用性通知
-    const val DEVICE_TRANSPORT_IDENTIFIER = 0x4E0E // 手机 → 配件：蓝牙/USB 标识通知
+    // ---- Беспроводная CarPlay ----
+    const val CARPLAY_AVAILABILITY = 0x4300 // Телефон → Аксессуары: спросите, можете ли вы начать
+    const val CARPLAY_START_SESSION = 0x4301 // Аксессуары → Телефон: Параметры беспроводной сети + Конечная точка AirPlay
+    const val WIRELESS_CARPLAY_UPDATE = 0x4E0D // Мобильный телефон → Аксессуары: Уведомление о доступности беспроводной сети
+    const val DEVICE_TRANSPORT_IDENTIFIER = 0x4E0E // Мобильный телефон → Аксессуары: уведомление о логотипе Bluetooth/USB
 
-    // ---- 设备状态问候（真 iPhone 在 0x4300 之前发送的一批消息）----
-    const val DEVICE_INFORMATION_UPDATE = 0x4E09 // 手机 → 配件：设备名
-    const val DEVICE_LANGUAGE_UPDATE = 0x4E0A // 手机 → 配件：语言
-    const val DEVICE_TIME_UPDATE = 0x4E0B // 手机 → 配件：时间（u64 epoch + u16 tz + u8 dst）
-    const val DEVICE_UUID_UPDATE = 0x4E0C // 手机 → 配件：UUID
+    // ----Приветствие о состоянии устройства (пакет сообщений, отправленных настоящим iPhone до 0x4300)----
+    const val DEVICE_INFORMATION_UPDATE = 0x4E09 // Мобильный телефон → Аксессуары: название устройства
+    const val DEVICE_LANGUAGE_UPDATE = 0x4E0A // Мобильный → Аксессуары: Язык
+    const val DEVICE_TIME_UPDATE = 0x4E0B // Mobile → Аксессуары: Время (u64 эпоха + u16 tz + u8 dst)
+    const val DEVICE_UUID_UPDATE = 0x4E0C // Мобильный → Аксессуары: UUID
 
-    // ---- WiFi 配置交换 ----
-    const val REQUEST_ACCESSORY_WIFI_CONFIGURATION = 0x5702 // 手机 → 配件
-    const val ACCESSORY_WIFI_CONFIGURATION = 0x5703 // 配件 → 手机
+    // ---- Обмен конфигурацией WiFi ----
+    const val REQUEST_ACCESSORY_WIFI_CONFIGURATION = 0x5702 // Мобильный телефон → Аксессуары
+    const val ACCESSORY_WIFI_CONFIGURATION = 0x5703 // Аксессуары → Мобильные телефоны
 
-    // ---- HID（Phase 2：车机触摸回传）----
-    const val START_HID = 0x6800 // 配件 → 手机
-    const val DEVICE_HID_REPORT = 0x6801 // 手机 → 配件（应答）
-    const val ACCESSORY_HID_REPORT = 0x6802 // 配件 → 手机（触摸/旋钮事件）
+    // ---- HID (Этап 2: контактная транзитная связь от автомобиля к машине) ----
+    const val START_HID = 0x6800 // Аксессуары → Мобильные телефоны
+    const val DEVICE_HID_REPORT = 0x6801 // Мобильный телефон → Аксессуары (Ответ)
+    const val ACCESSORY_HID_REPORT = 0x6802 // Аксессуары → Мобильные телефоны (Touch/Knob Events)
     const val STOP_HID = 0x6803
 
-    // ---- MFi 认证（单向：手机验证配件；发送端可跳过校验、自报成功）----
-    const val MFI_REQUEST_CERTIFICATE = 0xAA00 // 手机 → 配件
-    const val MFI_CERTIFICATE = 0xAA01 // 配件 → 手机（参数0=证书）
-    const val MFI_REQUEST_CHALLENGE = 0xAA02 // 手机 → 配件（参数0=挑战 16B）
-    const val MFI_RESPONSE = 0xAA03 // 配件 → 手机（参数0=签名）
-    const val MFI_AUTHENTICATION_FAILED = 0xAA04 // 手机 → 配件
-    const val MFI_AUTHENTICATION_SUCCEEDED = 0xAA05 // 手机 → 配件（自报结果）
+    // ---- Аутентификация MFi (односторонняя: мобильный телефон проверяет аксессуары; отправитель может пропустить
+    // проверку и самостоятельно сообщить об успехе) ----
 
-    // ---- 配件 bring-up 期间发来的订阅请求（接收并忽略即可）----
+    const val MFI_REQUEST_CERTIFICATE = 0xAA00 // Мобильный телефон → Аксессуары
+    const val MFI_CERTIFICATE = 0xAA01 // Аксессуары → Мобильный телефон (параметр 0=сертификат)
+    const val MFI_REQUEST_CHALLENGE = 0xAA02 // Мобильный телефон → Аксессуары (параметр 0=Вызов 16B)
+    const val MFI_RESPONSE = 0xAA03 // Аксессуары → Мобильный телефон (Параметр 0=Подпись)
+    const val MFI_AUTHENTICATION_FAILED = 0xAA04 // Мобильный телефон → Аксессуары
+    const val MFI_AUTHENTICATION_SUCCEEDED = 0xAA05 // Мобильный телефон → Аксессуары (результаты, сообщаемые вами самими)
+
+    // ----Запрос на подписку отправлен во время подключения аксессуара (просто примите и проигнорируйте)----
     const val START_NOW_PLAYING_UPDATES = 0x5000
     const val START_ROUTE_GUIDANCE_UPDATES = 0x5200
     const val START_POWER_UPDATES = 0xAE00
     const val START_COMMUNICATIONS_UPDATES = 0x4157
     const val START_CALL_STATE_UPDATES = 0x4154
 
-    // ---- ExternalAccessory 会话（链路 2 号会话承载 EA 数据；触摸 HID 高概率载体）----
-    const val EA_OPEN_SESSION = 0xEA00 // 手机 → 配件（奥迪可收清单明确支持）
-    const val EA_CLOSE_SESSION = 0xEA01 // 手机 → 配件
-    const val EA_SESSION_STATUS = 0xEA03 // 配件 → 手机（奥迪发送清单明确声明）
+    // ----Сеанс внешнего доступа (сеанс канала № 2 передает данные EA; сенсорный HID-носитель с высокой вероятностью) ----
+    const val EA_OPEN_SESSION = 0xEA00 // Мобильный телефон → Аксессуары (явно поддерживается списком дебиторской задолженности Audi)
+    const val EA_CLOSE_SESSION = 0xEA01 // Мобильный телефон → Аксессуары
+    const val EA_SESSION_STATUS = 0xEA03 // Аксессуары → Мобильные телефоны (четко указано в списке отправки Audi)
 
     fun nameOf(messageId: Int): String =
         when (messageId) {

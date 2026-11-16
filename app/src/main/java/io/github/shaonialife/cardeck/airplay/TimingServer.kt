@@ -4,15 +4,18 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 
 /**
- * AirPlay 计时服务（NTP over RTCP，对照 catplay clock/timing_server.rs + rtcp_timesync.rs）。
+ * Служба синхронизации AirPlay (NTP через RTCP, сравните catplay clock/timing_server.rs + rtcp_timesync.rs).
  *
- * 初始 SETUP 通告本端口（timingPort）；车机（媒体时钟主）向它发 32 字节 timesync 请求，
- * 我们按 NTP 语义应答：t1=回显请求 t3（客户端发送时刻）、t2=本地接收时刻、t3=本地发送时刻。
- * 缺失时序：此前通告 timingPort=0，车机无法与我们同步媒体时钟——屏幕流 SETUP 被 400 的
- * 头号嫌疑（catplay 真车实现始终绑定真实端口）。
+ * начальная НАСТРОЙКА объявляет этот порт (timingPort); автомобильный компьютер (ведущий медиа-часы) отправляет
+ * ему 32-байтовый запрос синхронизации времени,
+ * Мы отвечаем в соответствии с семантикой NTP: t1=эхо-запрос t3 (время отправки клиента), t2=время локального
+ * приема, t3=время локальной отправки.
+ * Отсутствует тайминг: Ранее объявленный таймингПорт=0, машина не может синхронизировать с нами часы мультимедиа
+ * - поток экрана SETUP был 400
+ * — подозреваемый номер один (реализация Catplay в реальном автомобиле всегда привязана к реальному порту).
  *
- * 线格式（大端）：[0x80][pt][length=7][rtp_ts=0][t1(8)][t2(8)][t3(8)]，
- * pt：0xD2 请求 / 0xD3 应答；时间 = NTP 64 位（秒<<32 | 2^32 分数），取自单调时钟。
+ * Формат строки   (с обратным порядком байтов): [0x80][pt][длина=7][rtp_ts=0][t1(8)][t2(8)][t3(8)],
+ * pt: запрос 0xD2 / ответ 0xD3; время = NTP 64 бита (секунды <<32 | 2^32 доли), взятые из монотонных часов.
  */
 class TimingServer(
     private val log: (String) -> Unit = {},
@@ -22,11 +25,11 @@ class TimingServer(
     @Volatile
     private var running = false
 
-    /** 收到的 timesync 请求计数（诊断：车机是否真的来同步媒体时钟）。 */
+    /** Подсчет полученных запросов timesync (диагностика: действительно ли машина синхронизирует медиачасы). */
     private var syncRequests = 0L
     private var lastSyncLogAt = 0L
 
-    /** 非 timesync 包计数（诊断：有没有别的 UDP 报文打到这个端口）。 */
+    /** Подсчет пакетов, не синхронизированных по времени (диагностика: есть ли какие-либо другие UDP-пакеты, попадающие на этот порт). */
     private var unexpected = 0L
 
     val port: Int get() = socket?.localPort ?: 0
@@ -44,7 +47,7 @@ class TimingServer(
             }
             true
         } catch (error: Exception) {
-            log("TIMING: 启动失败 - ${error.message}")
+            log("ВРЕМЯ: Ошибка запуска — ${error.message}")
             false
         }
     }
@@ -62,14 +65,14 @@ class TimingServer(
             try {
                 s.receive(packet)
             } catch (_: Exception) {
-                return // socket closed
+                return // розетка закрыта
             }
             val request = buffer.copyOfRange(0, packet.length)
             val response = buildResponse(request, System.nanoTime())
             if (response == null) {
                 unexpected++
                 if (unexpected <= 5) {
-                    log("TIMING: 收到非 timesync 报文 ${request.size}B（累计 $unexpected）")
+                    log("ВРЕМЯ: получено сообщение без синхронизации времени ${request.size}B (накоплено $unexpected).")
                 }
                 continue
             }
@@ -77,7 +80,7 @@ class TimingServer(
             val now = System.currentTimeMillis()
             if (syncRequests <= 3 || now - lastSyncLogAt >= 30_000L) {
                 lastSyncLogAt = now
-                log("TIMING: timesync 应答 #$syncRequests → ${packet.address.hostAddress}:${packet.port}")
+                log("ВРЕМЯ: ответ синхронизации времени #$syncRequests → ${packet.address.hostAddress}:${packet.port}")
             }
             try {
                 s.send(DatagramPacket(response, response.size, packet.address, packet.port))
@@ -92,8 +95,9 @@ class TimingServer(
         private const val PACKET_BYTES = 32
 
         /**
-         * 构造 timesync 应答；非 timesync 请求返回 null。
-         * [nowNanos]：单调时钟当前值（System.nanoTime 语义，可为任意起点——NTP 差值计算只用相对量）。
+         * Создает ответ синхронизации времени; возвращает значение null для запросов без синхронизации времени.
+         * [nowNanos]: Текущее значение монотонных часов (семантика System.nanoTime может быть любой отправной точкой —
+         * при расчете разницы NTP используются только относительные величины).
          */
         fun buildResponse(
             request: ByteArray,
@@ -112,14 +116,14 @@ class TimingServer(
             response[2] = 0
             response[3] = (PACKET_BYTES / 4 - 1).toByte()
             // rtp_ts(4..8) = 0
-            System.arraycopy(request, 24, response, 8, 8) // t1 = 请求的 t3（ntp_xmit 回显）
+            System.arraycopy(request, 24, response, 8, 8) // t1 = запрошенный t3 (эхо ntp_xmit)
             val now = ntpFromNanos(nowNanos)
-            System.arraycopy(now, 0, response, 16, 8) // t2 = 接收时刻
-            System.arraycopy(now, 0, response, 24, 8) // t3 = 发送时刻
+            System.arraycopy(now, 0, response, 16, 8) // t2 = время приема
+            System.arraycopy(now, 0, response, 24, 8) // t3 = время отправки
             return response
         }
 
-        /** 单调纳秒 → NTP 64 位（秒<<32 | (纳秒分数 * 2^32 / 1e9)），大端 8 字节。 */
+        /** Монотонная наносекунда → NTP 64 бита (секунды <<32 | (доля наносекунды * 2^32 / 1e9)), прямой порядок байтов 8 байт. */
         fun ntpFromNanos(nanos: Long): ByteArray {
             val secs = Math.floorDiv(nanos, 1_000_000_000L)
             val fracNanos = Math.floorMod(nanos, 1_000_000_000L)

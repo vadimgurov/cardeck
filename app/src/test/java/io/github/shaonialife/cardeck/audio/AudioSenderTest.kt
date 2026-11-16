@@ -6,8 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 音频 RTP 封包回环测试：加密后的线格式必须能被「接收端解密路径」逐字节还原
- * （对照 DiPlay `AudioStream.kt`：AAD=头 4..12、密文=12..n-8、nonce=尾 8B 小端）。
+ * аудио-тест RTP-пакета с обратной связью: формат зашифрованной линии должен быть восстановлен побайтно с
+ * помощью «пути расшифровки принимающей стороны»
+ * (Сравните DiPlay `AudioStream.kt`: AAD=head 4..12, зашифрованный текст=12..n-8, nonce=tail 8B с прямым порядком байтов).
  */
 class AudioSenderTest {
     private val key = ByteArray(32) { (it * 7 + 1).toByte() }
@@ -25,18 +26,18 @@ class AudioSenderTest {
         val pcm = ByteArray(AudioSender.PACKET_BYTES) { it.toByte() }
         val wire = sender().sealPacket(pcm, sequence = 0x1234, timestamp = 512, nonceCounter = 0)
 
-        // version=2；PT=100（catplay 直接以 stream type 作 PT）
+        // версия=2; PT=100 (catplay напрямую использует тип потока в качестве PT)
         assertEquals(0x80, wire[0].toInt() and 0xFF)
         assertEquals(100, wire[1].toInt() and 0x7F)
-        // sequence BE
+        // последовательность БЭ
         assertEquals(0x12, wire[2].toInt() and 0xFF)
         assertEquals(0x34, wire[3].toInt() and 0xFF)
-        // timestamp BE = 512
+        // временная метка BE = 512
         assertEquals(0, wire[4].toInt() and 0xFF)
         assertEquals(0, wire[5].toInt() and 0xFF)
         assertEquals(2, wire[6].toInt() and 0xFF)
         assertEquals(0, wire[7].toInt() and 0xFF)
-        // 总长 = 12 头 + 明文 + 16 tag + 8 nonce
+        // Общая длина = 12 заголовков + обычный текст + 16 тегов + 8 одноразовых номеров.
         assertEquals(12 + pcm.size + 16 + 8, wire.size)
     }
 
@@ -45,7 +46,7 @@ class AudioSenderTest {
         val pcm = ByteArray(AudioSender.PACKET_BYTES) { ((it * 13) and 0xFF).toByte() }
         val wire = sender().sealPacket(pcm, sequence = 7, timestamp = 1024, nonceCounter = 42)
 
-        // —— 复刻接收端解密（DiPlay AudioStream.runData + AndroidMediaSink LPCM 路径）——
+        // —— Репликация расшифровки приемника (DiPlay AudioStream.runData + путь AndroidMediaSink LPCM) ——
         val aad = wire.copyOfRange(4, 12)
         val sealedEnd = wire.size - 8
         val sealed = wire.copyOfRange(12, sealedEnd)
@@ -53,15 +54,17 @@ class AudioSenderTest {
         val nonce = ByteArray(12).also { shortNonce.copyInto(it, 4) }
 
         val decrypted = AirPlayCrypto.chachaOpen(key, nonce, sealed, aad)
-        // 线格式为**大端 s16**（接收端会 byteSwapS16 转回小端喂 AudioTrack）：
-        // 解密结果应等于原 PCM 换序，换回后与原 PCM 一致。
-        val receiverPcm = AudioSender.bigEndianS16(decrypted) // 接收端 byteSwapS16（换序是对合运算）
+        // Формат строки — **big endian s16** (принимающая сторона преобразует byteSwapS16 обратно в прямой порядок
+        // байтов для подачи AudioTrack):
+
+        // Результат расшифровки должен быть равен исходному PCM в обратном порядке и будет соответствовать исходному PCM после обмена.
+        val receiverPcm = AudioSender.bigEndianS16(decrypted) // Приемник byteSwapS16 (подкачка — операция инволюции)
         assertArrayEquals(pcm, receiverPcm)
     }
 
     @Test
     fun wirePayloadIsByteSwappedRelativeToCapture() {
-        val pcm = byteArrayOf(0x34, 0x12, 0x78, 0x56) // 小端样本 0x1234, 0x5678
+        val pcm = byteArrayOf(0x34, 0x12, 0x78, 0x56) // Образцы с прямым порядком байтов 0x1234, 0x5678
         val wire = sender().sealPacket(pcm, sequence = 0, timestamp = 0, nonceCounter = 0)
         val decrypted =
             AirPlayCrypto.chachaOpen(
@@ -70,7 +73,7 @@ class AudioSenderTest {
                 wire.copyOfRange(12, wire.size - 8),
                 wire.copyOfRange(4, 12),
             )
-        // 线上应为大端：0x12 0x34 0x56 0x78
+        // Строка должна быть с прямым порядком байтов: 0x12 0x34 0x56 0x78
         assertArrayEquals(byteArrayOf(0x12, 0x34, 0x56, 0x78), decrypted)
     }
 
@@ -81,7 +84,9 @@ class AudioSenderTest {
         val second = sender().sealPacket(pcm, 0, 0, nonceCounter = 1)
         val cipherA = first.copyOfRange(12, first.size - 8)
         val cipherB = second.copyOfRange(12, second.size - 8)
-        // 明文相同但 nonce 递增：密文必须不同（防 nonce 复用）
+        // Открытый текст тот же, но nonce увеличивается: зашифрованный текст должен быть другим (чтобы предотвратить
+        // повторное использование nonce).
+
         org.junit.Assert.assertFalse(cipherA.contentEquals(cipherB))
     }
 }

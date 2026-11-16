@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- dock 回桌面按钮：描边房屋（对照设计原型；替换原先过小的「⌂」字符） -->
+<!-- кнопка возврата на рабочий стол: обведите дом (сравните дизайн-прототип; замените исходный символ «⌂», который слишком мал) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="16dp"
     android:height="16dp"

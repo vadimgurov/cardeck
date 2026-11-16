@@ -1,22 +1,22 @@
-#!/bin/sh
-# 提交前拦截：作者邮箱白名单 + 自动格式化 + Android Lint。
-# 按仓库约定通过 `git config core.hooksPath .githooks` 启用（克隆后执行一次）。
+#!/бин/ш
+# Перехват перед отправкой: белый список адресов электронной почты автора + автоматическое форматирование + Android Lint.
+# Включить через `git config core.hooksPath .githooks` согласно соглашению хранилища (выполнить один раз после клонирования).
 set -eu
 cd "$(git rev-parse --show-toplevel)"
 
-# 0) 作者邮箱守门：本仓库是公开仓库，**禁止**把公司/私人邮箱写进提交历史
-#    （提交一旦推送就无法真正撤回，且 GitHub 会永久索引作者邮箱）。
-#    允许列表写在这里，新增合法身份时同步修改。
+# 0) Контроль электронной почты автора: этот репозиторий является общедоступным, и **не разрешено** записывать корпоративные/частные адреса электронной почты в историю отправки.
+#    (После отправки коммита его невозможно отозвать, и GitHub постоянно индексирует адрес электронной почты автора).
+#    Разрешенный список написан здесь и будет изменен одновременно с добавлением юридических лиц.
 ALLOWED_EMAIL_DOMAIN="users.noreply.github.com"
 AUTHOR_EMAIL=$(git config user.email || echo "")
 case "$AUTHOR_EMAIL" in
 *"@$ALLOWED_EMAIL_DOMAIN") ;;
 *)
     echo ""
-    echo "✗ 提交被拦截：当前 user.email = '${AUTHOR_EMAIL}'"
-    echo "  本仓库只允许 *@${ALLOWED_EMAIL_DOMAIN} 形式的邮箱（公开仓库，避免泄露公司邮箱）。"
-    echo "  修复：git config user.email '16135960+shaonialife@users.noreply.github.com'"
-    echo "  （本仓库 .git/config 应已设置；若被覆盖，检查是否用了 --global 或环境变量）"
+    echo "✗ Отправка заблокирована：текущий user.email = '${AUTHOR_EMAIL}'"
+    echo "  Этот склад позволяет только *@${ALLOWED_EMAIL_DOMAIN} формировать почтовый ящик（публичный репозиторий，Избегайте утечки электронной почты компании）。"
+    echo "  Ремонт：git config user.email '16135960+shaonialife@users.noreply.github.com'"
+    echo "  （Этот склад .git/config должен был быть установлен；если покрыто，Проверьте, используется ли --global или переменные среды）"
     echo ""
     exit 1
     ;;
@@ -25,35 +25,35 @@ esac
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 [ -z "$STAGED" ] && exit 0
 
-# 1) 格式化：仅当暂存了 Kotlin / Gradle 脚本
+# 1) Формат: только если сценарий Kotlin/Gradle подготовлен.
 if printf '%s\n' "$STAGED" | grep -qE '\.(kt|kts)$'; then
-    echo "▶ 提交前检查：代码格式化（spotlessApply）..."
+    echo "▶ Проверьте перед отправкой：Форматирование кода（spotlessApply）..."
     ./gradlew --console=plain -q spotlessApply
 
-    # 仅把「本来就暂存过、且被格式化改动」的文件重新加入暂存区
+    # Добавляйте повторно только те файлы, которые были «уже временно сохранены и изменены путем форматирования» во временное хранилище.
     for f in $STAGED; do
         case "$f" in
         *.kt | *.kts)
             if ! git diff --quiet -- "$f" 2>/dev/null; then
                 git add -- "$f"
-                echo "  已自动格式化并重新暂存: $f"
+                echo "  Автоматически форматируется и переустанавливается: $f"
             fi
             ;;
         esac
     done
 fi
 
-# 2) Lint：仅当暂存了源码/资源/构建脚本（存量问题已在 lint-baseline.xml 豁免）
+# 2) Lint: только тогда, когда исходный код/ресурсы/скрипты сборки временно сохранены (проблема со стандартом исключена в lint-baseline.xml)
 if printf '%s\n' "$STAGED" | grep -qE '^(app/src/|[^ ]*\.gradle\.kts$|gradle\.properties$)'; then
-    echo "▶ 提交前检查：Android Lint（lintStandardDebug）..."
+    echo "▶ Проверьте перед отправкой：Android Lint（lintStandardDebug）..."
     if ./gradlew --console=plain -q :app:lintStandardDebug; then
-        echo "✓ lint 通过"
+        echo "✓ lint Пройти"
     else
         echo ""
-        echo "✗ lint 检查未通过，本次提交已被拦截。"
-        echo "  报告: app/build/reports/lint-results-debug.html"
-        echo "  修复问题后重试；若确认为误报，可在 app/build.gradle.kts 的 lint 块中"
-        echo "  按 issue id 关闭，或经评审后更新基线（./gradlew :app:updateLintBaseline）。"
+        echo "✗ lint Проверка не удалась，Эта заявка заблокирована。"
+        echo "  отчет: app/build/reports/lint-results-debug.html"
+        echo "  Устраните проблему и повторите попытку；Если это подтверждается как ложная тревога，Доступно на app/build.gradle.kts из lint блокировать"
+        echo "  нажать issue id закрыть，Или обновите базовый уровень после проверки.（./gradlew :app:updateLintBaseline）。"
         exit 1
     fi
 fi

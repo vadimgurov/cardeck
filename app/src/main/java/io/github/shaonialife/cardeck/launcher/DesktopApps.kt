@@ -3,27 +3,28 @@ package io.github.shaonialife.cardeck.launcher
 import android.content.Context
 
 /**
- * 桌面应用选择（SharedPreferences 持久化）。
+ * Выбор настольного приложения (сохранение SharedPreferences).
  *
- * 默认（用户从未设置过）：只显示已安装的地图应用（高德/百度/腾讯；
- * 对照用户要求「默认显示高德、百度等地图」）；用户一旦在设置页勾选过，
- * 以显式选择为准（含「全部取消」这种状态）。
+ * По умолчанию (никогда не устанавливается пользователем): отображает только установленные картографические приложения (Amap/Baidu/Tencent;
+ * Сравните требования пользователя («по умолчанию отображать карты, такие как Amap и Baidu»); как только
+ * пользователь установит флажок на странице настроек,
+ * подлежит явному выбору (включая статус «Отменить все»).
  */
 object DesktopApps {
     private const val PREFS_NAME = "settings"
     private const val KEY_SELECTED = "desktopApps"
 
-    /** 默认勾选的地图应用包名。 */
+    /** Имя пакета картографического приложения, которое отмечено по умолчанию. */
     private val MAP_PACKAGES =
         setOf(
-            "com.autonavi.amapauto", // 高德地图车机版
-            "com.baidu.naviauto", // 百度地图车机版
-            "com.autonavi.minimap", // 高德地图
-            "com.baidu.BaiduMap", // 百度地图
-            "com.tencent.map", // 腾讯地图
+            "com.autonavi.amapauto", // Автомобильная версия Amap
+            "com.baidu.naviauto", // Версия автомобиля карты Baidu
+            "com.autonavi.minimap", // Карта Гаоде
+            "com.baidu.BaiduMap", // Карта Байду
+            "com.tencent.map", // Карта Тенсента
         )
 
-    /** 当前应显示在桌面上的应用（component flattenToString 集合）。 */
+    /** Приложение, которое в данный момент должно отображаться на рабочем столе (коллекция компонента FlattenToString). */
     fun selected(
         context: Context,
         apps: List<VirtualLauncher.AppEntry>,

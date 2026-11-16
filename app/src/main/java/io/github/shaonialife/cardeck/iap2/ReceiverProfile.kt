@@ -3,45 +3,55 @@ package io.github.shaonialife.cardeck.iap2
 import io.github.shaonialife.cardeck.net.AirPlayFeatures
 
 /**
- * **车机画像**：把散落的版本/能力信号收口成一份可解释的判定。
+ * **Портрет автомобиля и машины**: Объедините разрозненные сигналы о версии/возможностях в интерпретируемое суждение.
  *
- * 信号来自三处、到达时机不同：0x1D01 身份帧（蓝牙 bring-up 早期）、mDNS/`/info` 的
- * features 与 srcvers（端点解析期）、实车行为（挑战长度/拆链特征，走既有 Memory 学习）。
- * 每次有新信号到达都可重算——[classify] 是纯函数，同一输入恒同一输出。
+ * Сигнал   поступает из трех мест с разным временем прибытия: идентификационный кадр 0x1D01 (раннее подключение Bluetooth), mDNS/`/info`.
+ * Функции и источники   (период анализа конечной точки), реальное поведение транспортного средства (функция
+ * длины вызова/отключения цепочки, отслеживание существующего обучения памяти).
+ * можно пересчитывать каждый раз при поступлении нового сигнала — [classify] — это чистая функция, один и тот же
+ * вход всегда имеет один и тот же выход.
  *
- * 两条铁律（HID 描述符教训的推广）：
- *  1. **按能力分支，不按版本号/品牌硬编码**——srcvers/features 只做先验提示，
- *     真正分派以能力清单（收/发清单、audioFormats、hidDescriptors）与实测行为为准；
- *  2. **判定必须可解释**——[describe] 把依据写进日志，判错时一眼能看出是哪条信号误导。
+ * Два железных закона (обобщение уроков HID-дескрипторов):
+ * 1. **Ветвь по возможностям, не жестко запрограммированная по номеру версии/торговой марке** —
+ * источники/функции дают только априорные подсказки,
+ * Фактическое распределение   зависит от списка возможностей (список приема/получения, audioFormats,
+ * hidDescriptors) и фактического измеренного поведения;
+ * 2. **Решение должно быть объяснимым** —— [describe] Запишите доказательства в журнал, и вы сможете сразу
+ * увидеть, какой сигнал вводит в заблуждение, когда суждение неверно.
  */
 object ReceiverProfile {
-    /** 三时代（对照 catplay 分类，§9f）。UNKNOWN = 信号缺失，保持旧路径不激进。 */
+    /** Три возраста (ср. классификацию кошачьих игр, §9f). НЕИЗВЕСТНО = Потеря сигнала, сохраняйте старый путь неагрессивным. */
     enum class Era { PRE_HOMEKIT, OPTIONAL_PAIRING, MODERN, UNKNOWN }
 
-    /** WiFi 凭据交换协议代际（PR #10 的分派依据，收口进画像）。 */
+    /** Генерация протокола обмена учетными данными WiFi (основа назначения для PR № 10, изображение импорта). */
     enum class WifiGen { LEGACY, NEW, UNKNOWN }
 
     /**
-     * iAP2 虚拟链路代际（2026-10-23 判定，纯函数）。
+     * Генерация виртуального канала iAP2 (решение 23 октября 2026 г., чистая функция).
      *
-     * **2026-10-23 二次定谳：代际不再分派 marker 行为**——所有车机都必须完成链路
-     * 协商（marker = 车机在等我们的会话表，1Hz 无限重发；不回应则链路到不了
-     * NORMAL，RECORD 后 ~10s 被拆：0.1.9 实测 10.17s、0.1.17 车主实测 10.18s）。
-     * 曾据此对 CLASSIC_MIB3 忽略 marker（0.1.16/0.1.17），其依据「0.1.9 忽略 marker
-     * 时奥迪照常进入」被 0.1.9 自己的日志推翻；「协商挂起车机 UI」的真因是协商完成
-     * 后缺 modesChanged 资源重申（AADisplay r17 时序）。判定保留用于日志与未来
-     * 分派（如 MFi 挑战长度先验、隧道内消息差异）。
+     * **23 октября 2026 г. Второе решение: поведение маркера больше не будет распределяться между поколениями** —
+     * все транспортные средства должны завершить ссылку
+     * Переговоры       (маркер = машина ожидает нашей таблицы сеансов, бесконечная повторная передача 1 Гц; если
+     * ответа нет, ссылка недоступна
+     * NORMAL, удалено через ~10 с после ЗАПИСИ: 0.1.9 измерял 10,17 с, 0.1.17 владелец измерял 10,18 с).
+     * игнорировал маркер (0.1.16/0.1.17) для CLASSIC_MIB3 на основе этого, который был основан на «0.1.9 игнорировать маркер
+     * «Audi входит как обычно, когда      » был отменен собственным журналом 0.1.9; настоящая причина «Переговоров о
+     * приостановке работы пользовательского интерфейса автомобиля» заключается в том, что переговоры завершены.
+     * Отсутствующие режимы. Изменено переопределение ресурсов после       (тайминг AADisplay r17). Решение оставлено
+     * для журналов и будущего
+     * Отправка       (например, предварительная длина запроса MFi, дисперсия сообщения внутри туннеля).
      *
-     * 判据（全部来自协议自报，零品牌猜测之外的新依赖）：
-     * DELPHI 制造 + AUDI 型号 + 稀疏清单（合计 <10 项，实测 2+5）→ CLASSIC_MIB3。
-     * 三条同时命中才算——单条都可能误伤（清单稀疏的其它车机、非奥迪的 DELPHI 件）。
-     * 其余一切（含未知车机）→ EVENT_LINK。
+     * Критерии       (все из протокола самоотчета, никаких новых оснований, кроме спекуляций о бренде):
+     * Марка DELPHI + модель AUDI + разреженный список (всего <10 позиций, измерено 2+5) → CLASSIC_MIB3.
+     * засчитывается только в том случае, если три из них попали одновременно - любой из них может быть случайно
+     * поврежден (другие автомобили с немногочисленным списком, детали не Audi DELPHI).
+     * Все остальное (в том числе неизвестные автомобили и машины) → EVENT_LINK.
      */
     enum class LinkGeneration { CLASSIC_MIB3, EVENT_LINK }
 
     /**
-     * 从 0x1D01 自报信号判定链路代际（见 [LinkGeneration] 文档）。
-     * 信号不足（清单未提供/身份缺失）→ EVENT_LINK（0.1.13 前兼容行为）。
+     * определяет генерацию канала на основе сигнала самоотчета 0x1D01 (см. документ [LinkGeneration]).
+     * Недостаточный сигнал (манифест не предоставлен/отсутствует идентификатор) → EVENT_LINK (поведение, совместимое с версиями до 0.1.13).
      */
     fun linkGenerationOf(signals: Signals): LinkGeneration {
         val manufacturer = signals.manufacturer?.lowercase().orEmpty()
@@ -56,27 +66,27 @@ object ReceiverProfile {
         }
     }
 
-    /** 画像输入：全字段可空——信号到多少算多少。 */
+    /** Ввод изображения: Все поля можно оставить пустыми — столько сигналов, сколько есть. */
     data class Signals(
         val name: String? = null,
         val model: String? = null,
         val manufacturer: String? = null,
-        /** AirPlay features 位图（mDNS TXT / /info）；null = 未取到。 */
+        /** AirPlay поддерживает растровое изображение (mDNS TXT//info); ноль = не получено. */
         val features: Long? = null,
-        /** AirPlay 栈版本（mDNS TXT srcvers / 0x4301 sourceVersion）。 */
+        /** Версия стека AirPlay (mDNS TXT srcvers/0x4301 sourceVersion). */
         val srcvers: String? = null,
-        /** 0x1D01 参数 6：车机声明「会发送」的消息号清单；null = 未提供。 */
+        /** 0x1D01 Параметр 6: Список номеров сообщений, которые автомобиль заявляет «отправит»; ноль = не указано. */
         val sendIds: Set<Int>? = null,
-        /** 0x1D01 参数 7：车机声明「可接收」的消息号清单；null = 未提供。 */
+        /** 0x1D01 Параметр 7: Список номеров сообщений, которые автомобиль объявляет «подлежащими получению»; ноль = не указано. */
         val receiveIds: Set<Int>? = null,
     )
 
     data class Profile(
         val era: Era,
         val wifiGen: WifiGen,
-        /** 身份键（与 MfiLengthMemory/AudioProfileMemory 同源，后续 Memory 并表用）。 */
+        /** Ключ идентификации (того же происхождения, что и MfiLengthMemory/AudioProfileMemory, позже используемый в сочетании с Memory). */
         val identityKey: String,
-        /** 判定依据（可解释性：每条结论对应的信号原文）。 */
+        /** Основа суждения (интерпретируемость: исходный текст сигнала, соответствующий каждому выводу). */
         val reasons: List<String>,
     )
 
@@ -87,46 +97,56 @@ object ReceiverProfile {
             when {
                 pairing == null -> Era.UNKNOWN
                 !pairing -> {
-                    reasons += "features(${signals.features?.let { "0x${it.toString(16)}" } ?: "?"}) 无 bit38=HK_PAIRING_AND_ENCRYPT"
+                    reasons += "features(${signals.features?.let { "0x${it.toString(16)}" } ?: "?"}) Нет bit38=HK_PAIRING_AND_ENCRYPT"
                     Era.PRE_HOMEKIT
                 }
 
                 else -> {
-                    reasons += "features bit38=HK_PAIRING_AND_ENCRYPT 已声明"
+                    reasons += "функции bit38=HK_PAIRING_AND_ENCRYPT объявлены"
                     Era.MODERN
                 }
             }
         if (signals.srcvers != null) reasons += "srcvers=${signals.srcvers}"
         if (era != Era.PRE_HOMEKIT && signals.srcvers != null) {
-            // 先验提示（不改变判定）：老版本号 + 未声明配对 → v280 可选配对档
+            // Априорная подсказка (не меняет решения): старый номер версии + необъявленное сопряжение → дополнительный файл
+            // сопряжения v280.
+
             val v = signals.srcvers.toDoubleOrNull()?.let { (it * 100).toInt() } ?: 0
-            if (v in 1..36599 && era == Era.UNKNOWN) reasons += "srcvers 提示 v280 可选配对档（仅先验）"
+            if (v in 1..36599 && era == Era.UNKNOWN) reasons += "srcvers подсказывает дополнительный файл сопряжения v280 (только априори)"
         }
 
         val wifiGen =
             when {
                 signals.sendIds == null && signals.receiveIds == null -> {
-                    reasons += "0x1D01 未提供收/发清单"
+                    reasons += "0x1D01 Список получателей/получателей не предоставлен."
                     WifiGen.UNKNOWN
                 }
 
                 signals.sendIds?.contains(Iap2MessageIds.ACCESSORY_WIFI_CONFIGURATION) == true ||
                     signals.receiveIds?.contains(Iap2MessageIds.REQUEST_ACCESSORY_WIFI_CONFIGURATION) == true -> {
-                    reasons += "清单声明 0x5703/0x5702（旧协议在场）"
+                    reasons += "Оператор манифеста 0x5703/0x5702 (присутствует старый протокол)"
                     WifiGen.LEGACY
                 }
 
                 (signals.sendIds?.size ?: 0) + (signals.receiveIds?.size ?: 0) >= 10 -> {
-                    // 清单齐且相当完整仍无 0x5703/0x5702——BMW iD9 形态（两清单均 10+ 项）。
-                    // 不能仅凭「未声明」判新：奥迪清单只列 CarPlay 生命周期消息（实测
-                    // 发送清单 2 项/可收 5 项，均无 0x57xx），但旧协议工作正常——
-                    // 稀疏清单不算数，保守 UNKNOWN 走旧协议（0x5703 有超时兜底）
-                    reasons += "清单完整（${(signals.sendIds?.size ?: 0) + (signals.receiveIds?.size ?: 0)} 项）仍无 0x5703/0x5702——AP 信息由 0x4301 提供"
+                    // Листинги полные и достаточно полные, но формы 0x5703/0x5702 – BMW iD9 до сих пор нет (в обоих листингах более
+                    // 10 позиций).
+
+                    // Вы не можете судить о новинке по «необъявленному»: в списке Audi указана только информация о жизненном цикле
+                    // CarPlay (фактический тест
+
+                    // Список отправки 2 элемента/получение 5 элементов, ни одного 0x57xx), но старый протокол работает нормально——
+                    // Разреженные списки не учитываются, консервативный UNKNOWN использует старый протокол (0x5703 имеет тайм-аут)
+                    reasons +=
+                        "Полный список (элементы ${(signals.sendIds?.size ?: 0) + (signals.receiveIds?.size ?: 0)}) все " +
+                        "еще отсутствует 0x5703/0x5702 — параметры точки доступа предоставляются через 0x4301"
                     WifiGen.NEW
                 }
 
                 (signals.sendIds != null || signals.receiveIds != null) -> {
-                    reasons += "清单稀疏且未声明 0x5703/0x5702——不构成「新协议」证据，保守按旧协议（超时兜底）"
+                    reasons +=
+                        "Список скуден и необъявлен 0x5703/0x5702 — не является свидетельством «нового соглашения», " +
+                        "консервативно следуйте старому соглашению (гарантия тайм-аута)"
                     WifiGen.UNKNOWN
                 }
 
@@ -135,7 +155,7 @@ object ReceiverProfile {
         return Profile(era, wifiGen, identityKeyOf(signals), reasons)
     }
 
-    /** 身份原文（name+model+manufacturer，与 0x1D01 逐字一致；空档跳过）。 */
+    /** Исходный идентификационный текст (имя+модель+производитель, дословно соответствует 0x1D01; пробелы пропускаются). */
     fun identityKeyOf(signals: Signals): String =
         listOfNotNull(
             signals.name?.takeIf { it.isNotBlank() },
@@ -143,8 +163,8 @@ object ReceiverProfile {
             signals.manufacturer?.takeIf { it.isNotBlank() },
         ).joinToString(" ").ifBlank { "unknown" }
 
-    /** 一行可读判定（进文件日志）。 */
+    /** Одна строка доступна для чтения (в файл журнала). */
     fun describe(profile: Profile): String =
         "PROFILE: era=${profile.era} wifiGen=${profile.wifiGen} key=${MfiLengthMemory.receiverKey(profile.identityKey)}" +
-            " 依据[" + profile.reasons.joinToString("；") + "]"
+            " На основе [" + profile.reasons.joinToString("；") + "]"
 }

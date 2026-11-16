@@ -11,22 +11,26 @@ import java.net.ServerSocket
 import kotlin.concurrent.thread
 
 /**
- * 「奥迪 MMI 3315_5GHz 首连必拒」回放测试（2026-10-21 真机 sysdiagnose，
- * docs/PROTOCOL-NOTES.md §13a）：车机在自身就绪窗口内对配对请求一律 403
- * （真 iPhone 的 pair-verify 通过后照样在认证段被 403，18~20s 后车机自动
- * 重邀、第二次即成）。
+ * Тест воспроизведения «Audi MMI 3315_5 ГГц должен быть отклонен при первом подключении» (системная диагностика
+ * реальной машины 21 октября 2026 г.,
+ * docs/PROTOCOL-NOTES.md §13a): Транспортное средство всегда отвечает на 403 для запросов на сопряжение в
+ * пределах своего собственного окна готовности.
+ * (После прохождения проверки пары настоящего iPhone в разделе аутентификации по-прежнему будет 403, и телефон
+ * автоматически включится через 18–20 секунд.
+ * Повторное приглашение, второй раз будет принято).
  *
- * 脚本化接收端 = 回环 ServerSocket，对所有 pair-setup / pair-verify 请求
- * 恒回 `HTTP/1.1 403 Forbidden`，驱动真实 [AirPlayClient] 配对循环，断言：
- *  1. `pairingForbidden` 被置位（verify/认证段的 403 也要标记——旧实现只认
- *     pair-setup 段，导致主控误走「断 BT 重试」与「明文降级」两条歧路）；
- *  2. 退避节奏：403 后 ≥4.5s 才进入下一轮尝试（5s 退避，见
- *     [pairingRetryBackoffMs]），不再以 500ms 猛攻可能重置车机就绪状态机；
- *  3. 12s 窗口内 2~4 轮尝试、不产出密钥（对 403 车机没有可成功的路径）。
+ * Приемник с поддержкой сценариев   = ServerSocket обратной связи для всех запросов на настройку пары/проверку пары
+ * всегда возвращает `HTTP/1.1 403 Forbidden`, запуская реальный цикл сопряжения [AirPlayClient], утверждая:
+ * 1. Установлен `pairingForbidden` (403 в разделе проверки/аутентификации также необходимо отметить — старая реализация распознает только
+ * раздел парной настройки  , из-за которого основной элемент управления ошибочно выбирает два неправильных пути:
+ * «отключение BT и повторная попытка» и «понижение версии с открытым текстом»);
+ * 2. Ритм отсрочки: ≥4,5 с после 403 перед переходом к следующему раунду попыток (5 с отсрочка, см.
+ * [pairingRetryBackoffMs]), больше невозможно сбросить машину состояния готовности машины атакой 500 мс;
+ * 3. 2–4 раунда попыток в течение 12 секунд, ключ не генерируется (для 403 транспортных средств нет успешного пути).
  */
 class ForbiddenAudiReplayTest {
     @Test
-    fun `首连 403 窗口 - 标记 forbidden 并按 5s 退避重试`() {
+    fun `первая компания 403 окно - отметка forbidden и нажмите 5s Отступите и повторите попытку`() {
         val server = ServerSocket(0, 16, InetAddress.getLoopbackAddress())
         val requestAtNs = ArrayList<Long>()
         val lock = Any()
@@ -46,7 +50,8 @@ class ForbiddenAudiReplayTest {
                         val out = s.getOutputStream()
                         try {
                             while (true) {
-                                val head = readHead(input) ?: break // 连接关闭：回到 accept 等下一连接
+                                // Соединение закрыто: ждать следующего клиента.
+                                val head = readHead(input) ?: break
                                 val length =
                                     Regex("Content-Length: *(\\d+)", RegexOption.IGNORE_CASE)
                                         .find(head)
@@ -55,7 +60,11 @@ class ForbiddenAudiReplayTest {
                                         ?.toIntOrNull() ?: 0
                                 if (length > 0) skipFully(input, length)
                                 synchronized(lock) { requestAtNs.add(System.nanoTime()) }
-                                // 必须回显 CSeq：客户端按 CSeq 派发应答，缺了会当 10s 超时
+                                // CSeq должен быть отражен: клиент отправляет ответ в соответствии с CSeq. If it is missing, it will time
+                                // out
+                                // in
+                                // 10s.
+
                                 val cseq =
                                     Regex("CSeq: *(\\d+)", RegexOption.IGNORE_CASE)
                                         .find(head)
@@ -68,7 +77,7 @@ class ForbiddenAudiReplayTest {
                                 out.flush()
                             }
                         } catch (_: Exception) {
-                            // 客户端断开换新连接（403 快路径行为），继续服务
+                            // Клиент отключает новое соединение (ошибка 403 быстрого пути) и продолжает обслуживание.
                         }
                     }
                 }
@@ -95,24 +104,26 @@ class ForbiddenAudiReplayTest {
                 runCatching { acceptor.join(1_000) }
             }
 
-        assertNull("403 窗口内不可能建立密钥", keys)
-        assertTrue("verify/认证段的 403 也必须置位 pairingForbidden", client.pairingForbidden)
+        assertNull("403 Невозможно создать ключ в окне", keys)
+        assertTrue("verify/Раздел аутентификации 403 Также необходимо установить pairingForbidden", client.pairingForbidden)
         assertTrue(client.attemptedPairing)
 
         val stamps =
             synchronized(lock) { requestAtNs.sorted() }.map { it / 1_000_000 }
-        assertTrue("请求过少（${stamps.size} 次）——循环未真正轮转", stamps.size >= 4)
-        // 轮次聚类：同轮内 setup→verify 两条请求间隔 <3s，轮与轮之间 ≥4.5s（5s 退避）
+        assertTrue("Слишком мало запросов（${stamps.size} раз）——Петля на самом деле не вращается", stamps.size >= 4)
+        // Кластеризация раундов: настройка → проверка, интервал между двумя запросами в одном раунде составляет <3 с, а
+        // интервал между раундами составляет ≥4,5 с (задержка 5 с).
+
         val cycles = ArrayList<Long>()
         for (i in stamps.indices) {
             if (i == 0 || stamps[i] - stamps[i - 1] >= 3_000) cycles.add(stamps[i])
         }
-        assertTrue("轮次 ${cycles.size}（期望 2~4）", cycles.size in 2..4)
+        assertTrue("раунды ${cycles.size}（Ожидание 2~4）", cycles.size in 2..4)
         val gaps = cycles.zipWithNext { a, b -> b - a }
-        assertTrue("轮间退避不足（$gaps ms，期望 ≥4500）", gaps.all { it >= 4_500 })
+        assertTrue("Недостаточный холостой ход между поворотами.（$gaps ms，Ожидание ≥4500）", gaps.all { it >= 4_500 })
     }
 
-    /** 读到 HTTP 头结束（\r\n\r\n）；连接关闭返回 null。 */
+    /** Прочтите конец HTTP-заголовка (\r\n\r\n); вернуть ноль, когда соединение закрыто. */
     private fun readHead(input: InputStream): String? {
         val buf = StringBuilder()
         val chunk = ByteArray(1)

@@ -11,22 +11,28 @@ import android.text.StaticLayout
 import android.text.TextPaint
 
 /**
- * 「强制横屏未生效」提示：探测 + 几何计算 + 提示卡绘制。
+ * Подсказка «Принудительное горизонтальное отображение экрана не действует»: обнаружение + геометрический расчет
+ * + подсказка по рисованию карты.
  *
- * 场景（2026-10-18 真机复现）：应用先运行，连接车机后 am compat 写入强制横屏。
- * `am compat` 确实杀了进程，但系统恢复任务时 ActivityRecord 仍按旧的竖屏配置
- * 重建（`displayChangedWithoutRestart=true`），于是应用继续以 letterbox 竖窗运行。
- * 此时唯一的修复手段是 force-stop 后重新启动——提示卡让用户一键完成。
+ * Сценарий   (воспроизведен на реальной машине 18 октября 2026 г.): приложение запускается первым, а после
+ * подключения к машине и машине пишется am compat для принудительного горизонтального экрана.
+ * `am compat` завершает процесс, но когда система возобновляет выполнение задачи, ActivityRecord все еще
+ * настроен на старом вертикальном экране.
+ * перестраивается (`displayChangedWithoutRestart=true`), поэтому приложение продолжает работать в вертикальном окне почтового ящика.
+ * В настоящее время единственным способом восстановления является принудительная остановка и последующий
+ * перезапуск: карточка с подсказкой позволяет пользователю завершить ремонт одним щелчком мыши.
  *
- * 探测数据全部来自 `dumpsys activity activities`（无默认值、无估算）：
- *   `bounds=Rect(...)`        letterbox 内窗（应用实际窗口）四边
- *   `mMaxBounds=Rect(...)`    letterbox 外框（虚拟屏可用区域）
- * 两者之差就是左右（竖屏车机为上下）黑边。系统同时给出 `isLetterboxRunning`
- * 与 `letterboxReason`，据此只对「方向锁导致的 letterbox」提示，
- * 不打扰用户本来就想竖窗显示的应用、也不误报宽高比类 letterbox。
+ * Все данные обнаружения   поступают от `dumpsys activity activities` (без значения по умолчанию, без оценки):
+ * `bounds=Rect(...)` внутреннее окно почтового ящика (фактическое окно приложения) с четырех сторон
+ * `mMaxBounds=Rect(...)` Рамка почтового ящика (доступная область виртуального экрана)
+ * Разница между   и двумя моделями заключается в черных границах слева и справа (верхняя и нижняя для моделей с
+ * вертикальным экраном). Система также выдает `isLetterboxRunning`
+ * и `letterboxReason` соответственно только выдают сообщение "почтовый ящик вызван блокировкой ориентации",
+ * не нарушает работу приложений, которые пользователи изначально хотят отображать в вертикальных окнах, а также
+ * не сообщает ложных пропорций, например почтовый ящик.
  */
 
-/** 简单整数矩形（避免 android.graphics.Rect 在 JVM 单测里是空实现）。 */
+/** Простой целочисленный прямоугольник (чтобы избежать пустой реализации android.graphics.Rect в одиночном тесте JVM). */
 internal data class PixelBounds(
     val left: Int,
     val top: Int,
@@ -37,17 +43,17 @@ internal data class PixelBounds(
     val height: Int get() = bottom - top
 }
 
-/** `dumpsys activity activities` 里某块屏顶层 Activity 的相关事实。 */
+/** Факты, связанные с максимальной активностью определенного экрана в `dumpsys activity activities`. */
 internal data class LetterboxActivity(
     val packageName: String,
-    /** `包/类` 形式，可直接 `am start -n`。 */
+    /** Форма `пакет/класс`, может быть непосредственно `am start -n`. */
     val component: String,
     val displayId: Int,
     val letterboxed: Boolean,
     val letterboxReason: String?,
-    /** 应用窗口矩形（`bounds=`）。 */
+    /** Примените прямоугольник окна (`bounds=`). */
     val inner: PixelBounds,
-    /** 该屏可用区域矩形（`mMaxBounds=`；缺失时用调用方给的屏尺寸）。 */
+    /** Доступная область экрана — прямоугольная (`mMaxBounds=`; если она отсутствует, используйте размер экрана, указанный вызывающим абонентом). */
     val full: PixelBounds,
 )
 
@@ -60,12 +66,12 @@ private val boundsRegex = Regex("""^\s+bounds=Rect\((-?\d+), (-?\d+) - (-?\d+), 
 private val maxBoundsRegex = Regex("""mMaxBounds=Rect\((-?\d+), (-?\d+) - (-?\d+), (-?\d+)\)""")
 
 /**
- * 解析指定虚拟屏顶层 Activity 的 letterbox 事实。
+ * анализирует факт почтового ящика, определяющий активность виртуального экрана верхнего уровня.
  *
- * @param displayId 目标屏
- * @param dump `dumpsys activity activities` 原始输出
- * @param fallbackW/[fallbackH] `mMaxBounds` 缺失时的屏尺寸兜底（调用方持有的事实，
- *        不是常量默认值——仍能算出左右黑边）
+ * @param целевой экран displayId
+ * @param дамп необработанных выходных данных `dumpsys activity activities`
+ * @param запасной вариантW/[fallbackH] `mMaxBounds` Размер экрана при его отсутствии (факт, удерживаемый вызывающим абонентом,
+ * не является постоянным значением по умолчанию — левую и правую черные полосы все равно можно рассчитать)
  */
 internal fun parseTopLetterboxActivity(
     displayId: Int,
@@ -87,9 +93,9 @@ internal fun parseTopLetterboxActivity(
         }
     }
     if (sectionStart < 0) return null
-    // 只取目标 display 段，避免把别的屏的 Hist 块带进来
+    // Берите только целевой сегмент дисплея, чтобы не включать блоки Hist других экранов.
     val section = lines.subList(sectionStart + 1, sectionEnd)
-    // 顶层任务：段内第一个 topResumedActivity（任务按从顶到底输出）
+    // Задача верхнего уровня: первая topResumedActivity в сегменте (вывод задач осуществляется сверху вниз)
     var topHash: String? = null
     var topPkg: String? = null
     var topCls: String? = null
@@ -100,8 +106,8 @@ internal fun parseTopLetterboxActivity(
         topCls = match.groupValues[3]
         break
     }
-    // 定位顶层 ActivityRecord 的 Hist 块：优先 hash 完全匹配，
-    // 兼容 ROM 省略 topResumedActivity 时取第一块 Hist
+    // Найдите блок Hist ActivityRecord верхнего уровня: предпочитайте точное совпадение хеша,
+    // Совместимо с ПЗУ, когда topResumedActivity опущен, берется первый Hist
     var block = -1
     var header: MatchResult? = null
     for (index in section.indices) {
@@ -174,10 +180,11 @@ internal fun parseTopLetterboxActivity(
 }
 
 /**
- * 是否值得弹「强制横屏未生效」提示。
+ * Стоит ли выскакивать подсказка "Принудительное горизонтальное положение экрана не вступает в силу".
  *
- * 四条同时成立：顶层应用在「应用横屏」名单里、确实处于 letterbox、
- * 原因是 FIXED_ORIENTATION（方向锁）、且用户本次会话没关掉过该提示。
+ * Одновременно устанавливаются четыре условия: приложение верхнего уровня находится в списке «Прикладная среда»,
+ * действительно находится в почтовом ящике,
+ * Причина — FIXED_ORIENTATION (блокировка ориентации), и пользователь не отключил этот запрос в этом сеансе.
  */
 internal fun shouldShowLetterboxHint(
     activity: LetterboxActivity,
@@ -192,9 +199,11 @@ internal fun shouldShowLetterboxHint(
 internal enum class LetterboxSide { LEFT, RIGHT }
 
 /**
- * 选提示卡放哪一侧：优先左侧（靠近驾驶位），左侧放不下且右侧更宽时退到右侧。
- * [neededPx] = 卡片最小宽度 + 两侧外边距（由文字实测得出，非固定阈值）。
- * 两侧都不够 → null（黑边太窄，与全屏横屏已无区别，提示只会挤成一团）。
+ * Выберите, на какую сторону разместить карточку-подсказку: отдайте приоритет левой стороне (возле сиденья
+ * водителя) и отступите к правой стороне, если левую сторону разместить невозможно, а правая сторона шире.
+ * [neededPx] = минимальная ширина карты + поля с обеих сторон (получено на основе фактического измерения текста, нефиксированный порог).
+ * Недостаточно обеих сторон → ноль (черная рамка слишком узкая и больше не отличается от полноэкранного
+ * горизонтального экрана, а подсказка будет только сжиматься в шарик).
  */
 internal fun chooseLetterboxSide(
     leftPx: Float,
@@ -211,12 +220,13 @@ internal fun chooseLetterboxSide(
 internal enum class LetterboxCardState { NORMAL, BUSY, FAILED }
 
 /**
- * 提示卡的手势裁决（纯函数，TouchRouter 的唯一决策点）。
+ * Решение жеста  для карты-подсказки (чистая функция, единственная точка принятия решения TouchRouter).
  *
- * 卡片画在黑边上，绝不注入给应用；按下命中后整段手势由卡片独占：
- *  - 抬起点仍在卡片内 → 算一次点按；
- *  - 移出卡片再抬起 → 取消（避免误触）；
- *  - 按住期间不把 move 漏给应用（否则会拖动下面的列表）。
+ * Карта   рисуется на черной рамке и никогда не будет внедрена в приложение; после нажатия и удара весь жест
+ * является эксклюзивным для карты:
+ * — Поднятая точка все еще находится на карточке → считается за один клик;
+ * - Вынуть карту и затем поднять ее → Отмена (во избежание случайных касаний);
+ * — не пропускайте переходы в приложение, удерживая нажатой кнопку (иначе оно будет перетаскивать список ниже).
  */
 internal enum class CardGesture { NOT_HANDLED, CONSUME, TAP }
 
@@ -228,22 +238,28 @@ internal fun resolveCardGesture(
     appGestureActive: Boolean = false,
 ): CardGesture =
     when {
-        // 卡片已收起：无论之前是否按住，都交回普通路由
+        // Карта убрана: независимо от того, была ли она нажата ранее, вернитесь к обычной маршрутизации.
         !cardVisible -> if (holding) CardGesture.CONSUME else CardGesture.NOT_HANDLED
-        // 按住中：按下期间的 move 一律吞掉；抬起时按是否仍在卡片内决定点按
+        // При нажатии и удержании: все движения в период нажатия будут проглочены; при подъеме щелчок будет определяться
+        // тем, находится ли пресс еще в карте.
+
         holding && down -> CardGesture.CONSUME
         holding -> if (hit) CardGesture.TAP else CardGesture.CONSUME
-        // 未按住：只有「按下瞬间就在卡片上」才接管。应用手势进行中拖进卡片区域
-        // 不接管——否则应用收不到抬起，会停在按下态（卡死）。
+        // Не нажато: Вступит во владение только «на карте в момент нажатия». Перетащите жест приложения в область
+        // карточки во время его выполнения.
+
+        // Не принимать - иначе приложение не получит подъема и останется в нажатом состоянии (зависнет).
         down && hit && !appGestureActive -> CardGesture.CONSUME
         else -> CardGesture.NOT_HANDLED
     }
 
 /**
- * 提示卡绘制（离屏 Bitmap → 合成器当纹理贴到黑边上）。
+ * Рисунок подсказки  (растровое изображение за кадром → композитор, когда текстура вставлена в черную рамку).
  *
- * 尺寸全部按画布密度换算；**最小宽度由文字实测**（按钮文字 + 内边距），
- * 没有「黑边小于 N px 不显示」这类硬编码阈值——窄到放不下文案自然就不显示。
+ * Все размеры   конвертируются в зависимости от плотности холста; **Минимальная ширина измеряется по
+ * фактическому тексту** (текст кнопки + отступы),
+ * не имеет жестко запрограммированного порогового значения, такого как «черные рамки размером меньше N пикселей
+ * не будут отображаться» — они не будут отображаться, если они слишком узкие для размещения текста.
  */
 internal object LetterboxCardPainter {
     private const val MAX_WIDTH_DP = 200f
@@ -252,34 +268,35 @@ internal object LetterboxCardPainter {
     private const val PAD_V_DP = 10f
     private const val GAP_DP = 7f
 
-    /** 按钮高度随字号同步收敛（32dp + 9.5sp 会显得按钮里空荡）。 */
+    /** Высота кнопки сходится синхронно с размером шрифта (32dp + 9,5sp сделает кнопку пустой). */
     private const val BUTTON_H_DP = 28f
     private const val RADIUS_DP = 10f
     private const val TITLE_SP = 11.5f
     private const val BODY_SP = 9.5f
 
-    /** 按钮字号与正文同档：11.5sp 在真机上比标题还抢眼（用户实测反馈，2026-10-18）。 */
+    /** Размер шрифта кнопки такой же, как и у основного текста: 11,5sp, что более привлекательно, чем заголовок на реальном устройстве (фактические отзывы пользователей от 18 октября 2026 г.). */
     private const val BUTTON_SP = 9.5f
     private const val BUTTON_PAD_H_DP = 8f
 
     fun marginPx(density: Float): Float = MARGIN_DP * density
 
-    /** 卡片允许的最大宽度（黑边再宽也不铺满，避免在大黑边里变成一块巨幅广告牌）。 */
+    /** Максимальная ширина карты (независимо от того, насколько широка черная рамка, она не заполнит ее, чтобы она не превратилась в огромный рекламный щит в большой черной рамке). */
     fun maxWidthPx(density: Float): Float = MAX_WIDTH_DP * density
 
-    /** 卡片最小宽度：由按钮文案与标题实测宽度决定。 */
+    /** Минимальная ширина карты: определяется измеренной шириной копии кнопки и заголовка. */
     fun minWidthPx(density: Float): Float {
         val button = textPaint(BUTTON_SP * density, Color.WHITE, bold = true)
         val buttonW = button.measureText("принудительный перезапуск") + 2f * BUTTON_PAD_H_DP * density
         val title = textPaint(TITLE_SP * density, Color.WHITE, bold = true)
-        // 标题至少容纳 5 个汉字（再窄会碎成单字换行）
+        // В заголовке должно быть не менее 5 китайских иероглифов (более узкие будут разбиты на отдельные символы и разрывы строк).
         val titleW = title.measureText("Горизонтальный экран не действует")
         return 2f * PAD_H_DP * density + maxOf(buttonW, titleW)
     }
 
     /**
-     * 生成提示卡位图；[widthPx] 由黑边宽度决定。
-     * 宽度放不下文案或高度放不下按钮时返回 null（调用方据此不显示）。
+     * генерирует растровое изображение карточки приглашения; [widthPx] определяется шириной черной границы.
+     * Возвращает ноль, если ширина не соответствует тексту или высота не соответствует кнопке (вызывающая сторона не
+     * отображается соответствующим образом).
      */
     fun render(
         density: Float,
@@ -348,8 +365,10 @@ internal object LetterboxCardPainter {
                 if (enabled) BUTTON_TEXT_COLOR else DISABLED_TEXT,
                 bold = true,
             ).apply {
-                // drawText 默认左对齐：不设 CENTER 时整串从 buttonRect.centerX() 起笔、
-                // 向右溢出按钮（真机截图暴露，2026-10-18）
+                // drawText по умолчанию выравнивает по левому краю: если CENTER не установлен, вся строка начинается с
+                // buttonRect.centerX(),
+
+                // Кнопка переполнения справа (скриншот реальной машины, 18 октября 2026 г.)
                 textAlign = Paint.Align.CENTER
             }
         val metrics = buttonPaint.fontMetrics
@@ -399,7 +418,7 @@ internal object LetterboxCardPainter {
             this.color = color
         }
 
-    // 深色卡 + 琥珀强调色，与 dock 的深色风格一致；黑边上对比足够
+    // Темная карта + янтарный акцентный цвет, соответствующий темному стилю дока; достаточный контраст на черном крае
     private const val BG_COLOR = 0xF0171C22.toInt()
     private const val BORDER_COLOR = 0x33FFFFFF
     private const val ACCENT_COLOR = 0xFFFFC24B.toInt()

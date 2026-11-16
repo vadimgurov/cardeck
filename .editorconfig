@@ -6,12 +6,12 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-# ktlint（经 Spotless 调用）读取以下配置
+# ktlint（по Spotless позвонить）Прочтите следующую конфигурацию
 [*.{kt,kts}]
 ktlint_code_style = ktlint_official
 max_line_length = 140
-# 本库惯用「KDoc 摘要 + 段落注释（分区说明）」风格，该规则与之冲突且不可自动修复
+# Эта библиотека идиоматическая「KDoc Резюме + аннотации к абзацам（Описание раздела）」стиль，Это правило конфликтует с ним и не может быть автоматически исправлено.
 ktlint_standard_no-consecutive-comments = disabled
-# 保持显式导入，不折叠为通配导入
+# Сохраняйте импорт явным，Не свернуто при импорте с подстановочными знаками
 ij_kotlin_name_count_to_use_star_import = 2147483647
 ij_kotlin_name_count_to_use_star_import_with_prefix = 2147483647

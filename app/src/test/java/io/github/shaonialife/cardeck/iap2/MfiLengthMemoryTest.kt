@@ -6,24 +6,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * MFi 挑战长度的按车机持久化记忆。
+ * MFi бросает вызов долговременной памяти автомобильных прессов.
  *
- * 背景（2026-10-19 奥迪 MMI 3315 实测）：20B 挑战该车机静默 6 秒无应答，32B 才在
- * 0.64 秒回签名。不同接收端偏好相反（DiPlay 只认 32B、MMI 6318 认 20B），所以
- * 记忆必须按车机身份分开存，且冷启动仍要有合理基线。
+ * Предыстория   (фактическое измерение Audi MMI 3315 19 октября 2026 г.): 20B бросил вызов машине, и машина
+ * молчала в течение 6 секунд, не отвечая, и вошел 32B.
+ * возвращает подпись через 0,64 секунды. Различные ресиверы имеют противоположные предпочтения (DiPlay
+ * распознает только 32B, MMI 6318 распознает 20B), поэтому
+ * Память   должна храниться отдельно в соответствии с идентичностью транспортного средства и машины, а холодный
+ * запуск должен иметь разумный базовый уровень.
  */
 class MfiLengthMemoryTest {
-    private val baselineCar = listOf(20, 32, 16) // 真车系：20B 优先
-    private val baselineTestBench = listOf(32, 20, 16) // 测试台：32B 优先
+    private val baselineCar = listOf(20, 32, 16) // Реальная серия автомобилей: приоритет 20B
+    private val baselineTestBench = listOf(32, 20, 16) // Испытательный стенд: приоритет 32Б
 
     @Test
     fun receiverKeyIsStableAndFilesystemFriendly() {
-        // 0x1D01 的 name + model + manufacturer 拼接（会带空格与大小写差异）
+        // Название 0x1D01 + модель + соединение производителя (с пробелами и регистровыми различиями)
         val a = MfiLengthMemory.receiverKey("audi_mmi_3315 audi 5163 delphi")
         val b = MfiLengthMemory.receiverKey("Audi_MMI_3315  AUDI 5163 DELPHI")
         assertEquals(a, b)
         assertTrue(a.matches(Regex("[a-z0-9_]+")))
-        // 不同车机必须落到不同键（3315 与 6318 不能互相污染记忆）
+        // Разные машины необходимо ставить на разные ключи (3315 и 6318 не могут засорять память друг друга)
         assertFalse(a == MfiLengthMemory.receiverKey("audi_mmi_6318 audi 3260 delphi"))
     }
 
@@ -38,10 +41,10 @@ class MfiLengthMemoryTest {
 
     @Test
     fun rememberedSuccessGoesFirst() {
-        // MMI 3315 记住了 32B 成功 → 下一轮直接 32B，不再先撞 20B 的 6 秒静默
+        // MMI 3315 помнит успех 32B → сразу 32B в следующем раунде, больше не попадая первым 20B и 6 секунд молчания
         val entry = MfiLengthMemory.Entry(succeeded = 32)
         assertEquals(listOf(32, 20, 16), MfiLengthMemory.orderAttempts(baselineCar, entry))
-        // 测试台场景同理（32B 本来就在最前，顺序不变）
+        // То же самое относится и к сценарию на испытательном стенде (изначально 32В находится спереди, порядок остается неизменным)
         assertEquals(listOf(32, 20, 16), MfiLengthMemory.orderAttempts(baselineTestBench, entry))
     }
 
@@ -49,15 +52,17 @@ class MfiLengthMemoryTest {
     fun silentAndRejectedLengthsSinkButStayAsFallback() {
         val entry = MfiLengthMemory.Entry(silent = setOf(20), rejected = setOf(16))
         val order = MfiLengthMemory.orderAttempts(baselineCar, entry)
-        // 成功档位没有；20B 静默、16B 被拒都排到最后，32B 提前
+        // Нет никакого уровня успеха; 20B молчит, 16B отклоняется, а 32B выдвигается.
         assertEquals(listOf(32, 20, 16), order)
-        // 不丢档位：记忆只影响顺序，不会让某个长度永远不被尝试
+        // Не теряйте передачи: память влияет только на порядок, а не на определенную длину, которая никогда не будет опробована.
         assertEquals(baselineCar.toSet(), order.toSet())
     }
 
     @Test
     fun allRejectedFallsBackToTryingEverything() {
-        // 记忆与现状矛盾（换了固件/同一身份的不同车）：全部被拒过也要照常试，避免永久卡死
+        // Возник конфликт между памятью и текущей ситуацией (прошивка изменена/разные машины с одинаковым
+        // идентификатором): Если вам все отказали, постарайтесь, как обычно, избежать постоянного зависания.
+
         val entry = MfiLengthMemory.Entry(rejected = setOf(20, 32, 16))
         val order = MfiLengthMemory.orderAttempts(baselineCar, entry)
         assertEquals(baselineCar, order)
@@ -73,23 +78,25 @@ class MfiLengthMemoryTest {
 
     @Test
     fun succeededAndRejectedContradictionDemotesMemory() {
-        // 2026-10-24 DiPlay 实测：迟到应答把 20B 误记成功，随后每轮 20B 被断链。
-        // 矛盾态（成功 ∧ 被拒）下 20B 不得再排第一——降级参与正常排序
+        // 24 октября 2026 г. Фактический тест DiPlay: Поздний ответ ошибочно успешно записал 20B, а затем 20B отключился в каждом раунде.
+        // В противоречивом состоянии (успех ∧ отклонен) 20B больше не может занимать первое место — понизьте его до
+        // участия в обычном рейтинге.
+
         val entry = MfiLengthMemory.Entry(succeeded = 20, rejected = setOf(20))
         val order = MfiLengthMemory.orderAttempts(baselineCar, entry)
-        assertEquals("被硬拒绝的档位不得再排第一", 32, order.first())
-        assertTrue("矛盾档位仍在候选内（固件可能变）", 20 in order)
+        assertEquals("Стенд, который был принудительно отклонен, не может снова занимать первое место.", 32, order.first())
+        assertTrue("Конфликтная позиция все еще находится в списке кандидатов（Прошивка может измениться）", 20 in order)
     }
 
     @Test
     fun describeShowsWhatWasRemembered() {
-        assertEquals("无", MfiLengthMemory.describe(MfiLengthMemory.Entry()))
+        assertEquals("Нет", MfiLengthMemory.describe(MfiLengthMemory.Entry()))
         val text =
             MfiLengthMemory.describe(
                 MfiLengthMemory.Entry(succeeded = 32, silent = setOf(20), rejected = setOf(16)),
             )
-        assertTrue(text.contains("成功=32B"))
-        assertTrue(text.contains("静默=20B"))
-        assertTrue(text.contains("被拒=16B"))
+        assertTrue(text.contains("успех=32B"))
+        assertTrue(text.contains("тишина=20B"))
+        assertTrue(text.contains("отклонено=16B"))
     }
 }

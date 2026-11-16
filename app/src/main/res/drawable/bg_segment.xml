@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 分段控件底板：深灰圆角 -->
+<!-- Сегментированная опорная пластина управления: темно-серая с закругленными углами -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#FF1F1F23" />

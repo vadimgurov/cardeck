@@ -5,50 +5,51 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 
 /**
- * PCM → AAC-LC 编码器（type=102 MainHighAudio 通路用）。
+ * PCM → кодер AAC-LC (тип = 102 канал MainHighAudio).
  *
- * 为什么需要它（2026-10-20 Honda HFT / Alpine 实测）：该车机 `/info` 里
- * `type=102`（MainHighAudio）的 `media` 档只声明 `0x400000` = **AAC-LC 44.1k 立体声**，
- * 没有任何 PCM 位；而 `type=100 media` 只声明 PCM 44.1k，往那里推 PCM 时车机
- * 收包却不消费（`/feedback` 里 `sampleTime` 恒 0），约 6.5s 后拆会话。
- * 真 iPhone 的媒体音频走的就是 102 + AAC-LC，所以必须自己编 AAC。
+ * Зачем он нужен   (20 октября 2026 г., фактический тест Honda HFT / Alpine): Этот автомобиль находится в `/info`.
+ * Файл `media`   `type=102` (MainHighAudio) объявляет только `0x400000` = **AAC-LC 44.1k стерео**,
+ * не имеет битов PCM; в то время как `type=100 media` декларирует только PCM 44.1k. При нажатии туда PCM машина
+ * принимает пакеты, но не потребляет их (`sampleTime` в `/feedback` всегда равен 0), а сессия разрывается примерно через 6,5 секунд.
+ * Настоящий мультимедийный звук iPhone использует формат 102 + AAC-LC, поэтому вам придется программировать AAC самостоятельно.
  *
- * 线格式（对照 catplay `aac_encoder.rs` + `rtp_recorder.rs`）：编码器输出的是
- * **裸 AAC 帧** —— 没有 ADTS 头、没有 RFC3640 的 AU header，RTP 负载就是该帧本身，
- * 一包一帧。Android `MediaCodec` 的 AAC 编码器同样输出裸帧，可直接使用。
+ * Формат строки   (сравните Catplay `aac_encoder.rs` + `rtp_recorder.rs`): Выход энкодера
+ * **Прямой кадр AAC** — без заголовка ADTS, без заголовка RFC3640 AU, полезная нагрузка RTP — это сам кадр,
+ * Одна рамка в упаковке. Кодировщик AAC Android `MediaCodec` также выводит голые кадры и может использоваться напрямую.
  *
- * 帧长固定 1024 采样（AAC-LC 规格），因此 RTP 时间戳每包步进 1024。
+ * Длина кадра   фиксирована и составляет 1024 выборки (спецификация AAC-LC), поэтому временная метка RTP увеличивается на 1024 на пакет.
  */
 class AacLcEncoder(
     private val sampleRate: Int,
     private val channels: Int,
     private val bitRate: Int = 192_000,
-    /** 是否给每帧补 7 字节 ADTS 头（见 [AudioTuning.ADTS]）。 */
+    /** Добавлять ли 7-байтовый заголовок ADTS к каждому кадру (см. [AudioTuning.ADTS]). */
     private val wrapAdts: Boolean = false,
     private val log: (String) -> Unit,
 ) {
     companion object {
-        /** AAC-LC 一帧固定 1024 个采样（每声道）。 */
+        /** AAC-LC имеет фиксированный кадр из 1024 выборок (на канал). */
         const val FRAME_SAMPLES = 1024
 
-        /** 一帧 PCM 的字节数（16bit）。 */
+        /** Количество байт в одном кадре PCM (16 бит). */
         fun pcmBytes(channels: Int): Int = FRAME_SAMPLES * channels * 2
 
-        /** ADTS 头长度（无 CRC）。 */
+        /** Длина заголовка ADTS (без CRC). */
         private const val ADTS_HEADER_SIZE = 7
 
-        /** ADTS 里的 audioObjectType：AAC-LC = 2（存的是 AOT-1）。 */
+        /** audioObjectType в ADTS: AAC-LC = 2 (сохраняется AOT-1). */
         private const val AAC_PROFILE_LC = 2
 
         private const val MIME = "audio/mp4a-latm"
         private const val TIMEOUT_US = 10_000L
 
         /**
-         * 组 7 字节 ADTS 头（无 CRC）：MPEG-4 / AAC-LC / 对应采样率与声道数。
+         * Группа  7-байтовый заголовок ADTS (без CRC): MPEG-4/AAC-LC/соответствующая частота дискретизации и количество каналов.
          *
-         * 线上报文（RTP 负载）按 Apple 的约定是**裸 AAC 帧**，但个别车机的解码链是
-         * 按 ADTS 组织的（Android `audio/aac-adts`），裸帧喂进去会被判为非帧。
-         * 因此留一条可切换的封装路径（[AudioTuning.ADTS]）。
+         * Онлайн-сообщения           (полезная нагрузка RTP) представляют собой **чистые кадры AAC** в соответствии с
+         * соглашением Apple, но цепочка декодирования отдельных транспортных средств
+         * организован по ADTS (Android `audio/aac-adts`). Если будет подан голый кадр, он будет расценен как отсутствие кадра.
+         * Таким образом,           оставляет переключаемый путь упаковки ([AudioTuning.ADTS]).
          */
         fun adtsHeader(
             payloadSize: Int,
@@ -59,25 +60,25 @@ class AacLcEncoder(
             val freqIndex = frequencyIndex(sampleRate)
             val header = ByteArray(ADTS_HEADER_SIZE)
             header[0] = 0xFF.toByte()
-            // syncword 剩余 4 位 + MPEG-4(0) + layer(00) + protection_absent(1)
+            // оставшиеся 4 бита синхворда + MPEG-4(0) + Layer(00) + Protection_absent(1)
             header[1] = 0xF1.toByte()
-            // profile=LC(2) 存的是 AOT-1；采样率索引 <<2；声道配置高 2 位
+            // профиль=LC(2) сохраняет AOT-1; индекс частоты дискретизации <<2; старшие 2 бита конфигурации канала
             header[2] =
                 (
                     ((AAC_PROFILE_LC - 1) shl 6) or
                         ((freqIndex and 0x0F) shl 2) or
                         ((channels shr 2) and 0x03)
                 ).toByte()
-            // 声道配置低 2 位 + 帧长高 2 位
+            // Конфигурация канала, младшие 2 бита + длина кадра, старшие 2 бита
             header[3] = (((channels and 0x03) shl 6) or ((frameLength shr 11) and 0x03)).toByte()
             header[4] = ((frameLength shr 3) and 0xFF).toByte()
-            // 帧长低 3 位 + buffer_fullness=0x7FF（VBR 惯例）+ 单帧（低 2 位 0）
+            // Длина кадра, младшие 3 бита + buffer_fullness=0x7FF (соглашение VBR) + одиночный кадр (2 младших бита 0)
             header[5] = (((frameLength and 0x07) shl 5) or 0x1F).toByte()
             header[6] = 0xFC.toByte()
             return header
         }
 
-        /** 采样率 → ADTS 的 samplingFrequencyIndex。 */
+        /** sampleFrequencyIndex → sampleFrequencyIndex ADTS. */
         fun frequencyIndex(rate: Int): Int =
             when (rate) {
                 96_000 -> 0
@@ -97,14 +98,20 @@ class AacLcEncoder(
             }
 
         /**
-         * 自检：用平台解码器把一帧裸 AAC 解回 PCM，返回 `(峰值, 样本数)`；解不出返回 null。
+         * Самотестирование: используйте декодер платформы для декодирования кадра чистого AAC обратно в PCM и возврата
+         * `(пик, Количество образцов)`; если не декодировано, верните ноль.
          *
-         * 为什么需要（2026-10-20 第三次实测）：车机「收包但不发声」时，最容易搞错的是
-         * 归因——是编码器吐了坏流/静音，还是车机侧没播。本机解码一遍就能证伪：
-         * 峰值 > 0 说明比特流有效且非静音，问题必在车机侧；峰值 = 0 说明编码器在出静音。
+         * Зачем нужен           (третий фактический тест 20 октября 2026 г.): Когда машина и машина «получили посылку,
+         * но не издают ни звука», наиболее вероятная ошибка
+         * Атрибуция - кодер выдает плохой поток/отключение звука, либо со стороны автомобиля не ведется трансляция. Эта
+         * машина может расшифровать его один раз, и его можно подделать:
+         * Пиковое значение           > 0 указывает на то, что битовый поток действителен и не отключен, и проблема
+         * должна быть на стороне транспортного средства; Пиковое значение = 0 указывает на то, что кодер приглушает звук.
          *
-         * 注意：这里**绝不能**对帧做任何字节换序（旧实现把所有负载统一按大端 s16 换序，
-         * 连 AAC 比特流也换掉了——车机解码器直接判坏帧，这就是「有包无声」的根因）。
+         * Примечание. Здесь не следует выполнять какое-либо переупорядочение байтов кадра (старая реализация помещает
+         * все нагрузки в переупорядочение s16 с прямым порядком байтов,
+         * даже заменил битовый поток AAC — автомобильный декодер напрямую определяет плохой кадр, что является основной
+         * причиной «пакетов, но нет звука»).
          */
         fun decodePeak(
             frame: ByteArray,
@@ -165,16 +172,16 @@ class AacLcEncoder(
     private val bufferInfo = MediaCodec.BufferInfo()
     private var presentationUs = 0L
 
-    /** ADTS 剥离只提示一次，避免刷屏。 */
+    /** Удаление ADTS запрашивает только один раз, чтобы избежать пролистывания экрана. */
     private var adtsStripped = false
 
-    /** ADTS 封装提示只打一次。 */
+    /** Приглашение к упаковке ADTS вводится только один раз. */
     private var adtsWrapped = false
 
-    /** 首帧十六进制只打一次。 */
+    /** Шестнадцатеричное число первого кадра вводится только один раз. */
     private var firstFrameLogged = false
 
-    /** 每帧 PCM 输入字节数。 */
+    /** Количество входных байтов PCM на кадр. */
     val inputFrameBytes: Int = pcmBytes(channels)
 
     var started: Boolean = false
@@ -199,22 +206,23 @@ class AacLcEncoder(
             presentationUs = 0L
             started = true
             log(
-                "AUDIO: AAC-LC 编码器就绪（${sampleRate}Hz ${channels}ch " +
-                    "${bitRate / 1000}kbps，帧=${FRAME_SAMPLES}采样/${inputFrameBytes}B）",
+                "АУДИО: готов кодер AAC-LC (${sampleRate}Hz ${channels}ch" +
+                    "${bitRate / 1000}кбит/с, кадр=${FRAME_SAMPLES} выборка/${inputFrameBytes}B)",
             )
             true
         } catch (error: Exception) {
-            log("AUDIO: AAC-LC 编码器启动失败 - ${error.message}（本档位放弃）")
+            log("АУДИО: не удалось запустить кодер AAC-LC — ${error.message} (это устройство заброшено)")
             started = false
             false
         }
     }
 
     /**
-     * 喂一帧 PCM（[inputFrameBytes] 字节），返回本次编出的全部 AAC 帧。
+     * передает кадр PCM (байты [inputFrameBytes]) и возвращает все кадры AAC, скомпилированные на этот раз.
      *
-     * 编码器内部有延迟（首帧通常要喂 1~2 帧才吐第一包），所以返回值可能为空，
-     * 调用方按「拿到的帧逐个发包」处理即可。
+     * В кодировщике       существует внутренняя задержка (первый кадр обычно занимает 1–2 кадра, чтобы передать
+     * первый пакет), поэтому возвращаемое значение может быть пустым.
+     * Вызывающая сторона может обработать его, «отправляя полученные кадры один за другим».
      */
     fun encode(
         pcm: ByteArray,
@@ -237,7 +245,7 @@ class AacLcEncoder(
             }
             drain(encoder, output)
         } catch (error: Exception) {
-            log("AUDIO: AAC 编码异常 - ${error.message}")
+            log("АУДИО: исключение кодировки AAC — ${error.message}")
         }
         return output
     }
@@ -269,52 +277,57 @@ class AacLcEncoder(
     }
 
     /**
-     * 去掉 ADTS 头（若存在）。
+     * Удалите заголовок ADTS, если он присутствует.
      *
-     * 线上格式要求是**裸 AAC 帧**（catplay `rtp_recorder` 直接把编码器输出当负载）。
-     * 多数 MediaCodec 实现输出裸帧，但个别硬件编码器会带 7/9 字节 ADTS 头——带上就是
-     * 非法负载，车机解码器会整条流丢弃。这里按同步字识别并剥掉，属于防御性处理。
+     * Требование онлайн-формата       — **голый кадр AAC** (catplay `rtp_recorder` напрямую использует выход кодера в качестве нагрузки).
+     * Большинство реализаций MediaCodec выводят голые кадры, но некоторые аппаратные кодировщики поддерживают
+     * заголовок ADTS размером 7/9 байт — просто внесите его.
+     * недопустимая нагрузка, декодер транспортного средства отбросит весь поток. Здесь идентифицируйте и отделяйте
+     * по слову синхронизации, что является защитным лечением.
      */
     private fun stripAdts(frame: ByteArray): ByteArray {
         if (frame.size < 7) return frame
         val b0 = frame[0].toInt() and 0xFF
         val b1 = frame[1].toInt() and 0xFF
         if (b0 != 0xFF || (b1 and 0xF0) != 0xF0) return frame
-        // ADTS 的 protection_absent 位在第二个字节最低位：1=无 CRC（7 字节头），0=9 字节
+        // Бит Protection_absent ADTS — это младший бит второго байта: 1 = нет CRC (7-байтовый заголовок), 0 = 9 байтов.
         val headerSize = if ((b1 and 0x01) == 0x01) 7 else 9
         if (frame.size <= headerSize) return frame
         if (!adtsStripped) {
             adtsStripped = true
-            log("AUDIO: 编码器输出带 ADTS 头（${headerSize}B）——已剥离，改发裸 AAC 帧")
+            log("АУДИО: выход кодировщика с заголовком ADTS (${headerSize}B) — очищен, преобразован в чистые кадры AAC.")
         }
         return frame.copyOfRange(headerSize, frame.size)
     }
 
     /**
-     * 按当前方案决定线上负载形态：裸帧（默认）或「ADTS 头 + 裸帧」。
+     * определяет форму онлайн-загрузки в соответствии с текущим планом: пустой кадр (по умолчанию) или «ADTS-заголовок + пустой кадр».
      *
-     * 先统一剥掉编码器可能自带的 ADTS（避免重复套头），再按方案决定是否重建。
+     * Сначала удалите ADTS, которые могут идти в комплекте с кодировщиком (во избежание дублирования заголовков), а
+     * затем решите, стоит ли пересобирать по плану.
      */
     private fun finalizeFrame(frame: ByteArray): ByteArray {
         val raw = stripAdts(frame)
         if (!adtsWrapped && wrapAdts) {
             adtsWrapped = true
-            log("AUDIO: 已改为 ADTS 封装（每帧补 7 字节头，方案2）")
+            log("АУДИО: изменено на инкапсуляцию ADTS (7-байтовый заголовок добавляется к каждому кадру, вариант 2)")
         }
         val out = if (wrapAdts) buildAdts(raw) else raw
-        // 首帧留档：出问题时能直接从日志里核对负载是不是合法 AAC（而不是等用户导文件）
+        // Сохранение первого кадра: при возникновении проблемы вы можете напрямую проверить из журнала, является ли
+        // загрузка допустимым AAC (вместо ожидания файла руководства пользователя).
+
         if (!firstFrameLogged) {
             firstFrameLogged = true
             val head = out.take(16).joinToString(" ") { "%02X".format(it) }
             log(
-                "AUDIO: 首帧 ${out.size}B（裸帧 ${raw.size}B）head=$head" +
+                "АУДИО: первый кадр ${out.size}B (голый кадр ${raw.size}B) head=$head" +
                     (if (wrapAdts) "（ADTS，sync=FFF）" else ""),
             )
         }
         return out
     }
 
-    /** 组 7 字节 ADTS 头（无 CRC）：MPEG-4 / LC / 对应采样率与声道。 */
+    /** Набор 7-байтового заголовка ADTS (без CRC): MPEG-4/LC/соответствующие частота дискретизации и каналы. */
     private fun buildAdts(raw: ByteArray): ByteArray = adtsHeader(raw.size, sampleRate, channels) + raw
 
     fun stop() {

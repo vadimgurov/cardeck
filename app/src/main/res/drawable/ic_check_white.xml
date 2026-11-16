@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 勾选框对勾（白色描边，叠于蓝色圆角底上） -->
+<!-- Флажок в поле-флажке (белая обводка, наложенная на синее закругленное основание) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="12dp"
     android:height="12dp"

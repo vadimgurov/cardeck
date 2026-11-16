@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页应用选择行：图标 + 名称 + 勾选框（整行可点；两列网格） -->
+<!-- Строка выбора приложения на странице настроек: значок + имя + флажок (можно щелкнуть всю строку; сетка из двух столбцов) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"

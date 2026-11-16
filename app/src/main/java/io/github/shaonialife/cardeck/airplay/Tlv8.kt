@@ -1,6 +1,6 @@
 package io.github.shaonialife.cardeck.airplay
 
-/** HomeKit/AirPlay 风格 TLV8 编解码（独立实现，语义与参考接收端一致）。 */
+/** Кодек TLV8 в стиле HomeKit/AirPlay (независимая реализация, семантика соответствует эталонному приемнику). */
 object Tlv8 {
     private const val SEPARATOR_TYPE = 0xFF
     private const val MAX_FRAGMENT = 255
@@ -52,7 +52,7 @@ object Tlv8 {
         return output
     }
 
-    // 常用类型
+    // Распространенные типы
     const val TYPE_METHOD = 0x00
     const val TYPE_IDENTIFIER = 0x01
     const val TYPE_SALT = 0x02

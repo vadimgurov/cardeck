@@ -19,12 +19,14 @@ import io.github.shaonialife.cardeck.ui.WallpaperStore
 import io.github.shaonialife.cardeck.util.Bg
 
 /**
- * CarPlay dock（独立虚拟屏，含时钟/电量/运行中应用/回桌面）。
+ * Док-станция CarPlay (независимый виртуальный экран, включая часы/батарею/работающие приложения/возврат на рабочий стол).
  *
- * 两种形态（布局见 res/layout）：
- *  - 横屏车机：dock 是左侧竖条 → activity_dock_sidebar.xml（时钟居顶、回桌面居底）
- *  - 竖屏车机：dock 是底部横条 → activity_dock_bar.xml（⌂ | 应用横排 | 时间/电量）
- * 形态由 dock 虚拟屏自身宽高决定（竖条 height>width；横条 width>height），与车机方向自动对齐。
+ * две формы (см. res/layout для макета):
+ * — Машина с горизонтальным экраном: Док — вертикальная полоса слева → Activity_dock_sidebar.xml (часы вверху, рабочий стол внизу)
+ * — машина с вертикальным экраном: док-станция — нижняя горизонтальная полоса → Activity_dock_bar.xml (⌂ |
+ * горизонтальное расположение приложения | время/батарея)
+ * Форма   определяется шириной и высотой виртуального экрана дока (высота вертикальной полосы>ширина; ширина
+ * горизонтальной полосы>высота) и автоматически выравнивается по направлению движения транспортного средства.
  */
 class DockActivity : AppCompatActivity() {
     private var appsContainer: LinearLayout? = null
@@ -35,10 +37,13 @@ class DockActivity : AppCompatActivity() {
     private var barForm = false
 
     /**
-     * 设计基准密度（420dpi）的当前倍率。dock 屏密度由 SessionController 按画布短边等比
-     * 下发（奥迪 1160×540→420 不变；测试台 2320×1080→840，dock 与文字/图标整体 ×2）。
-     * 布局 XML 用 dp 自动随密度缩放；字号/模糊半径等按「设计 px × 本倍率」在代码里设，
-     * 保证高分辨率车机下 dock 内容与画布同比例（2026-10-17 修复「高分辨率下显得小」）。
+     * Текущее увеличение расчетной плотности  (420 точек на дюйм). Плотность экрана док-станции определяется
+     * SessionController пропорционально короткой стороне холста.
+     * Выпускается       (Audi 1160×540→420 без изменений; стенд 2320×1080→840, док и текст/иконка целиком × 2).
+     * XML макета       использует dp для автоматического масштабирования в зависимости от плотности; размер
+     * шрифта/радиус размытия и т. д. задаются в коде параметром «Design px × это увеличение».
+     * гарантирует, что содержимое дока будет в той же пропорции, что и холст под автомобилями с высоким разрешением
+     * (исправления 17 октября 2026 г. «при высоком разрешении кажутся маленькими»).
      */
     private val designScale: Float
         get() = resources.displayMetrics.densityDpi / 420f
@@ -58,7 +63,9 @@ class DockActivity : AppCompatActivity() {
     private val clockTicker =
         object : Runnable {
             override fun run() {
-                // 无秒显示（用户要求）：对齐到下一分钟边界刷新，秒内不做无用重绘
+                // Отсутствие второго дисплея (требование пользователя): выравнивание по обновлению границы в следующую минуту,
+                // отсутствие бесполезной перерисовки в течение нескольких секунд.
+
                 clockView?.text =
                     android.text.format.DateFormat
                         .format("HH:mm", System.currentTimeMillis())
@@ -68,14 +75,14 @@ class DockActivity : AppCompatActivity() {
             }
         }
 
-    /** 壁纸背景（全流画布切片，与桌面同源同路径——交界处逐像素连续）。 */
+    /** Фон обоев (полнопоточный фрагмент холста, то же начало и путь, что и на рабочем столе — соединение непрерывное, пиксель за пикселем). */
     private var wallpaperView: ImageView? = null
     private var wallpaperShownVersion = -1L
 
-    /** 壁纸变更监听（WallpaperStore 主线程回调；解码在本类自行切后台线程）。 */
+    /** Мониторинг смены обоев (обратный вызов основного потока WallpaperStore; декодирование само переключается на фоновый поток в этом классе). */
     private val wallpaperListener = { _: Long -> refreshWallpaperIfChanged() }
 
-    /** dock 外观偏好监听（设置页拖动滑条即时生效）。 */
+    /** мониторинг предпочтений внешнего вида дока (перетащите ползунок на странице настроек, чтобы немедленно вступить в силу). */
     private val dockPrefsListener: () -> Unit = { runOnUiThread { applyDockPrefs() } }
 
     private val batteryReceiver =
@@ -100,8 +107,12 @@ class DockActivity : AppCompatActivity() {
         wallpaperView = findViewById(R.id.dockWallpaper)
         findViewById<ImageView>(R.id.dockHome).apply {
             setOnClickListener { Bg.run("dock-home") { VirtualLauncher.onHomePressed() } }
-            // 图标随模式切换：仪表盘激活=房屋（点按回桌面）；否则=田字格（点按进仪表盘）。
-            // 应用中与桌面同为田字格——两种场景下的动作都是进仪表盘，语义一致。
+            // Значок переключается с режимом: активация приборной панели = дом (кликните для возврата на рабочий стол); в
+            // противном случае = поле (нажмите, чтобы войти в панель мониторинга).
+
+            // Приложение и рабочий стол имеют одну и ту же сетку Tianzi — действие в обоих сценариях заключается в входе в
+            // панель мониторинга, и семантика одинакова.
+
             VirtualLauncher.addDashboardListener { dashboard ->
                 runOnUiThread {
                     setImageResource(
@@ -117,20 +128,26 @@ class DockActivity : AppCompatActivity() {
         VirtualLauncher.addRunningAppsListener(refreshListener)
         pollHandler.postDelayed(pollRunnable, 3_000)
         clockHandler.post(clockTicker)
-        // 字号按「设计 px × designScale」设置（不进 XML：荣耀 ROM 上 autoSize 对窄 dock
-        // 不生效，仍需布局完成后按实测宽度手工缩钟表——见 fitClockText；13/22 为原型值）
+        // Размер шрифта устанавливается в соответствии с «design px × designScale» (не вводите XML: autoSize на Honor
+        // ROM или узкой док-станции).
+
+        // Это не вступает в силу. Вам все равно придется вручную сжимать часы в соответствии с измеренной шириной после
+        // завершения макета — см. fitClockText; 13/22 — значение прототипа)
+
         clockView?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 22f * designScale)
         batteryText?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 13f * designScale)
         clockView?.post { fitClockText(clockView!!) }
         setupWallpaper()
-        // 注册变更通知 + 立即对账一次（兜底注册前发生的更换——事件不补发）
+        // Уведомление об изменении регистрации + немедленная сверка (охватывает изменения, произошедшие до регистрации –
+        // события не будут переизданы)
+
         WallpaperStore
             .addListener(wallpaperListener)
         refreshWallpaperIfChanged()
-        // dock 外观（暗幕/模糊）：应用当前值 + 监听设置页调整
+        // внешний вид док-станции (темный/размытый): применить текущие значения + настройки страницы настроек прослушивателя
         DockPrefs.addListener(dockPrefsListener)
         applyDockPrefs()
-        // 系统受保护广播：ACTION_BATTERY_CHANGED 为 sticky，注册即回填当前电量
+        // Защищенная системой трансляция: ACTION_BATTERY_CHANGED закреплена, регистрация восстановит текущий уровень заряда батареи.
         registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
     }
 
@@ -151,12 +168,13 @@ class DockActivity : AppCompatActivity() {
     }
 
     /**
-     * 壁纸切片：dock 窗口内画「全流画布壁纸」中本条带对应的部分。
-     * dock 虚拟屏与流 1:1（420dpi），canvas 视图 = 流画布尺寸：
-     *  - 侧栏（横屏车机）：流左条，偏移 (0, 0)
-     *  - 底栏（竖屏车机）：流底条，偏移 (0, -(appHeight))
-     * 窗口必须不透明：半透明窗口下系统会往这块虚拟屏合成手机自身壁纸
-     * （曾致 dock 显示手机壁纸、与桌面壁纸错位——2026-10-12 实测根因）。
+     * Фрагмент обоев: нарисуйте соответствующую часть этой полосы в «Full Flow Canvas Wallpaper» в окне закрепления.
+     * закрепите виртуальный экран и трансляцию 1:1 (420 точек на дюйм), вид холста = размер холста потока:
+     * — Боковая панель (автомобиль с горизонтальным экраном): направление левой панели, смещение (0, 0)
+     * — Нижняя полоса (машина с вертикальным экраном): нижняя полоса потока, смещение (0, -(appHeight))
+     * Окно должно быть непрозрачным: под полупрозрачным окном система синтезирует собственные обои телефона в этот виртуальный экран.
+     * (Обои мобильного телефона, отображаемые на док-станции, не совпадали с обоями рабочего стола — основная
+     * причина измерена 12 октября 2026 г.).
      */
     private fun setupWallpaper() {
         val launcher = VirtualLauncher
@@ -178,9 +196,10 @@ class DockActivity : AppCompatActivity() {
     }
 
     /**
-     * 应用 dock 外观偏好：暗幕强度（scrim View 的黑 alpha）+ 背景高斯模糊
-     * （RenderEffect，API 31+；半径按 dock 物理像素，最大 40px——乘 designScale
-     * 保证高分辨率车机上模糊观感与奥迪基准一致）。
+     * Настройки внешнего вида док-станции приложения: интенсивность темного экрана (черная альфа-версия Scrim View)
+     * + размытие фона по Гауссу.
+     * (RenderEffect, API 31+; радиус в физических пикселях закрепления, максимум 40 пикселей — умножается на designScale
+     * гарантирует, что размытость изображения на автомобилях с высоким разрешением соответствует эталону Audi).
      */
     private fun applyDockPrefs() {
         val scrim = findViewById<View>(R.id.dockScrim) ?: return
@@ -205,7 +224,7 @@ class DockActivity : AppCompatActivity() {
         }
     }
 
-    /** 壁纸版本变化时后台重解码并换图（监听器模式下与桌面同步更新）。 */
+    /** При изменении версии обоев фон перекодируется и меняет изображение (обновляется синхронно с рабочим столом в режиме прослушивания). */
     private fun refreshWallpaperIfChanged() {
         val view = wallpaperView ?: return
         val current = WallpaperStore.version
@@ -233,7 +252,7 @@ class DockActivity : AppCompatActivity() {
         }
     }
 
-    /** 逐级缩小字号直至文本宽度放得下（设计 px × designScale；行程 22→12，对照设计原型）。 */
+    /** Уменьшайте размер шрифта постепенно, пока ширина текста не поместится (дизайн px × designScale; обводка 22→12, сравните с прототипом дизайна). */
     private fun fitClockText(view: TextView) {
         val available = view.width - view.paddingLeft - view.paddingRight
         if (available <= 0) return
@@ -295,9 +314,13 @@ class DockActivity : AppCompatActivity() {
         val iconCache = VirtualLauncher.iconCache
         apps.forEach { component ->
             val drawable = iconCache[component] ?: packageManager.defaultActivityIcon
-            // 位图化渲染（与桌面网格同一路径）：直接 setImageDrawable 会让 ImageView
-            // 长期持有共享 Drawable 实例，其 bounds 被网格重绑改写后渲染错位
-            // （实机故障：点 home 后 dock 图标变小且偏左）
+            // Рендеринг растрового изображения (тот же путь, что и сетка рабочего стола): непосредственный набор
+            // ImageDrawable создаст ImageView
+
+            // Общий экземпляр Drawable удерживается в течение длительного времени, а его границы отображаются смещенными
+            // после повторной привязки и перезаписи сеткой.
+
+            // (Реальный сбой устройства: после нажатия кнопки «Домой» значок в доке становится меньше и смещается влево)
             val bitmap = AppIcons.rounded(drawable, iconPx)
             container.addView(
                 ImageView(this).apply {
@@ -313,5 +336,5 @@ class DockActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() = Unit // dock 常驻，不响应返回
+    override fun onBackPressed() = Unit // Док является резидентным и возвращается без ответа.
 }

@@ -8,12 +8,14 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * 屏幕流 keepAlive 帧格式回归。
+ * экранный поток KeepAlive возвращает формат кадра.
  *
- * 2026-10-19 奥迪 MMI 3315 实测：只有 UDP keepAlive + /feedback 时，RECORD 后约
- * 10.2s 整轮会话被 reset（视频/事件通道都健康）。catplay 在视频持续推流时**仍每秒**
- * 向屏幕数据口写一条 keepAlive 帧——这是接收端屏幕上独立的存活信号。
- * 帧格式写错时接收端静默忽略、现象仍是「10 秒断开」，所以必须有单测锁住。
+ * 19 октября 2026 г. Фактические измерения Audi MMI 3315: Когда используется только UDP KeepAlive + /feedback, ЗАПИСЬ составляет около
+ * 10.2s Весь сеанс был сброшен (все каналы видео/событий исправны). Catplay по-прежнему транслируется каждую
+ * секунду, пока видео продолжает передаваться
+ * записывает в порт данных экрана кадр KeepAlive — это независимый сигнал KeepAlive на принимающем экране.
+ * Когда формат кадра   записан неправильно, принимающая сторона молча игнорирует его, и явление все равно
+ * «отключается через 10 секунд», поэтому требуется одиночная тестовая блокировка.
  */
 class VideoKeepAliveFrameTest {
     private fun header(frame: ByteArray) = frame.copyOfRange(0, 128)
@@ -57,17 +59,19 @@ class VideoKeepAliveFrameTest {
     fun statsBodyLengthIsMirroredIntoParams14AsLittleEndianFloat() {
         val frame = VideoSender.buildKeepAliveFrame(withStats = true, frames = 30, bytesPerSecond = 1.0, framesPerSecond = 30)
         val expected = (frame.size - 128).toFloat()
-        // params[14] 位于偏移 120..128，后 4 字节是 f32 LE 的 body 长度（catplay 同款）
+        // params[14] находится по смещению 120..128, а последние 4 байта — это длина тела f32 LE (так же, как catplay)
         val declared = ByteBuffer.wrap(frame, 124, 4).order(ByteOrder.LITTLE_ENDIAN).float
         assertEquals(expected, declared, 0.0f)
-        // 前 4 字节固定 0.0f
+        // Первые 4 байта имеют фиксированное значение 0.0f.
         assertEquals(0.0f, ByteBuffer.wrap(frame, 120, 4).order(ByteOrder.LITTLE_ENDIAN).float, 0.0f)
     }
 
     @Test
     fun keepAliveHeaderCarriesNoChaChaTag() {
-        // keepAlive 是明文帧：body 长度必须等于实际 body（不含 16B tag），
-        // 否则接收端会把统计体后的字节当下一帧头，帧边界整体错位。
+        // KeepAlive — это текстовый фрейм: длина тела должна быть равна фактическому телу (исключая тег 16B),
+        // В противном случае принимающая сторона будет рассматривать байты после тела статистики как заголовок
+        // следующего кадра, и общая граница кадра будет смещена.
+
         val frame = VideoSender.buildKeepAliveFrame(withStats = true, frames = 1, bytesPerSecond = 0.0, framesPerSecond = 1)
         val size = bodySize(header(frame))
         assertTrue("body=$size", size > 0)
@@ -75,29 +79,30 @@ class VideoKeepAliveFrameTest {
     }
 
     /**
-     * VideoConfig 帧头必须与 catplay `ScreenFrame::config` 一致。
+     * Заголовок кадра  VideoConfig должен соответствовать Catplay `ScreenFrame::config`.
      *
-     * 奥迪 4851（AUDI 5163 / DELPHI，0.1.4 日志）实测：配对、SETUP、RECORD、推流、
-     * 触摸全部正常，**车机屏全黑**。catplay 在 config 头里写了两项被我们漏掉的字段：
-     *  - `small_param[1] |= ScreenFlag::Encrypted (0x04)` —— 声明视频帧是密封的；
-     *  - `params[1]` = (width, height) 两个 f32 LE —— 车机据此建立解码器画布。
-     * DiPlay/WinPlay 只读 body、不校验头，所以测试台一直没暴露。
+     * Audi 4851 (AUDI 5163 / DELPHI, журнал 0.1.4) фактический тест: сопряжение, НАСТРОЙКА, ЗАПИСЬ, потоковая передача,
+     * Все касания на       нормальные, **экран автомобиля весь чёрный**. catplay прописал в заголовке конфигурации
+     * два поля, которые мы пропустили:
+     * — `small_param[1] |= ScreenFlag::Encrypted (0x04)` — заявляет, что видеокадр запечатан;
+     * - `params[1]` = (ширина, высота) два f32 LE - машина машины строит полотно декодера соответственно.
+     * DiPlay/WinPlay считывает только тело и не проверяет заголовок, поэтому тестовый стенд никогда не подвергался воздействию.
      */
     @Test
     fun videoConfigHeaderDeclaresEncryptionAndCanvasSize() {
         val header = VideoSender.buildVideoConfigHeader(bodySize = 35, width = 1412, height = 654)
 
         assertEquals(35, bodySize(header))
-        assertEquals(1, header[4].toInt() and 0xFF) // opcode = VideoConfig
-        // small_param[1] 在头部偏移 6；Encrypted = 1<<2
+        assertEquals(1, header[4].toInt() and 0xFF) // код операции = VideoConfig
+        // small_param[1] со смещением головки 6; Зашифровано = 1<<2
         assertEquals(0x04, header[6].toInt() and 0x04)
 
-        // params[0]（偏移 8..16）是 PTS 槽位，config 必须留 0
+        // params[0] (смещение 8..16) — это слот PTS, в конфигурации необходимо оставить 0
         for (index in 8 until 16) {
-            assertEquals("params[0] 应为 0（偏移 $index）", 0, header[index].toInt())
+            assertEquals("params[0] должно быть 0（компенсация $index）", 0, header[index].toInt())
         }
 
-        // params[1]（偏移 16..24）= width f32 LE、height f32 LE
+        // params[1] (смещение 16..24) = ширина f32 LE, высота f32 LE
         val width = ByteBuffer.wrap(header, 16, 4).order(ByteOrder.LITTLE_ENDIAN).float
         val height = ByteBuffer.wrap(header, 20, 4).order(ByteOrder.LITTLE_ENDIAN).float
         assertEquals(1412.0f, width, 0.0f)
@@ -106,7 +111,9 @@ class VideoKeepAliveFrameTest {
 
     @Test
     fun videoConfigHeaderUsesEncodedEvenDimensions() {
-        // 编码器尺寸在构造时已向下对齐偶数，header 必须报同一个值（车机按它建画布）
+        // Размер кодировщика был выровнен по четному числу во время построения, и заголовок должен сообщать то же
+        // значение (машина строит холст в соответствии с ним).
+
         val header = VideoSender.buildVideoConfigHeader(bodySize = 20, width = 1260, height = 654)
         assertEquals(1260.0f, ByteBuffer.wrap(header, 16, 4).order(ByteOrder.LITTLE_ENDIAN).float, 0.0f)
         assertEquals(654.0f, ByteBuffer.wrap(header, 20, 4).order(ByteOrder.LITTLE_ENDIAN).float, 0.0f)

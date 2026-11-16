@@ -6,14 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 触摸报文格式判定（按设备 HID 描述符，不按车机型号/uuid 写死）。
+ * Определение формата сенсорного сообщения (на основе HID-дескриптора устройства, не закодированного жестко в
+ * соответствии с моделью/uuid автомобиля).
  *
- * 两类设备实测：
- *  - 奥迪 MIB3 eso_touchScreen：单指 5 字节 [tip][X u16LE][Y u16LE]，描述符 62B
- *  - DiPlay 测试台 Touchscreen：双槽 12 字节，描述符含两个 Finger Collection
+ * фактическое измерение двух типов оборудования:
+ * — Audi MIB3 eso_touchScreen: один палец, 5 байт [tip][X u16LE][Y u16LE], дескриптор 62B
+ * — испытательный стенд DiPlay Сенсорный экран: двухслотовый, 12 байт, дескриптор с набором двух пальцев
  */
 class TouchReportsTest {
-    /** 奥迪触摸屏描述符（Digitizer 页，单指，X/Y 16bit）。 */
+    /** Дескриптор сенсорного экрана Audi (страница дигитайзера, один палец, X/Y 16 бит). */
     private val audiTouchDescriptor =
         byteArrayOf(
             0x05,
@@ -80,7 +81,7 @@ class TouchReportsTest {
             0xc0.toByte(),
         )
 
-    /** DiPlay 双指描述符（两个 Finger Collection）。 */
+    /** Дескриптор DiPlay для двух пальцев (коллекция двух пальцев). */
     private val diplayTouchDescriptor =
         byteArrayOf(
             0x05,
@@ -140,7 +141,7 @@ class TouchReportsTest {
             0x81.toByte(),
             0x02,
             0xc0.toByte(),
-            // 第二个手指 Collection
+            // Коллекция второго пальца
             0x05,
             0x0d,
             0x09,
@@ -213,7 +214,7 @@ class TouchReportsTest {
 
     @Test
     fun nonDigitizerDescriptorIsNotTouch() {
-        // Consumer Control（媒体键）不是触摸设备
+        // Consumer Control (Media Keys) не является сенсорным устройством.
         val consumer =
             byteArrayOf(
                 0x05,
@@ -259,7 +260,7 @@ class TouchReportsTest {
 
     @Test
     fun diplayMultiSlotReportParses() {
-        // 槽0 按下 (100,200)、槽1 抬起 (0,0)
+        // Слот 0 нажат (100,200), слот 1 поднят (0,0)
         val report =
             byteArrayOf(
                 0x00,
@@ -289,7 +290,7 @@ class TouchReportsTest {
 
     @Test
     fun lengthFallbackWhenDescriptorMissing() {
-        // 描述符不可得：5B → 单指；12B → 多槽；其它 → 不解析
+        // Дескриптор недоступен: 5B → один палец; 12Б → многослотовый; другое → не анализируется
         assertEquals(1, TouchReports.parse(byteArrayOf(0x01, 0x00, 0x02, 0x00, 0x01), null)!!.size)
         assertEquals(2, TouchReports.parse(ByteArray(12), null)!!.size)
         assertNull(TouchReports.parse(byteArrayOf(0x00, 0x00, 0x00, 0x00), null))

@@ -3,23 +3,25 @@ package io.github.shaonialife.cardeck.input
 import android.view.KeyEvent
 
 /**
- * 车机「导航类」HID（iDrive 旋钮 / 四向拨杆 / 确认键）→ Android 方向键。
+ * автомобильная «навигация» HID (ручка iDrive/четырехпозиционный рычаг/клавиша подтверждения) → клавиша направления Android.
  *
- * 与 [ConsumerKeys] 的分工：
- *  - Consumer 页（0x0C）= 媒体键 → `AudioManager.dispatchMediaKeyEvent`，全局生效、不需要焦点；
- *  - Generic Desktop 页（0x01）的 Wheel(0x38)/Hat(0x39) = 旋钮/方向 → **DPAD_***，
- *    必须注入虚拟屏、由焦点系统处理（`CarInputBridge.injectNavigationKey`）。
+ * Разделение труда между   и [ConsumerKeys]:
+ * — Страница потребителя (0x0C) = медиа-ключ → `AudioManager.dispatchMediaKeyEvent`, действует глобально и не требует фокуса;
+ * — Колесо (0x38)/Шляпа (0x39) = Ручка/Направление → **DPAD_*** страницы общего рабочего стола (0x01),
+ * должен быть введен в виртуальный экран и обработан системой фокусировки (`CarInputBridge.injectNavigationKey`).
  *
- * **不按车机型号写死**：先用 HID 描述符判定（有 Wheel/Hat 且不是 Digitizer 才算导航设备），
- * 描述符缺失时才按报文长度兜底（2~4 字节、非 5 字节触摸）。
+ * **Не запрограммировано жестко в зависимости от модели автомобиля**: сначала используйте дескриптор HID для
+ * определения (оно считается навигационным устройством, если оно имеет колесо/шляпу и не является дигитайзером),
+ * Если дескриптор   отсутствует, используется длина сообщения (2–4 байта, не 5 байт).
  *
- * 报文布局（宝马 iD8.5 实测校准用：[rawLogEnabled] 打开后日志里有原始 hex）：
- *  - 末字节按**有符号**解析为旋钮步进（顺时针为正）；
- *  - 前面的字节按位图解析按钮：bit0=确认、1=上、2=下、3=左、4=右、5=返回。
- *  - 描述符声明了 Hat switch 时改用「低 4 位 = 8 向帽」语义。
+ * Формат сообщения   (для BMW iD8.5 фактическая калибровка измерений: [rawLogEnabled] имеет исходный
+ * шестнадцатеричный код в журнале после открытия):
+ * — последний байт интерпретируется как **подписанный** как шаг ручки (по часовой стрелке — положительное значение);
+ * — предыдущий байт анализируется как растровая кнопка: бит0 = подтверждение, 1 = вверх, 2 = вниз, 3 = влево, 4 = вправо, 5 = возврат.
+ * — когда дескриптор объявляет переключатель Hat, вместо этого используется семантика «младшие 4 бита = 8-позиционная шляпа».
  */
 object HidNavigation {
-    /** 原始报文日志开关（设置 → 显示 →「HID 原始日志」）。 */
+    /** Переключатель журнала необработанных сообщений (Настройки → Дисплей → «Журнал необработанных сообщений HID»). */
     @Volatile
     var rawLogEnabled: Boolean = false
 
@@ -29,13 +31,13 @@ object HidNavigation {
     private const val USAGE_WHEEL = 0x38
     private const val USAGE_HAT_SWITCH = 0x39
 
-    /** 单次报告最多走几步（旋钮快拧时避免一次注入几十个按键把 UI 打死）。 */
+    /** Максимальное количество шагов, которые необходимо выполнить в одном отчете (избегайте одновременного добавления десятков кнопок, чтобы отключить пользовательский интерфейс при быстром повороте ручки). */
     private const val MAX_STEPS = 5
 
     private val lastButtonMask = HashMap<String, Int>()
     private val lastHat = HashMap<String, Int>()
 
-    /** 报告对应的设备是否是导航类（有 Wheel/Hat、且不是触摸屏）。 */
+    /** Сообщите, является ли соответствующее устройство навигационным типом (с колесиком/шляпой, а не с сенсорным экраном). */
     fun isNavigationDevice(descriptor: ByteArray?): Boolean {
         if (descriptor == null || descriptor.isEmpty()) return false
         if (hasPage(descriptor, PAGE_DIGITIZER)) return false
@@ -44,9 +46,9 @@ object HidNavigation {
     }
 
     /**
-     * 处理一帧导航报告，返回需要注入的按键序列（0 个或多个）。
+     * обрабатывает кадр навигационного отчета и возвращает последовательность ключей (0 или более), которую необходимо ввести.
      *
-     * @param uuid HID 设备 uuid（同一 uuid 的边沿状态单独维护）
+     * @param uuid Uuid HID устройства (состояние границы того же uuid поддерживается отдельно)
      */
     fun handle(
         uuid: String,
@@ -70,7 +72,7 @@ object HidNavigation {
         }
     }
 
-    /** 8 向帽：0=上 1=右上 2=右 3=右下 4=下 5=左下 6=左 7=左上，其余=松开。 */
+    /** 8 До конца: 0=вверху 1=вверху справа 2=вправо 3=внизу справа 4=внизу 5=внизу слева 6=слева 7=вверху слева, остальное = свободно. */
     private fun parseHat(
         uuid: String,
         value: Int,
@@ -91,7 +93,7 @@ object HidNavigation {
         }
     }
 
-    /** 末字节=有符号步进，前面的字节=按钮位图（边沿触发）。 */
+    /** Последний байт = шаг со знаком, предыдущий байт = растровое изображение кнопки (срабатывает по краю). */
     private fun parseWheelAndButtons(
         uuid: String,
         report: ByteArray,
@@ -125,10 +127,11 @@ object HidNavigation {
     private fun Int?.orZero(): Int = this ?: 0
 
     /**
-     * 描述符里是否出现某个 Usage Page。
-     * 只做「条目扫描」：UsagePage 是全局项（prefix `0000 0101`? 实际 bTag=0x0），
-     * 这里按「任何 1~2 字节数据项的值等于该页」宽松匹配——误判只影响分流，
-     * 不会把触摸屏当旋钮（Digitizer 页优先排除）。
+     * Появляется ли страница использования в дескрипторе .
+     * выполняет только «сканирование записей»: UsagePage — это глобальный элемент (префикс `0000 0101`? фактический bTag=0x0),
+     * Здесь выражение «значение любого элемента данных размером 1–2 байта равно странице» не совсем точно совпадает
+     * — неправильная оценка влияет только на распределение.
+     * не использует сенсорный экран в качестве ручки (сначала исключается страница дигитайзера).
      */
     private fun hasPage(
         descriptor: ByteArray,
@@ -157,7 +160,7 @@ object HidNavigation {
         return false
     }
 
-    /** 描述符里是否出现某个 Usage（局部项 bTag=0x0，1/2 字节）。 */
+    /** Появляется ли определенное Usage в дескрипторе (локальный элемент bTag=0x0, 1/2 байта). */
     private fun hasUsage(
         descriptor: ByteArray,
         usage: Int,
@@ -185,15 +188,15 @@ object HidNavigation {
         return false
     }
 
-    /** 键盘键的可读名（日志用）。 */
+    /** Удобочитаемое имя клавиши клавиатуры (для целей регистрации). */
     fun nameOf(keyCode: Int): String =
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> "上"
-            KeyEvent.KEYCODE_DPAD_DOWN -> "下"
-            KeyEvent.KEYCODE_DPAD_LEFT -> "左"
-            KeyEvent.KEYCODE_DPAD_RIGHT -> "右"
-            KeyEvent.KEYCODE_DPAD_CENTER -> "确认"
-            KeyEvent.KEYCODE_BACK -> "返回"
+            KeyEvent.KEYCODE_DPAD_UP -> "на"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "вниз"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "ушел"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "правильно"
+            KeyEvent.KEYCODE_DPAD_CENTER -> "Подтвердить"
+            KeyEvent.KEYCODE_BACK -> "Возврат"
             else -> "$keyCode"
         }
 }

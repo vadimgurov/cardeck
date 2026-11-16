@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页左栏菜单项底（选中态）：深灰圆角 -->
+<!-- Внизу пункта меню в левой колонке страницы настроек (выбранное состояние): тёмно-серые закруглённые углы. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#FF1C1C1F" />

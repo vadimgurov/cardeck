@@ -16,25 +16,27 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 静默领取 MediaProjection 令牌的**透明跳板**（自动连接专用）。
+ * — **прозрачный трамплин** для молчаливого получения токенов MediaProjection (только для автоматического подключения).
  *
- * 为什么需要它：AudioPlaybackCapture 必须有 MediaProjection 实例，而 Android 14+ 的令牌
- * 是**单次**的（停止捕获即作废），自动连接时没人能点「允许投屏」。
+ * Зачем это нужно: AudioPlaybackCapture должен иметь экземпляр MediaProjection и токен для Android 14+.
+ * — **одиночный** (будет недействителен при остановке захвата). Никто не может нажать «Разрешить зеркалирование
+ * экрана» во время автоматического подключения.
  *
- * 两条系统闸门与对策：
- *  1. **授权弹窗**：`appops set <pkg> PROJECT_MEDIA allow` 会让 SystemUI 的
- *     `MediaProjectionPermissionActivity` 直接返回 RESULT_OK（Tasker 官方文档同款做法）；
- *  2. **后台启动 Activity（BAL）**：由 Shizuku 执行
- *     `am start -n <pkg>/<activity> --activity-no-animation` 拉起本页——shell 持有
- *     `START_ACTIVITIES_FROM_BACKGROUND`，不受应用侧 BAL 限制；失败再退回
- *     `context.startActivity`（需要 `SYSTEM_ALERT_WINDOW`，缺失时先 `appops` 补授）。
+ * Два системных врата и меры противодействия:
+ * 1. **Всплывающее окно авторизации**: `appops set <pkg> PROJECT_MEDIA allow` создаст SystemUI
+ * `MediaProjectionPermissionActivity` напрямую возвращает RESULT_OK (тот же метод, что и в официальных документах Tasker);
+ * 2. **Фоновое стартовое действие (BAL)**: выполняется Шизуку
+ * `am start -n <pkg>/<activity> --activity-no-animation` Поднимите эту страницу ——оболочка удерживается
+ * `START_ACTIVITIES_FROM_BACKGROUND`, не ограничен BAL на стороне приложения; возвращается в случае неудачи
+ * `context.startActivity` (требуется `SYSTEM_ALERT_WINDOW`, в случае отсутствия `appops` будет вручен первым).
  *
- * 页面本身：1×1、不可触摸、不可聚焦、无动画、不进最近任务；拿到结果立即 finish。
+ * Сама страница  : 1×1, недоступна для касания, фокусировки, без анимации, без недавних задач; закончить сразу после получения результатов.
  *
- * **用完即弃**：令牌由 `CarPlayService` 立刻换成 MediaProjection 实例；本页不持有任何状态。
+ * **Одноразовый**: токен немедленно заменяется экземпляром MediaProjection из `CarPlayService`; эта страница не
+ * содержит никакого состояния.
  */
 class SilentProjectionActivity : Activity() {
-    /** 授权结果（resultCode + 换 MediaProjection 所需的 Intent）。 */
+    /** Результат авторизации (resultCode + Intent, необходимый для MediaProjection). */
     data class Grant(
         val resultCode: Int,
         val data: Intent,
@@ -54,13 +56,17 @@ class SilentProjectionActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // 手机在口袋里（锁屏 + 息屏）时，后台 Activity 不会被 resume，onActivityResult 会一直
-        // 挂着；这两个标志让本页在锁屏上也能立刻走完（配合暗幕/真息屏，用户无感）。
+        // Когда телефон находится в кармане (экран блокировки + отдых экрана), фоновая активность не возобновляется, а
+        // onActivityResult всегда будет
+
+        // Висит; эти два знака позволяют немедленно завершить эту страницу даже на экране блокировки (с темным
+        // экраном/экраном истинного дыхания пользователь этого не почувствует).
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         }
-        // 1×1、不可触摸、不可聚焦：用户完全看不到
+        // 1×1, неприкосновенный, не фокусируемый: полностью невидим для пользователя
         window.setLayout(1, 1)
         window.addFlags(
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -94,7 +100,9 @@ class SilentProjectionActivity : Activity() {
     }
 
     override fun onDestroy() {
-        // 没拿到结果就被销毁（用户取消/被系统回收）：让等待方立刻失败，而不是等满超时
+        // Уничтожено до получения результата (отменено пользователем/переработано системой): пусть ожидающая сторона
+        // выйдет из строя немедленно, вместо того, чтобы ждать тайм-аута.
+
         complete(null, "Активность уничтожается до возврата результатов")
         super.onDestroy()
     }
@@ -108,13 +116,13 @@ class SilentProjectionActivity : Activity() {
     companion object {
         private const val REQUEST_CODE = 10086
 
-        /** 同一时刻只允许一个请求（自动连接是串行的）。 */
+        /** Одновременно допускается только один запрос (автоматические соединения являются последовательными). */
         private val pending = AtomicReference<CompletableFuture<Grant>?>(null)
 
         /**
-         * 阻塞领取令牌（**必须在后台线程调用**，内部会走 2~3 条 Shizuku 命令）。
+         * блокирует получение токена (**Должен быть вызван в фоновом потоке**, 2~3 команды Shizuku будут выполнены внутри).
          *
-         * @return null = 失败/超时：调用方应退回「只推视频」
+         * @return null = Сбой/Тайм-аут: вызывающему абоненту следует вернуться к режиму «Только push-видео»
          */
         fun request(
             context: Context,
@@ -124,19 +132,23 @@ class SilentProjectionActivity : Activity() {
             val future = CompletableFuture<Grant>()
             pending.getAndSet(future)?.completeExceptionally(IllegalStateException("Перезаписан новым запросом"))
             val pkg = app.packageName
-            // 1) 放行投屏：SystemUI 见到 PROJECT_MEDIA=allow 会直接返回 RESULT_OK，不弹窗
+            // 1) Разрешить показ экрана: когда SystemUI видит PROJECT_MEDIA=allow, он напрямую возвращает RESULT_OK без всплывающего окна.
             Shell.exec("appops set $pkg PROJECT_MEDIA allow", 5_000L)
-            // 2) 没有悬浮窗权限时，后台拉起 Activity / 前台服务都会被拦；暗幕本来也需要它
+            // 2) При отсутствии разрешения на плавающее окно действия, запущенные в фоновых/передних службах, будут
+            // заблокированы; темным экранам это тоже нужно.
+
             if (!Settings.canDrawOverlays(app)) {
                 val r = Shell.exec("appops set $pkg SYSTEM_ALERT_WINDOW allow", 5_000L)
                 DebugFileLog.append(app, "PROJ: Возврат «отображения поверх других приложений» ok=${r.ok} (${r.output.take(60)})")
             }
-            // 3) 录音权限（AudioPlaybackCapture 需要）：没授过就顺手补上
+            // 3) Разрешение на запись (требуется для AudioPlaybackCapture): просто добавьте его, если вы его еще не предоставили.
             if (app.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 val r = Shell.exec("appops set $pkg RECORD_AUDIO allow", 5_000L)
                 DebugFileLog.append(app, "PROJ: предоставить разрешение на запись ok=${r.ok}（${r.output.take(60)}）")
             }
-            // 4) 用 shell am start 绕过后台启动 Activity 限制；失败再退回应用内启动
+            // 4) Используйте оболочку am start, чтобы обойти ограничение активности фонового запуска; в случае неудачи
+            // вернитесь к запуску в приложении
+
             val component = "$pkg/${SilentProjectionActivity::class.java.name}"
             val viaShell = Shell.exec("am start -n $component --activity-no-animation", 8_000L)
             if (!viaShell.ok) {

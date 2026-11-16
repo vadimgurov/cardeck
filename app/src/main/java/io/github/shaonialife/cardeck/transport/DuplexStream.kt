@@ -7,12 +7,12 @@ import java.io.OutputStream
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
 
-/** 阻塞式双向字节流抽象：蓝牙 RFCOMM socket 与内存回环测试共用。 */
+/** Блокировка абстракции двунаправленного потока байтов: сокет Bluetooth RFCOMM используется совместно с тестированием обратной связи в памяти. */
 interface DuplexStream : Closeable {
-    /** 阻塞读取；返回 -1 表示流结束。 */
+    /** Блокирует чтение; возвращает -1, чтобы указать конец потока. */
     fun read(buffer: ByteArray): Int
 
-    /** 阻塞写入全部字节或抛异常。 */
+    /** Блокирует запись всех байтов или выдает исключение. */
     fun write(bytes: ByteArray)
 
     override fun close()
@@ -24,10 +24,13 @@ class StreamDuplexStream(
     private val onClose: () -> Unit = {},
 ) : DuplexStream {
     /**
-     * 注意：read/write 不能共享一把锁——读线程会阻塞在 read() 里持锁等待数据，
-     * 写线程将永久拿不到锁（真机蓝牙上实际触发过）。写入的并发安全由
-     * Iap2LinkChannel 的通道锁保证（所有写入都在 lock 内串行），读只发生在
-     * 唯一的读线程，蓝牙 socket 的输入/输出流彼此独立，跨线程读写是安全的。
+     * Примечание: чтение/запись не может совместно использовать блокировку — поток чтения блокируется в read() и
+     * удерживает блокировку в ожидании данных.
+     * Поток записи       никогда не сможет получить блокировку (фактически срабатывает на реальном устройстве
+     * Bluetooth). Безопасность параллелизма при записи обеспечивается
+     * Гарантия блокировки канала Iap2LinkChannel (все записи выполняются последовательно внутри блокировки), чтение происходит только
+     * - единственная читающая ветка. Потоки ввода/вывода разъема Bluetooth независимы друг от друга, а перекрестное
+     * чтение и запись безопасны.
      */
     override fun read(buffer: ByteArray): Int = input.read(buffer)
 
@@ -43,7 +46,7 @@ class StreamDuplexStream(
     }
 }
 
-/** 内存回环流对：两端各持一个 DuplexStream，用于单元测试。 */
+/** Пара потоков кольцевой проверки памяти: на каждом конце содержится DuplexStream для модульного тестирования. */
 class InMemoryStreamPair {
     private val aToB = Pipe()
     private val bToA = Pipe()
@@ -90,7 +93,7 @@ class InMemoryStreamPair {
             runCatching { source.close() }
         }
 
-        /** 关闭对端出口，让对方读到 EOF。 */
+        /** Закройте выход узла и позвольте узлу прочитать EOF. */
         fun closePartner() {
             runCatching { source.close() }
         }

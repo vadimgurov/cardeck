@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置页应用横屏行：图标 + 名称（下方可带红色状态小字）+ 开关状态勾选框（整行可点） -->
+<!-- Горизонтальная строка экрана приложения страницы настройки: значок + имя (красный текст статуса может быть включен ниже) + флажок переключения статуса (можно щелкнуть всю строку) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -36,7 +36,7 @@
             android:textColor="#FFF5F5F7"
             android:textSize="13sp" />
 
-        <!-- 系统侧覆盖状态小字：默认隐藏；打开时显示、残留（勾选框关但系统开）时红色高亮 -->
+        <!-- Мелкий текст состояния наложения на стороне системы: скрыт по умолчанию; отображается при включении, подсвечивается красным, если находится слева (флажок снят, но система включена) -->
         <TextView
             android:id="@+id/oriHint"
             android:layout_width="match_parent"

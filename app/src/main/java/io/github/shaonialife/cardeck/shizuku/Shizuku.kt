@@ -12,17 +12,18 @@ import java.io.FileInputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * Shizuku 网关 + shell 执行 + CarInput UserService 绑定。
- * 激活（无线调试，Android 11+，免 root）：开发者选项 → 无线调试 → 配对 → Shizuku App 点启动。
- * （移植自参考项目 android-auto）
+ * Шлюз Shizuku + выполнение оболочки + привязка CarInput UserService.
+ * Активация   (беспроводная отладка, Android 11+, root не требуется): Параметры разработчика → Беспроводная
+ * отладка → Сопряжение → Приложение Shizuku. Нажмите, чтобы запустить.
+ * (перенесено из эталонного проекта android-auto)
  */
 object ShizukuGate {
     enum class State { NOT_INSTALLED, NOT_RUNNING, UNAUTHORIZED, READY }
 
-    /** Shizuku 授权请求码（授权结果回调按它过滤）。 */
+    /** Код запроса авторизации Shizuku (по нему фильтруется обратный вызов результата авторизации). */
     const val PERMISSION_REQUEST_CODE = 101
 
-    /** Shizuku App 包名（打开/检测共用）。 */
+    /** Имя пакета приложения Shizuku (открыть/обнаружить общий доступ). */
     const val PACKAGE_NAME = "moe.shizuku.privileged.api"
 
     fun state(context: Context): State {
@@ -52,10 +53,11 @@ object ShizukuGate {
     }
 
     /**
-     * 未就绪时的引导文案（纯函数，可单测）。
+     * Загрузочное копирование, когда оно не готово (чистая функция, однократная проверка).
      *
-     * 三种未就绪状态的**处置方式完全不同**（装/启动/授权），混成一句
-     * 「Shizuku 未就绪」用户无从下手——这是共享给朋友后最容易被问住的地方。
+     * Три состояния неготовности имеют совершенно разные методы обработки (установка/запуск/авторизация), смешанные в одно предложение.
+     * «Шизуку не готова» Пользователи понятия не имеют, с чего начать — это, скорее всего, вопрос, с которого их
+     * спросят после того, как они поделятся им с друзьями.
      */
     internal fun guidanceOf(state: State): ShizukuGuidance =
         when (state) {
@@ -96,15 +98,15 @@ object ShizukuGate {
         }
 }
 
-/** Shizuku 未就绪时的引导内容（见 [ShizukuGate.guidanceOf]）。 */
+/** Загрузить контент, когда Шизуку не готов (см. [ShizukuGate.guidanceOf]). */
 internal data class ShizukuGuidance(
     val title: String,
     val message: String,
-    /** null = 本机没有可执行的主操作（未安装时无处可跳）。 */
+    /** null = На этом компьютере нет исполняемого файла основного действия (некуда перейти, если он не установлен). */
     val primaryLabel: String?,
 )
 
-/** 以 shell 身份执行命令（等同 adb shell）。Shizuku api 13 需经 IShizukuService binder 调 newProcess。 */
+/** Выполните команду как оболочку (эквивалент оболочки adb). Shizuku API 13 необходимо вызвать newProcess через привязку IshizukuService. */
 object Shell {
     class Result(
         val exitCode: Int,
@@ -113,15 +115,16 @@ object Shell {
         val ok: Boolean get() = exitCode == 0
     }
 
-    /** 主线程调用 `Shell.exec` 的累计次数（诊断用；见 [exec] 里的守卫）。 */
+    /** Совокупное количество вызовов `Shell.exec` основным потоком (в целях диагностики; см. защиту в [exec]). */
     @Volatile
     var mainThreadViolations: Int = 0
         private set
 
     /**
-     * 在主线程调用 shell 的告警出口（SessionController.appendLog）。
-     * 单条 shell 通常 100ms 量级、超时可达数秒，串几条就够 ANR——
-     * 这类问题只在真机上暴露（HKS 下 logcat 不可读），必须进文件日志。
+     * вызывает аварийный выход оболочки (SessionController.appendLog) в основном потоке.
+     * Длительность одной оболочки обычно составляет порядка 100 мс, а таймаут может достигать нескольких секунд. Для
+     * ANR достаточно нескольких строк——
+     * Этот тип проблемы встречается только на реальных машинах (logcat не читается в HKS), и необходимо вводить журналы файлов.
      */
     @Volatile
     var violationSink: ((String) -> Unit)? = null
@@ -130,19 +133,23 @@ object Shell {
         cmd: String,
         timeoutMs: Long = 6000L,
     ): Result {
-        // **UI 线程禁止 shell**：每次 exec 都是 Shizuku newProcess + 进程等待。
-        // 这里不强行拦截（会让原本可用的功能失效），但记录并告警——历史上
-        // 已有两次真机 ANR 源于此（detach 清理、横屏勾选框）。
+        // **Оболочка запрета потоков пользовательского интерфейса**: Каждый исполнитель представляет собой новый процесс
+        // Shizuku + ожидание процесса.
+
+        // Здесь нет принудительного перехвата (что сделает недействительными изначально доступные функции), а запись и
+        // предупреждение - исторически
+
+        // Из-за этого возникло две ошибки ANR на реальных устройствах (отключить очистку, флажок горизонтального экрана).
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             mainThreadViolations++
             violationSink?.invoke(
-                "SHELL: ⚠ 主线程调用 shell（第 $mainThreadViolations 次）cmd=${cmd.take(60)}" +
-                    "（$timeoutMs ms 上限）——应改用 Bg.run / 后台线程",
+                "SHELL: ⚠ Основной поток вызывает оболочку (время $mainThreadViolations) cmd=${cmd.take(60)}." +
+                    "(ограничение $timeoutMs мс) — вместо этого следует использовать Bg.run/фоновый поток",
             )
         }
         val binder =
             rikka.shizuku.Shizuku.getBinder()
-                ?: return Result(-1, "Shizuku 未连接")
+                ?: return Result(-1, "Шизуку не на связи")
         return try {
             val service = IShizukuService.Stub.asInterface(binder)
             val process = service.newProcess(arrayOf("sh", "-c", cmd), null, null)
@@ -176,25 +183,28 @@ object Shell {
                 }
             Result(exit, output)
         } catch (e: Exception) {
-            Result(-1, "命令执行失败：${e.message ?: e.javaClass.simpleName}")
+            Result(-1, "Не удалось выполнить команду: ${e.message ?: e.javaClass.simpleName}.")
         }
     }
 }
 
-/** CarInput UserService 的绑定管理：绑定一次后所有触摸注入直连常驻 shell 进程（毫秒级）。 */
+/** Управление привязкой CarInput UserService: после однократной привязки все сенсорные инъекции напрямую подключаются к резидентному процессу оболочки (уровень миллисекунд). */
 object CarInputClient {
     @Volatile
     var service: ICarInput? = null
         private set
 
     /**
-     * 等待 UserService 就绪（阻塞，**只能在后台线程调用**）。
+     * ожидает готовности UserService (блокируется, **может вызываться только в фоновых потоках**).
      *
-     * 会话刚激活时服务可能仍在 spawn——此时若立刻判定「受信屏不可用」而回退应用侧
-     * PUBLIC 屏，会白白丢掉受信屏的 IME/触摸优势，且回退路径对 UserService 依赖更重
-     * （2026-10-22 K60E：首次触摸就注入失败，日志里「三屏创建(回退)」）。
+     * Служба все еще может быть создана при первой активации сеанса       - в это время, если сразу будет
+     * определено, что «доверенный экран недоступен» и будет возвращена сторона приложения,
+     * Экран       PUBLIC потеряет преимущество IME/touch доверенного экрана, а резервный путь будет в большей
+     * степени зависеть от UserService.
+     * (22 октября 2026 г. K60E: Ошибка внедрения при первом касании, в журнале «Создано три экрана (откат)»).
      *
-     * @return 就绪的 service；超时返回 null（调用方按原有回退逻辑处理）。
+     * @return готовое обслуживание; возвращает значение null после тайм-аута (вызывающая сторона обрабатывает его в
+     * соответствии с исходной логикой возврата).
      */
     fun awaitReady(
         context: Context,
@@ -221,11 +231,11 @@ object CarInputClient {
     @Volatile
     private var appContext: Context? = null
 
-    /** UserService 参数（unbind 时需同一实例）。 */
+    /** Параметр UserService (для отмены привязки необходим тот же экземпляр). */
     @Volatile
     private var userServiceArgs: rikka.shizuku.Shizuku.UserServiceArgs? = null
 
-    /** 诊断日志出口（接入文件日志，HKS 加密下 logcat 不可读）。 */
+    /** Экспорт журнала диагностики (журнал доступа к файлу, logcat не читается при шифровании HKS). */
     @Volatile
     var logSink: ((String) -> Unit)? = null
 
@@ -245,16 +255,23 @@ object CarInputClient {
     private var binderListenerAdded = false
 
     /**
-     * 回收旧版本残留的 UserService 进程，返回实际 kill 的数量（不足条件时 0）。
+     * перезапускает оставшиеся процессы UserService из старой версии и возвращает фактическое количество уничтожений
+     * (0, если условий недостаточно).
      *
-     * Shizuku 按「组件+进程名+版本(lastUpdateTime)」复用常驻 shell 进程——重装 APK 后
-     * 旧版本进程既不受 force-stop 影响、Shizuku 也不回收；而虚拟屏只有创建它的进程能
-     * 释放（releaseDisplay 只查本进程的 map），表现为「重启后检测到残留屏，点清理却
-     * 释放 0/N」。这里枚举 :car_input 进程，杀掉除当前绑定进程外的全部——旧进程只持有
-     * 残留屏，进程回收即屏随之释放（不打断触摸注入，当前会话屏属于绑定进程）。
-     * 配合 UserService 侧的过期自清（CarInputServiceImpl 的 stale self-reap）双保险。
+     * Shizuku повторно использует резидентный процесс оболочки по принципу «компонент + имя процесса + версия
+     * (lastUpdateTime)» — после переустановки APK
+     * Принудительная остановка не влияет на процесс старой версии       и не перерабатывается Шизуку; только
+     * процесс, создавший виртуальный экран, может
+     * Версия       (releaseDisplay проверяет только карту этого процесса), производительность такая: «После
+     * перезапуска обнаружен остаточный экран, нажмите «Очистить», чтобы очистить его»
+     * выпускает 0/N". Здесь мы перечисляем процессы :car_input и уничтожаем все, кроме текущего связанного процесса
+     * - сохраняется только старый процесс.
+     * остаточный экран, процесс перезапускает экран и освобождает его (инъекция касания не прерывается, текущий
+     * экран сеанса принадлежит связанному процессу).
+     * сотрудничает с истекшим самовозвратом на стороне UserService (устаревшим самовозвратом CarInputServiceImpl) двойной страховкой.
      *
-     * 阻塞调用（含 shell ps/kill），须在后台线程执行；绑定成功时自动触发一次。
+     * Блокирующий вызов       (включая командную строку ps/kill) должен выполняться в фоновом потоке; он
+     * автоматически запускается один раз, когда привязка успешна.
      */
     fun reapStaleUserServices(): Int {
         val bound = service ?: return 0
@@ -262,14 +279,16 @@ object CarInputClient {
             try {
                 bound.pid()
             } catch (t: Throwable) {
-                // 旧 dex 无 pid() 事务（正常不会发生：Shizuku 按版本复用，绑定的必是当前版本）
-                diag("reap 跳过：pid() 不可用（${t.javaClass.simpleName}）")
+                // В старом dex нет транзакции pid() (обычно этого не происходит: Shizuku повторно использует версию, а связанная
+                // должна быть текущей версией)
+
+                diag("reap пропущен: pid() недоступен (${t.javaClass.simpleName})")
                 return 0
             }
         val procName = (appContext?.packageName ?: return 0) + ":car_input"
         val ps = Shell.exec("ps -A -o PID,ARGS", 5_000L)
         if (!ps.ok) {
-            diag("reap 跳过：ps 失败（${ps.output.take(40)}）")
+            diag("reap пропущен: PS не удалось (${ps.output.take(40)})")
             return 0
         }
         val stale =
@@ -282,26 +301,33 @@ object CarInputClient {
                 }.toList()
         if (stale.isEmpty()) return 0
         val killed = stale.count { pid -> Shell.exec("kill -9 $pid", 3_000L).ok }
-        // force：紧随 bind 的 1s 节流窗口会吞掉这条关键结果（排查时必查）
-        diag("已回收 $killed/${stale.size} 个旧版本 UserService 进程（其残留虚拟屏随之释放）", force = true)
+        // принудительное: окно регулирования в 1 с сразу после привязки поглотит этот ключевой результат (необходимо
+        // проверить при устранении неполадок)
+
+        diag(
+            "Старая версия процесса UserService $killed/${stale.size} была переработана (соответственно будет освобожден " +
+                "ее остаточный виртуальный экран)",
+            force = true,
+        )
         return killed
     }
 
     /**
-     * 物理主屏断电/点亮（真息屏，同 scrcpy `-S`）。失败返回 false：
-     * ROM 未给 shell 相应权限，或 SDK 34+ 取不到 display token。
+     * Физический главный экран  выключен/включен (настоящий экран, такой же, как scrcpy `-S`). Вернуть false в случае неудачи:
+     * ROM не предоставляет оболочке соответствующие разрешения, или SDK 34+ не может получить токен отображения.
      */
     fun setPhysicalScreenPower(on: Boolean): Boolean =
         try {
             service?.setPhysicalScreenPower(on) ?: false
         } catch (t: Throwable) {
-            diag("setPhysicalScreenPower($on) 失败：${t.javaClass.simpleName} ${t.message}")
+            diag("setPhysicalScreenPower($on) не удалось: ${t.javaClass.simpleName} ${t.message}")
             false
         }
 
     /**
-     * 按键注入到指定 display（iDrive 旋钮 → 方向键/确认键）。
-     * 走 UserService 的 injectInputEvent（毫秒级）；失败时调用方回退 shell `input -d`。
+     * Кнопки  выводятся на указанный дисплей (ручка iDrive → клавиши направления/клавиши подтверждения).
+     * принимает событие injectInputEvent из UserService (уровень миллисекунд); в случае сбоя вызывающая сторона
+     * возвращается к оболочке `input -d`.
      */
     fun keyEvent(
         displayId: Int,
@@ -310,7 +336,7 @@ object CarInputClient {
         try {
             service?.keyEvent(displayId, keyCode) ?: false
         } catch (t: Throwable) {
-            diag("keyEvent($displayId,$keyCode) 失败：${t.javaClass.simpleName} ${t.message}")
+            diag("keyEvent($displayId,$keyCode) не удалось: ${t.javaClass.simpleName} ${t.message}")
             false
         }
 
@@ -320,11 +346,15 @@ object CarInputClient {
                 name: ComponentName?,
                 binder: IBinder?,
             ) {
-                // ⚠️ 本回调由 Shizuku 库 post 到**主线程**（ShizukuServiceConnection 用
-                // new Handler(Looper.getMainLooper())）。因此这里**绝不能**做阻塞调用：
-                // ping() 是跨进程 binder 调用，服务进程忙（建虚拟屏/注入）时可能阻塞
-                // 数百毫秒甚至更久，一旦主线程被堵，后续所有回调排队、binding 永久为真
-                // ——2026-10-22 K60E 真机定谳的「注入必然死锁」正是这条链。
+                // ⚠️ Этот обратный вызов отправляется библиотекой Shizuku в **основной поток** (используется ShizukuServiceConnection
+                // новый обработчик(Looper.getMainLooper())). Поэтому здесь нельзя блокировать вызовы:
+                // ping() — это межпроцессный вызов связывателя, который может быть заблокирован, когда процесс службы занят
+                // (создание виртуального экрана/внедрение).
+
+                // Сотни миллисекунд или даже дольше. Как только основной поток будет заблокирован, все последующие обратные
+                // вызовы будут поставлены в очередь, и привязка будет всегда истинной.
+
+                // ——22.10.2026 «Неизбежный тупик» K60E — именно эта цепочка.
                 val bound = ICarInput.Stub.asInterface(binder)
                 service = bound
                 binding = false
@@ -338,14 +368,18 @@ object CarInputClient {
                         }
                     diag("connected ping=$ok", force = true)
                     if (!ok) {
-                        // 只有仍是本次绑定的结果才清空（期间可能已重绑成功）
+                        // Будут удалены только результаты этой привязки (в течение этого периода повторная привязка могла быть успешной)
                         if (service === bound) {
                             service = null
                             binding = false
                         }
                     } else {
-                        // 绑定成功后顺手回收旧版本残留进程（其持有的虚拟屏跨进程无法释放，
-                        // 只有进程回收才能让屏消失）。后台线程执行：内部含 shell ps/kill。
+                        // После успешной привязки остаточный процесс старой версии будет плавно переработан (удерживаемый им виртуальный
+                        // экран не может быть освобожден между процессами.
+
+                        // Только переработка процесса может заставить экран исчезнуть). Выполнение фонового потока: внутри содержит
+                        // оболочку ps/kill.
+
                         reapStaleUserServices()
                     }
                 }
@@ -359,27 +393,31 @@ object CarInputClient {
             }
         }
 
-    /** 上次绑定尝试时间（防止高频重试）。 */
+    /** Время последней попытки привязки (для предотвращения часто повторяющихся попыток). */
     @Volatile
     private var lastBindAttemptAt = 0L
 
-    /** 本次绑定发起时刻（判「回调迟迟不来」用；0 = 当前无进行中的绑定）。 */
+    /** Время инициации этой привязки (используется для определения задержки обратного вызова; 0 = привязка в данный момент не выполняется). */
     @Volatile
     private var bindingSince = 0L
 
     /**
-     * 确保 UserService 已绑定。可高频调用：service 为空且距上次尝试 >1.5s 时自动重绑
-     * （手机重启/Shizuku 重启后 binder 可能丢失而进程残留，需主动重建连接）。
+     * Убедитесь, что UserService привязан. Может вызываться часто: служба пуста и автоматически перепривязывается
+     * >1,5 с с момента последней попытки.
+     * (После перезагрузки мобильного телефона/перезапуска Shizuku подшивка может быть потеряна, а процесс останется,
+     * поэтому соединение необходимо активно восстанавливать).
      *
-     * **本方法可能在主线程被调用**（MainActivity 的启动探测），而 bindUserService 是
-     * 同步 binder 调用——统一改投后台，主线程只做一次转手。
+     * **Этот метод может быть вызван в основном потоке** (обнаружение запуска MainActivity), а метод bindUserService
+     * Синхронный вызов связывателя       — унифицированное изменение фона, основной поток переходит из рук в руки только один раз.
      */
     fun ensure(context: Context) {
         val app = context.applicationContext
         appContext = app
         addBinderListeners()
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            // 不在主线程做 binder 调用：回调本身也走主 Looper，这里堵住等于自锁
+            // Не делайте вызовы связывателя в основном потоке: сам обратный вызов также берет на себя основной Looper,
+            // блокировка здесь равна самоблокировке
+
             Bg.run("shizuku-bind") { ensureInternal(app) }
             return
         }
@@ -391,15 +429,15 @@ object CarInputClient {
         binderListenerAdded = true
         try {
             rikka.shizuku.Shizuku.addBinderReceivedListener {
-                // Shizuku 服务端（重新）起来了：旧连接必然失效，允许重新绑定一次
-                diag("Shizuku binder 已就绪——重新绑定 UserService", force = true)
+                // Сервер Shizuku (пере)активен: старое соединение должно быть недействительным и перепривязка разрешена.
+                diag("Биндер Shizuku готов — перепривязываем UserService", force = true)
                 binding = false
                 bindingSince = 0L
                 lastBindAttemptAt = 0L
                 appContext?.let { Bg.run("shizuku-bind") { ensureInternal(it) } }
             }
             rikka.shizuku.Shizuku.addBinderDeadListener {
-                diag("Shizuku binder 断开（服务端退出/重启）——触摸注入暂不可用", force = true)
+                diag("Привязка Shizuku отключена (выход/перезапуск сервера) — сенсорная инъекция временно недоступна", force = true)
                 service = null
                 binding = false
                 bindingSince = 0L
@@ -411,32 +449,42 @@ object CarInputClient {
     private fun ensureInternal(app: Context) {
         if (service != null) return
         val now = android.os.SystemClock.uptimeMillis()
-        // 1.5s 节流：Shizuku 被系统冻结期间绑定会静默失败，解冻后需要尽快恢复
+        // Дросселирование в течение 1,5 с: привязка произойдет автоматически, пока Шизуку заморожена системой, и ее
+        // необходимо восстановить как можно скорее после оттаивания.
+
         if (now - lastBindAttemptAt < BIND_THROTTLE_MS) return
-        // **只在「等得太久」时才重新发起**。旧实现固定 1.5s 就判卡死，且重绑前会
-        // unbindUserService(remove=true)——那会把刚起来的服务进程**直接杀掉**：
-        //   Shizuku 的 connected 回调 post 到主线程 → 主线程一忙回调就晚到 →
-        //   1.5s 后被判「卡死」→ 杀进程 → 重新 spawn → 回调又晚到 → 再杀……
-        // 这是自持抖动，永不收敛（2026-10-22 K60E 真机：注入失败 1700+ 次、
-        // 每 2~3 秒刷一次「绑定卡死状态已解除」）。
-        // 现在：等待窗口放宽到 8s，且**绝不在这里杀服务进程**（重绑是幂等的，
-        // Shizuku 会把已在运行的服务 binder 再次回调过来）。
+        // **Повторная инициализация** только в случае «слишком долгого ожидания». Старая реализация зависала после
+        // исправления на 1,5 секунды и блокировалась перед повторной привязкой.
+
+        // unbindUserService(remove=true) — — Это приведет к непосредственному завершению только что запущенного служебного процесса:
+        // Подключенный обратный вызов Шизуку отправляет сообщения в основной поток → обратный вызов будет задерживаться,
+        // когда основной поток занят →
+
+        // Через 1,5 секунды считается, что он «застрял» → завершить процесс → повторно запустить → обратный вызов снова
+        // задерживается → снова убить…
+
+        // Это самоподдерживающийся джиттер, который никогда не сходится (22 октября 2026 г., реальная машина K60E: отказ
+        // впрыска более 1700 раз,
+
+        // Кисть «Привязка застрявшего состояния была снята» каждые 2–3 секунды).
+        // Теперь: окно ожидания уменьшено до 8 секунд, и **никогда не завершайте здесь процесс обслуживания** (перепривязка идемпотентна,
+        // Шизуку снова вызовет уже запущенную службу связывания).
         if (binding) {
             val waited = if (bindingSince == 0L) 0L else now - bindingSince
             if (!shouldRebind(binding = true, waitedMs = waited, stuckTimeoutMs = BIND_STUCK_TIMEOUT_MS)) {
-                // 仍在正常等待：不打日志、不打断
+                // Все еще ожидаю в обычном режиме: без регистрации или прерывания
                 return
             }
             binding = false
             diag(
-                "绑定等待 ${waited}ms 仍未回调——重新发起（不杀服务进程）",
+                "Ожидание привязки ${waited}ms все еще не перезванивается - повторите попытку (не завершайте процесс службы)",
                 force = true,
             )
         }
         lastBindAttemptAt = now
         val gate = ShizukuGate.state(app)
         if (gate != ShizukuGate.State.READY) {
-            diag("绑定暂停：state=$gate")
+            diag("Привязка паузы: состояние=$gate")
             return
         }
         binding = true
@@ -445,20 +493,27 @@ object CarInputClient {
             val args =
                 userServiceArgs ?: rikka.shizuku.Shizuku
                     .UserServiceArgs(
-                        // 包名取自运行时（不要硬编码）：改名后这里会自动跟随
+                        // Имя пакета берется из среды выполнения (не кодируйте жестко): оно будет автоматически следовать после
+                        // изменения имени.
                         ComponentName(app.packageName, CarInputServiceImpl::class.java.name),
                     ).processNameSuffix("car_input")
                     .debuggable(true)
-                    // 版本号取 APK lastUpdateTime（见 serviceVersion 注释）
+                    // Номер версии взят из APK LastUpdateTime (см. аннотацию serviceVersion).
                     .version(serviceVersion())
                     .also { userServiceArgs = it }
-            // **绝不 unbindUserService(remove=true)**：那个参数会 kill 远端服务进程。
-            // 旧实现在每次重试前都调用它 → 把刚 spawn 起来的进程杀掉 → 回调永远等不到
-            // → 再重试再杀，形成自持抖动（2026-10-22 K60E 注入必然死锁的根因之一）。
-            // bindUserService 本身幂等：服务已在运行时 Shizuku 会把现有 binder 再次
-            // 回调到同一个 ServiceConnection（Set 去重），无需先解绑。
+            // **Never unbindUserService(remove=true)**: этот параметр уничтожит процесс удаленной службы.
+            // Старая реализация вызывает его перед каждой повторной попыткой → убивает вновь созданный процесс → обратный
+            // вызов никогда не ждет
+
+            // → Повторите попытку и завершите еще раз, вызывая самоподдерживающееся дрожание (одна из основных причин
+            // неизбежного тупика при внедрении K60E 2026-10-22).
+
+            // Сама по себе служба связывания BindUserService является идемпотентной: когда служба уже запущена, Shizuku
+            // снова свяжет существующую связующую программу.
+
+            // Обратный вызов того же ServiceConnection (установлен для удаления дубликатов), предварительное отвязывание не требуется.
             rikka.shizuku.Shizuku.bindUserService(args, conn)
-            diag("bindUserService requested（等待回调，超时 ${BIND_STUCK_TIMEOUT_MS}ms）")
+            diag("Запрошена служба BindUserService (ожидание обратного вызова, тайм-аут ${BIND_STUCK_TIMEOUT_MS}ms)")
         } catch (e: Throwable) {
             binding = false
             bindingSince = 0L
@@ -467,11 +522,15 @@ object CarInputClient {
     }
 
     /**
-     * UserService 版本 = APK lastUpdateTime（秒）。Shizuku 按「组件+进程名+版本」复用
-     * 常驻服务进程：硬编码版本号时重装 APK 不会换进程——复用的旧进程跑的还是旧 dex，
-     * 新代码静默不生效（2026-10-15 实测：受信屏加 SUPPORTS_IME 后 flags 仍是旧值
-     * 0x448 的根因；且 force-stop 杀不掉这些 shell 进程，会越积越多）。
-     * lastUpdateTime 重装必变 → 必起新进程；APK 不变时恒定 → 正常复用常驻进程。
+     * Версия UserService = APK LastUpdateTime (секунды). Шизуку нажмите «компонент + имя процесса + версия», чтобы повторно использовать
+     * Процесс резидентной службы      : переустановка APK не изменит процесс, если номер версии жестко
+     * запрограммирован — повторно используемый старый процесс по-прежнему запускает старый dex.
+     * Новый код не вступает в силу автоматически (фактическое тестирование 15 октября 2026 г.: после добавления
+     * SUPPORTS_IME на доверенный экран флаги по-прежнему имеют старые значения)
+     * The root cause of       0x448; и принудительная остановка не может уничтожить эти процессы оболочки, и они
+     * будут накапливаться все больше и больше).
+     * LastUpdateTime при переустановке изменится → будет запущен новый процесс; константа, когда APK остается
+     * неизменным → резидентный процесс будет повторно использоваться в обычном режиме.
      */
     private fun serviceVersion(): Int =
         try {
@@ -481,37 +540,43 @@ object CarInputClient {
             val info = pm.getPackageInfo(appContext!!.packageName, 0)
             (info.lastUpdateTime / 1000L).toInt()
         } catch (_: Throwable) {
-            15 // 兜底：与历史手写版本号序列衔接，保证不低于 14
+            15 // Итог: связано с исторической последовательностью номеров рукописных версий, гарантированно не менее 14.
         }
 
     private const val TAG = "CarInputClient"
 
-    /** 两次绑定发起之间的最小间隔（Shizuku 被冻结时绑定会静默失败，解冻后需尽快恢复）。 */
+    /** Минимальный интервал между двумя инициациями привязки (привязка завершится автоматически, если Шизуку заморожена, и ее необходимо восстановить как можно скорее после разморозки). */
     private const val BIND_THROTTLE_MS = 1_500L
 
     /**
-     * 判定「本次绑定卡死」的等待上限。
+     * — это верхний предел времени ожидания для определения того, что «эта привязка застряла».
      *
-     * 必须远大于正常回调延迟：Shizuku 的 connected 回调 post 到主线程，而服务进程本身
-     * 要 spawn + 加载 dex（调试包更慢）。旧值 1.5s 与节流窗等长，导致「发起 → 1.5s 后
-     * 判死 → 杀进程重来」的自持抖动（2026-10-22 K60E 实测每 2~3 秒刷一次）。
+     * должна быть намного больше, чем обычная задержка обратного вызова: подключенный обратный вызов Шизуку
+     * отправляется в основной поток, в то время как сам процесс службы
+     * для появления + загрузка декса (пакет отладки работает медленнее). Старое значение 1,5 с имеет ту же длину,
+     * что и окно регулирования, поэтому «инициировать → 1,5 с позже».
+     * Самоподдерживающееся дрожание       при приговоре к смертной казни → завершить процесс и перезапустить (22
+     * октября 2026 г. K60E измеряется каждые 2–3 секунды).
      */
     private const val BIND_STUCK_TIMEOUT_MS = 8_000L
 }
 
 /**
- * 「这次绑定是否该判卡死并重发」的纯函数（[CarInputClient] 的绑定状态机核心）。
+ * Чистая функция  «должна ли эта привязка считаться зависшей и повторно переданной» (ядро конечного автомата привязки [CarInputClient]).
  *
- * 拆成纯函数是为了钉死一个真机定谳的回归（2026-10-22 Redmi K60E）：旧实现在
- * 「距上次发起 ≥1.5s」时就无条件判卡死，**而这个窗口与正常回调延迟同量级**——
- * Shizuku 的 connected 回调 post 到主线程，服务进程还要 spawn + 加载 dex，
- * 1.5s 常常不够。判死后旧代码还会 `unbindUserService(remove=true)` 把刚起来的
- * 服务进程杀掉，于是「发起 → 判死 → 杀 → 再发起」永不收敛，触摸注入从第一次
- * 触碰起就全灭（日志每 2~3 秒刷「绑定卡死状态已解除」）。
+ * разделен на чистые функции, чтобы обеспечить возвращение настоящей машины (Redmi K60E 2026-10-22): старая реализация теперь
+ * безоговорочно определяется как зависший, когда «≥1,5 с с момента последнего запуска», **и это окно имеет ту же
+ * величину, что и обычная задержка обратного вызова** ——
+ * Подключенный Шизуку обратный вызов отправляет в основной поток, и процесс обслуживания также должен порождать + загружать dex.
+ * 1.5s is often not enough. After death, the old code will still be `unbindUserService(remove=true)`
+ * Сервисный процесс   убит, поэтому «инициировать → умереть → убить → инициировать снова» никогда не сходится, и
+ * внедрение касания начинается с первого раза.
+ * будет уничтожен, как только к нему прикоснутся (в журнале будет отображаться сообщение «Состояние зависания
+ * привязки было освобождено» каждые 2–3 секунды).
  *
- * @param binding 当前是否有进行中的绑定
- * @param waitedMs 该次绑定已等待多久（[binding] 为 false 时忽略）
- * @return true = 应重发；false = 继续等（或本就空闲可以发起）
+ * Привязка   @param Выполняется ли в настоящее время привязка?
+ * @param waitedMs Как долго ожидается привязка (игнорируется, если [binding] имеет значение false)
+ * @return true = should be resent; false = продолжать ждать (или вы можете инициировать его, если вы уже простаиваете)
  */
 internal fun shouldRebind(
     binding: Boolean,

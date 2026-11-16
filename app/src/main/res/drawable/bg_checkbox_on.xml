@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 勾选框已选态：蓝色圆角底 + 白色对勾 -->
+<!-- Состояние флажка: синий закругленный низ + белая галочка. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">

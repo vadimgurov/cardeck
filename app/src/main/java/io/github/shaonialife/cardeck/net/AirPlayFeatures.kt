@@ -1,23 +1,25 @@
 package io.github.shaonialife.cardeck.net
 
 /**
- * `_airplay._tcp` TXT `features` 位图解析（形如 `0x44540380,0x61`）。
+ * `_airplay._tcp` TXT `features` растровый анализ (формируется как `0x44540380,0x61`).
  *
- * 低位在前：`低32位,高32位`，合并成 64 位。AirPlay 接收端用 bit38
- * `HK_PAIRING_AND_ENCRYPT` 表示「支持 HomeKit 配对/加密」——老车机
- * （CarPlay 210.81 时代）不声明该位，只接受 `et=NONE` 明文会话。
+ * Сначала немного: `низкий32Бит,высокий32Бит`, объединенный в 64 бита. Приемник AirPlay использует бит38
+ * `HK_PAIRING_AND_ENCRYPT` сказал: «поддерживает сопряжение/шифрование HomeKit» — старый автомобильный телефон
+ * (эра CarPlay 210.81) не объявляет этот бит и принимает только сеансы открытого текста `et=NONE`.
  *
- * 解析失败一律返回 null（未知），调用方按「保持旧行为」处理，
- * 绝不能把解析失败当成「不支持配对」——那会让正常车机也被降级成明文。
+ * всегда будет возвращать значение null (неизвестно), если синтаксический анализ не удался, и вызывающая сторона
+ * будет обрабатывать это как «Сохранить старое поведение».
+ * не должен рассматривать ошибку синтаксического анализа как «сопряжение не поддерживается» — это приведет к
+ * тому, что обычные автомобили будут понижены до уровня открытого текста.
  */
 object AirPlayFeatures {
-    /** 支持 /pair-setup + /pair-verify（AirPlayFeature::HK_PAIRING_AND_ENCRYPT）。 */
+    /** Поддержка /pair-setup + /pair-verify (AirPlayFeature::HK_PAIRING_AND_ENCRYPT). */
     const val HK_PAIRING_AND_ENCRYPT: Long = 1L shl 38
 
-    /** 支持屏幕镜像。 */
+    /** Поддерживает дублирование экрана. */
     const val SCREEN: Long = 1L shl 7
 
-    /** 车机控制（CarPlay）。 */
+    /** Управление автомобилем (CarPlay). */
     const val CARPLAY_CONTROL: Long = 1L shl 37
 
     fun parse(txt: String?): Long? {
@@ -31,7 +33,7 @@ object AirPlayFeatures {
         return (high shl 32) or low
     }
 
-    /** 接收端是否声明支持 HomeKit 配对/加密；null = TXT 缺失或不可解析。 */
+    /** Заявляет ли принимающая сторона о поддержке сопряжения/шифрования HomeKit; null = TXT отсутствует или не анализируется. */
     fun supportsPairing(features: Long?): Boolean? = features?.let { (it and HK_PAIRING_AND_ENCRYPT) != 0L }
 
     private fun parseHex(value: String): Long? {

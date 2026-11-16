@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- CarPlay 底部 dock（竖屏车机时使用）：⌂ | 运行中应用横排 | 时间/电量。
-     尺寸用 dp：数值 = 设计原型 px ÷ 2.625（设计基准 1160×540@420dpi；dock 密度
-     随画布短边等比下发——见 activity_dock_sidebar 注释）。
-     字号不在 XML 里写死：DockActivity 按「设计 px × designScale」以 PX 设置。
-     壁纸：DockActivity 往 dockWallpaper 塞「全流画布切片」（与桌面同源同路径）；
-     窗口不透明（半透明窗口会透出系统合成的手机壁纸——见 activity_dock_sidebar 注释）。 -->
+<!-- Нижняя док-станция CarPlay (используется, когда автомобиль находится в портретном режиме): ⌂ | Горизонтальный запуск приложений | Время/батарея.
+     dp для размера: значение = прототип дизайна пикселей ÷ 2,625 (основа проекта 1160×540 при 420 точек на дюйм; плотность стыковки
+     Выдается пропорционально короткой стороне холста — см. комментарий Activity_dock_sidebar).
+     Размер шрифта не жестко запрограммирован в XML: DockActivity нажимает «Design px × designScale», чтобы установить его в PX.
+     Обои: DockActivity подключает «полнопоточный фрагмент холста» к DockWallpaper (тот же источник и путь, что и у рабочего стола);
+     Окно непрозрачно (полупрозрачное окно будет видно сквозь синтезированные системой обои телефона — см. комментарий Activity_dock_sidebar). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"

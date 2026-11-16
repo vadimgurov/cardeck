@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 手机侧界面：Material 3 暗色重构（design/phone-ui-proto.html 的 Android 实现）。
-     结构：英雄卡（连接状态+主操作）→ 连接准备 → 车机显示 → 高级(折叠) → 日志(折叠)。
-     不引入 Material 组件库：卡片/按钮/开关样式全部用 shape/selector 自绘。 -->
+<!-- Мобильный интерфейс: темная реконструкция Material 3 (реализация design/phone-ui-proto.html для Android).
+     Структура: Карта героя (статус подключения + основная операция) → подготовка подключения → отображение автомобиля → расширенный (свернутый) → журнал (свернутый).
+     Библиотека компонентов Material не представлена: все стили карточек/кнопок/переключателей рисуются самостоятельно с помощью формы/селектора. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/m3_surface">
 
-    <!-- 页面竖向容器：顶部栏固定，内容区（contentArea）占满剩余高度。
-         横屏时英雄卡会被移入 contentArea 左缘固定显示，滚动只作用于右栏
-         （见 MainActivity.applyContentLayout）——英雄卡不随右侧列表滚走。 -->
+    <!-- Вертикальный контейнер страницы: верхняя панель фиксирована, а область содержимого (contentArea) занимает оставшуюся высоту.
+         Когда экран горизонтальный, карточка героя будет перемещена к левому краю области содержимого для фиксированного отображения, а прокрутка будет влиять только на правый столбец.
+         (См. MainActivity.applyContentLayout) — Карты героев не скатываются со списком справа. -->
     <LinearLayout
         android:id="@+id/pageColumn"
         android:layout_width="match_parent"
@@ -19,7 +19,7 @@
         android:paddingStart="16dp"
         android:paddingEnd="16dp">
 
-            <!-- ==================== 顶部应用栏 ==================== -->
+            <!-- =================== Верхняя панель приложения =================== -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -70,8 +70,8 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- 内容区容器：竖屏时 ScrollView 包住英雄卡与详情；
-                 横屏时英雄卡被移到本 FrameLayout 左缘固定，详情仍随 ScrollView 滚动 -->
+            <!-- Контейнер области содержимого: ScrollView оборачивает карточку героя и детализацию, когда экран находится в вертикальном положении;
+                 Когда экран горизонтальный, карточка героя перемещается к левому краю этого FrameLayout и фиксируется, а детали по-прежнему прокручиваются с помощью ScrollView. -->
             <FrameLayout
                 android:id="@+id/contentArea"
                 android:layout_width="match_parent"
@@ -92,17 +92,17 @@
                         android:layout_height="wrap_content"
                         android:orientation="vertical">
 
-            <!-- ==================== 内容区：竖屏单列 / 横屏双栏 ====================
-                 横屏屏高只有 ~300dp，英雄卡（176dp 波形 + 状态 + 主按钮）单独就占满，
-                 其余内容全被挤到屏幕外（用户实测「要滑动才能看到」）。
-                 onConfigurationChanged 里把本行切成横向：左英雄卡、右详情列。 -->
+            <!-- =================== Область содержимого: вертикальный экран, один столбец / горизонтальный экран, двойной столбец ===================
+                 Высота экрана по горизонтали составляет всего ~300 dp, а одна только карточка героя (сигнал 176 dp + статус + главная кнопка) заполнена.
+                 Остальной контент выдавливается за пределы экрана (пользователи фактически замеряли, что «чтобы увидеть, нужно провести пальцем по экрану»).
+                 В onConfigurationChanged эта строка разрезается по горизонтали: левая карта героя, правый столбец с подробностями. -->
             <LinearLayout
                 android:id="@+id/contentRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-                <!-- ==================== 英雄卡：连接状态 ==================== -->
+                <!-- ==================== Карта Героя: Статус соединения =================== -->
                 <LinearLayout
                     android:id="@+id/heroCard"
                     android:layout_width="match_parent"
@@ -126,8 +126,8 @@
                         android:layout_width="210dp"
                         android:layout_height="176dp" />
 
-                    <!-- 圆盘与标签：相对波形框**居中**定位（原固定 marginTop=51/134dp
-                         是按 176dp 高算死的，横屏把波形框压到 70dp 后圆盘被裁成半月） -->
+                    <!-- Диск и метка: расположение **по центру** относительно волнового поля (изначально фиксированное полеmartTop=51/134dp).
+                         Он рассчитывается на основе высоты 176dp. При нажатии горизонтального экрана до 70dp диск разрезается на полумесяц.) -->
                     <FrameLayout
                         android:id="@+id/hubPlate"
                         android:layout_width="74dp"
@@ -157,7 +157,7 @@
                         android:textStyle="bold" />
                 </FrameLayout>
 
-                <!-- 状态行：状态字 + 残留屏清理入口（检测到残留且用户暂缓时出现） -->
+                <!-- Строка состояния: слово состояния + запись об остаточной очистке экрана (появляется при обнаружении остатков и приостановке работы пользователя). -->
                 <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -212,7 +212,7 @@
                     android:indeterminateTint="@color/m3_primary"
                     android:visibility="gone" />
 
-                <!-- 连接统计：运行时分辨率 + 实际/目标帧率（1s 轮询差分，仅连接时显示） -->
+                <!-- Статистика соединения: разрешение во время выполнения + фактическая/целевая частота кадров (дифференциал опроса 1 с, отображается только при подключении) -->
                 <TextView
                     android:id="@+id/heroStats"
                     android:layout_width="wrap_content"
@@ -223,7 +223,7 @@
                     android:textSize="11.5sp"
                     android:visibility="gone" />
 
-                <!-- 主操作（M3 pill：填充→禁用→红色描边断开） -->
+                <!-- Основная операция (таблетка M3: заполнение → отключение → отключение красного хода) -->
                 <LinearLayout
                     android:id="@+id/ctaButton"
                     android:layout_width="match_parent"
@@ -272,14 +272,14 @@
                     android:visibility="gone" />
             </LinearLayout>
 
-            <!-- ==================== 详情列（横屏时成为右栏） ==================== -->
+            <!-- =================== Столбец сведений (становится правым столбцом, когда экран расположен горизонтально) =================== -->
             <LinearLayout
                 android:id="@+id/detailColumn"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-            <!-- ==================== 连接准备 ==================== -->
+            <!-- =================== Подготовка подключения =================== -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -320,7 +320,7 @@
                         android:textStyle="bold" />
                 </LinearLayout>
 
-                <!-- Shizuku（硬性前置：虚拟屏创建/触摸注入/窗口状态读取都经它） -->
+                <!-- Shizuku (жесткий интерфейс: создание виртуального экрана/сенсорное внедрение/считывание статуса окна — все это проходит через него) -->
                 <LinearLayout
                     android:id="@+id/rowShizuku"
                     android:layout_width="match_parent"
@@ -392,7 +392,7 @@
                     android:layout_marginStart="54dp"
                     android:background="#5A394444" />
 
-                <!-- 蓝牙配对 -->
+                <!-- Bluetooth-сопряжение -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -422,7 +422,7 @@
                         android:layout_weight="1"
                         android:orientation="vertical">
 
-                        <!-- 标题行：标题 + 目标选择按钮（靠标题排布，避免与右侧徽标拥挤） -->
+                        <!-- Строка заголовка: заголовок + кнопка выбора цели (расположены по заголовку, чтобы не загромождать логотип справа) -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -437,7 +437,7 @@
                                 android:textSize="14.5sp"
                                 android:textStyle="bold" />
 
-                            <!-- 目标车机：配对了多台时指定唯一目标（只向它发请求/只接受它连入） -->
+                            <!-- Целевой автомобиль: укажите единственную цель, когда несколько устройств соединены в пару (отправляйте только запросы к ней/принимайте соединения только от нее) -->
                             <TextView
                                 android:id="@+id/btnPickTarget"
                                 android:layout_width="wrap_content"
@@ -486,7 +486,7 @@
                     android:layout_marginStart="54dp"
                     android:background="#5A394444" />
 
-                <!-- 车机热点 -->
+                <!-- Горячие точки автомобиля -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -565,7 +565,7 @@
                     android:layout_marginStart="54dp"
                     android:background="#5A394444" />
 
-                <!-- 车机侧声音 -->
+                <!-- боковой звук автомобиля -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -630,7 +630,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- ==================== 车机显示 ==================== -->
+            <!-- ==================== Дисплей автомобиля =================== -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -650,7 +650,7 @@
                     android:textSize="12.5sp"
                     android:textStyle="bold" />
 
-                <!-- 常亮+暗幕 -->
+                <!-- Всегда включен + темный экран -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -712,7 +712,7 @@
                     android:layout_marginStart="54dp"
                     android:background="#5A394444" />
 
-                <!-- 立即假息屏 -->
+                <!-- Немедленно покиньте экран -->
                 <LinearLayout
                     android:id="@+id/rowDim"
                     android:layout_width="match_parent"
@@ -778,7 +778,7 @@
                     android:layout_marginStart="54dp"
                     android:background="#5A394444" />
 
-                <!-- 车机壁纸 -->
+                <!-- автомобильные обои -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -858,7 +858,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 强制应用横屏（跳转新页） -->
+            <!-- Принудительно изменить альбомную ориентацию приложения (перейти на новую страницу) -->
             <LinearLayout
                 android:id="@+id/btnCarSettings"
                 android:layout_width="match_parent"
@@ -919,7 +919,7 @@
                     android:src="@drawable/ic_chev_right" />
             </LinearLayout>
 
-            <!-- ==================== 高级：Shell 全局状态（默认折叠） ==================== -->
+            <!-- ==================== Дополнительно: глобальное состояние оболочки (по умолчанию свернуто) =================== -->
             <LinearLayout
                 android:id="@+id/advCard"
                 android:layout_width="match_parent"
@@ -1079,7 +1079,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- ==================== 日志（默认折叠） ==================== -->
+            <!-- ==================== Журнал (по умолчанию свернут) =================== -->
             <LinearLayout
                 android:id="@+id/logCard"
                 android:layout_width="match_parent"
@@ -1254,7 +1254,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 免责声明（只读重看；首次启动的强制接受是独立弹窗） -->
+            <!-- Отказ от ответственности (повторный просмотр только для чтения; принудительное принятие при первом запуске — в отдельном всплывающем окне) -->
             <LinearLayout
                 android:id="@+id/btnDisclaimer"
                 android:layout_width="match_parent"
@@ -1315,7 +1315,7 @@
                     android:src="@drawable/ic_chev_right" />
             </LinearLayout>
 
-            <!-- 远程调试入口：仅 remote 调试包里该组件存在（代码探测后显示），正式包恒隐藏 -->
+            <!-- Вход для удаленной отладки: этот компонент существует только в пакете удаленной отладки (отображается после обнаружения кода), а официальный пакет всегда скрыт. -->
             <LinearLayout
                 android:id="@+id/btnBridgeSetup"
                 android:layout_width="match_parent"
@@ -1402,7 +1402,7 @@
             </FrameLayout>
         </LinearLayout>
 
-    <!-- Snackbar（自绘 M3 反色胶囊） -->
+    <!-- Закусочная (самораскрашенная капсула M3 с обратным цветом) -->
     <TextView
         android:id="@+id/snackbar"
         android:layout_width="match_parent"

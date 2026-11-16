@@ -1078,7 +1078,7 @@
     <issue
         id="UnusedResources"
         message="The resource `R.string.accessibility_description` appears to be unused"
-        errorLine1="    &lt;string name=&quot;accessibility_description&quot;>镜像模式：把车机触摸手势注入手机屏幕，不读取屏幕内容&lt;/string>"
+        errorLine1="    &lt;string name=&quot;accessibility_description&quot;>Зеркальный режим：Внедрение сенсорных жестов автомобиля и машины на экраны мобильных телефонов，Не читать содержимое экрана&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
@@ -1276,7 +1276,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="                btDesc.text = &quot;已与 $bondedCount 台设备配对 · 连接自动回连&quot;"
+        errorLine1="                btDesc.text = &quot;Уже с $bondedCount сопряжение устройств · Автоматическое переподключение соединения&quot;"
         errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1298,7 +1298,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="        deviceSubtitle.text = &quot;${deviceName()} · ${if (ready) &quot;Shizuku 就绪&quot; else &quot;Shizuku 未就绪&quot;}&quot;"
+        errorLine1="        deviceSubtitle.text = &quot;${deviceName()} · ${if (ready) &quot;Shizuku готов&quot; else &quot;Shizuku Не готов&quot;}&quot;"
         errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1309,7 +1309,7 @@
     <issue
         id="SetTextI18n"
         message="String literal in `setText` can not be translated. Use Android resources instead."
-        errorLine1="                runOnUiThread { shellStateText.text = &quot;Shizuku 未就绪——shell 状态读取需要 Shizuku&quot; }"
+        errorLine1="                runOnUiThread { shellStateText.text = &quot;Shizuku Не готов——shell Чтение статуса требует Shizuku&quot; }"
         errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1320,7 +1320,7 @@
     <issue
         id="SetTextI18n"
         message="String literal in `setText` can not be translated. Use Android resources instead."
-        errorLine1="                runOnUiThread { shellStateText.text = &quot;Shizuku 未就绪——shell 复位需要 Shizuku&quot; }"
+        errorLine1="                runOnUiThread { shellStateText.text = &quot;Shizuku Не готов——shell Требуется сброс Shizuku&quot; }"
         errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1331,7 +1331,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="                shellStateText.text = &quot;复位结果：\n&quot; + results.joinToString(&quot;\n&quot;) +"
+        errorLine1="                shellStateText.text = &quot;Результат сброса：\n&quot; + results.joinToString(&quot;\n&quot;) +"
         errorLine2="                                      ~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1342,7 +1342,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="                shellStateText.text = &quot;复位结果：\n&quot; + results.joinToString(&quot;\n&quot;) +"
+        errorLine1="                shellStateText.text = &quot;Результат сброса：\n&quot; + results.joinToString(&quot;\n&quot;) +"
         errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1353,7 +1353,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="                shellStateText.text = &quot;复位结果：\n&quot; + results.joinToString(&quot;\n&quot;) +"
+        errorLine1="                shellStateText.text = &quot;Результат сброса：\n&quot; + results.joinToString(&quot;\n&quot;) +"
         errorLine2="                                      ^">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1364,7 +1364,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="                shellStateText.text = &quot;复位结果：\n&quot; + results.joinToString(&quot;\n&quot;) +"
+        errorLine1="                shellStateText.text = &quot;Результат сброса：\n&quot; + results.joinToString(&quot;\n&quot;) +"
         errorLine2="                                      ^">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1375,7 +1375,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="                    &quot;\n残留虚拟屏: 释放 $released/${ids.size}（保留当前会话屏）\n&quot; +"
+        errorLine1="                    &quot;\nОстаточный виртуальный экран: выпуск $released/${ids.size}（Сохранить текущий экран сеанса）\n&quot; +"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1386,7 +1386,7 @@
     <issue
         id="SetTextI18n"
         message="String literal in `setText` can not be translated. Use Android resources instead."
-        errorLine1="                    &quot;提示：letterbox 调优会在下次连接时自动重新应用&quot;"
+        errorLine1="                    &quot;Советы：letterbox Настройка автоматически применяется повторно при следующем подключении.&quot;"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/MainActivity.kt"
@@ -1397,7 +1397,7 @@
     <issue
         id="SetTextI18n"
         message="Do not concatenate text displayed with `setText`. Use resource string with placeholders."
-        errorLine1="        countText?.text = &quot;已选 ${selected.size} 个&quot;"
+        errorLine1="        countText?.text = &quot;Выбрано ${selected.size} а&quot;"
         errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/io/github/shaonialife/cardeck/launcher/settings/SettingsFragments.kt"
@@ -1451,8 +1451,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;回到桌面&quot;, should use `@string` resource"
-        errorLine1="            android:contentDescription=&quot;回到桌面&quot;"
+        message="Hardcoded string &quot;Вернуться на рабочий стол&quot;, should use `@string` resource"
+        errorLine1="            android:contentDescription=&quot;Вернуться на рабочий стол&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_dock_bar.xml"
@@ -1462,8 +1462,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;回到桌面&quot;, should use `@string` resource"
-        errorLine1="        android:contentDescription=&quot;回到桌面&quot;"
+        message="Hardcoded string &quot;Вернуться на рабочий стол&quot;, should use `@string` resource"
+        errorLine1="        android:contentDescription=&quot;Вернуться на рабочий стол&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_dock_sidebar.xml"
@@ -1473,8 +1473,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;CarPlay 发送端&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;CarPlay 发送端&quot;"
+        message="Hardcoded string &quot;CarPlay завершение отправки&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;CarPlay завершение отправки&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1484,8 +1484,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;设备检测中&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;设备检测中&quot; />"
+        message="Hardcoded string &quot;Оборудование на испытаниях&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Оборудование на испытаниях&quot; />"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1495,8 +1495,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机服务在线&quot;, should use `@string` resource"
-        errorLine1="                    android:text=&quot;车机服务在线&quot;"
+        message="Hardcoded string &quot;Сервис автомобилей и техники онлайн&quot;, should use `@string` resource"
+        errorLine1="                    android:text=&quot;Сервис автомобилей и техники онлайн&quot;"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1506,8 +1506,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;车机&quot;"
+        message="Hardcoded string &quot;машина машина&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;машина машина&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1528,8 +1528,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;未连接&quot;, should use `@string` resource"
-        errorLine1="                    android:text=&quot;未连接&quot;"
+        message="Hardcoded string &quot;Не подключено&quot;, should use `@string` resource"
+        errorLine1="                    android:text=&quot;Не подключено&quot;"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1539,8 +1539,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;与车机蓝牙完成配对后，点击下方按钮发起无线连接&quot;, should use `@string` resource"
-        errorLine1="                    android:text=&quot;与车机蓝牙完成配对后，点击下方按钮发起无线连接&quot;"
+        message="Hardcoded string &quot;После завершения сопряжения с автомобильным Bluetooth，Нажмите кнопку ниже, чтобы инициировать беспроводное соединение.&quot;, should use `@string` resource"
+        errorLine1="                    android:text=&quot;После завершения сопряжения с автомобильным Bluetooth，Нажмите кнопку ниже, чтобы инициировать беспроводное соединение.&quot;"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1550,8 +1550,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;操作&quot;, should use `@string` resource"
-        errorLine1="                        android:contentDescription=&quot;操作&quot;"
+        message="Hardcoded string &quot;Операция&quot;, should use `@string` resource"
+        errorLine1="                        android:contentDescription=&quot;Операция&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1561,8 +1561,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;启动连接&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;启动连接&quot;"
+        message="Hardcoded string &quot;Начать соединение&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Начать соединение&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1572,8 +1572,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机侧声音 · 开启&quot;, should use `@string` resource"
-        errorLine1="                    android:text=&quot;车机侧声音 · 开启&quot;"
+        message="Hardcoded string &quot;боковой звук автомобиля · включить&quot;, should use `@string` resource"
+        errorLine1="                    android:text=&quot;боковой звук автомобиля · включить&quot;"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1583,8 +1583,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;连接准备&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;连接准备&quot;"
+        message="Hardcoded string &quot;Подготовка подключения&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Подготовка подключения&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1605,8 +1605,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;热点&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;热点&quot;"
+        message="Hardcoded string &quot;Точка доступа&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;Точка доступа&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1616,8 +1616,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机热点&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;车机热点&quot;"
+        message="Hardcoded string &quot;Горячие точки автомобиля&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Горячие точки автомобиля&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1627,8 +1627,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;接收端热点 SSID（0x5703 下发）&quot;, should use `@string` resource"
-        errorLine1="                            android:hint=&quot;接收端热点 SSID（0x5703 下发）&quot;"
+        message="Hardcoded string &quot;Точка доступа приемника SSID（0x5703 Проблема）&quot;, should use `@string` resource"
+        errorLine1="                            android:hint=&quot;Точка доступа приемника SSID（0x5703 Проблема）&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1638,8 +1638,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;去连接&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;去连接&quot;"
+        message="Hardcoded string &quot;соединить&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;соединить&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1649,8 +1649,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;蓝牙&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;蓝牙&quot;"
+        message="Hardcoded string &quot;Bluetooth&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;Bluetooth&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1660,8 +1660,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;蓝牙配对&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;蓝牙配对&quot;"
+        message="Hardcoded string &quot;Bluetooth-сопряжение&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Bluetooth-сопряжение&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1671,8 +1671,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;与车机蓝牙配对后 · 连接自动回连&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;与车机蓝牙配对后 · 连接自动回连&quot;"
+        message="Hardcoded string &quot;После сопряжения с автомобильным Bluetooth · Автоматическое переподключение соединения&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;После сопряжения с автомобильным Bluetooth · Автоматическое переподключение соединения&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1682,8 +1682,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;就绪&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;就绪&quot;"
+        message="Hardcoded string &quot;готов&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;готов&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1693,8 +1693,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;声音&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;声音&quot;"
+        message="Hardcoded string &quot;звук&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;звук&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1704,8 +1704,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机侧声音&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;车机侧声音&quot;"
+        message="Hardcoded string &quot;боковой звук автомобиля&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;боковой звук автомобиля&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1715,8 +1715,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;需要「投屏」权限，可选 · 关闭时车机无声音&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;需要「投屏」权限，可选 · 关闭时车机无声音&quot;"
+        message="Hardcoded string &quot;необходимость「литой экран」Разрешения，Необязательно · Нет звука в машине при выключении&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;необходимость「литой экран」Разрешения，Необязательно · Нет звука в машине при выключении&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1726,8 +1726,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;授权&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;授权&quot;"
+        message="Hardcoded string &quot;Авторизовать&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Авторизовать&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1737,8 +1737,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机显示&quot;, should use `@string` resource"
-        errorLine1="                    android:text=&quot;车机显示&quot;"
+        message="Hardcoded string &quot;Дисплей автомобиля&quot;, should use `@string` resource"
+        errorLine1="                    android:text=&quot;Дисплей автомобиля&quot;"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1748,8 +1748,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;常亮&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;常亮&quot;"
+        message="Hardcoded string &quot;Всегда включен&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;Всегда включен&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1759,8 +1759,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;常亮 + 暗幕&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;常亮 + 暗幕&quot;"
+        message="Hardcoded string &quot;Всегда включен + темный занавес&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Всегда включен + темный занавес&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1770,8 +1770,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;手机不锁屏，无操作时自动暗幕 · 防车机触摸冻结&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;手机不锁屏，无操作时自动暗幕 · 防车机触摸冻结&quot;"
+        message="Hardcoded string &quot;Телефон не блокирует экран，Автоматически затемнять экран, когда не выполняется никаких операций · Антиавтомобильная машина с сенсорным замораживанием&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Телефон не блокирует экран，Автоматически затемнять экран, когда не выполняется никаких операций · Антиавтомобильная машина с сенсорным замораживанием&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1781,8 +1781,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;假息屏&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;假息屏&quot;"
+        message="Hardcoded string &quot;ложный экран&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;ложный экран&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1792,8 +1792,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;立即假息屏&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;立即假息屏&quot;"
+        message="Hardcoded string &quot;Немедленно покиньте экран&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Немедленно покиньте экран&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1803,8 +1803,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;点击手机屏幕任意处恢复&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;点击手机屏幕任意处恢复&quot;"
+        message="Hardcoded string &quot;Нажмите в любом месте экрана телефона, чтобы восстановить&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Нажмите в любом месте экрана телефона, чтобы восстановить&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1814,8 +1814,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;进入&quot;, should use `@string` resource"
-        errorLine1="                        android:contentDescription=&quot;进入&quot;"
+        message="Hardcoded string &quot;войти&quot;, should use `@string` resource"
+        errorLine1="                        android:contentDescription=&quot;войти&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1825,8 +1825,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;壁纸&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;壁纸&quot;"
+        message="Hardcoded string &quot;обои&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;обои&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1836,8 +1836,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机壁纸&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;车机壁纸&quot;"
+        message="Hardcoded string &quot;автомобильные обои&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;автомобильные обои&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1847,8 +1847,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;全屏 aspectFill&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;全屏 aspectFill&quot;"
+        message="Hardcoded string &quot;полноэкранный режим aspectFill&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;полноэкранный режим aspectFill&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1858,8 +1858,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;更换&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;更换&quot;"
+        message="Hardcoded string &quot;Заменить&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Заменить&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1869,8 +1869,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;恢复默认&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;恢复默认&quot;"
+        message="Hardcoded string &quot;Восстановить настройки по умолчанию&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Восстановить настройки по умолчанию&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1880,8 +1880,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;横屏&quot;, should use `@string` resource"
-        errorLine1="                        android:contentDescription=&quot;横屏&quot;"
+        message="Hardcoded string &quot;Горизонтальный экран&quot;, should use `@string` resource"
+        errorLine1="                        android:contentDescription=&quot;Горизонтальный экран&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1891,8 +1891,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机设置&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;车机设置&quot;"
+        message="Hardcoded string &quot;Настройки автомобиля&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;Настройки автомобиля&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1902,8 +1902,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;桌面应用 · 应用横屏 · 超采样 · dock 栏 · 默认地图&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;桌面应用 · 应用横屏 · 超采样 · dock 栏 · 默认地图&quot;"
+        message="Hardcoded string &quot;настольное приложение · Горизонтальный экран приложения · Передискретизация · dock бар · Карта по умолчанию&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;настольное приложение · Горизонтальный экран приложения · Передискретизация · dock бар · Карта по умолчанию&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1913,8 +1913,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;进入&quot;, should use `@string` resource"
-        errorLine1="                    android:contentDescription=&quot;进入&quot;"
+        message="Hardcoded string &quot;войти&quot;, should use `@string` resource"
+        errorLine1="                    android:contentDescription=&quot;войти&quot;"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1924,8 +1924,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;终端&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;终端&quot;"
+        message="Hardcoded string &quot;терминал&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;терминал&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1935,8 +1935,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;Shell 全局状态&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;Shell 全局状态&quot;"
+        message="Hardcoded string &quot;Shell глобальное состояние&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Shell глобальное состояние&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1946,8 +1946,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;letterbox / 虚拟屏 / wm 覆盖 —— 调试排查用&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;letterbox / 虚拟屏 / wm 覆盖 —— 调试排查用&quot;"
+        message="Hardcoded string &quot;letterbox / виртуальный экран / wm Обложка —— Для отладки и устранения неполадок&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;letterbox / виртуальный экран / wm Обложка —— Для отладки и устранения неполадок&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1957,8 +1957,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;展开&quot;, should use `@string` resource"
-        errorLine1="                        android:contentDescription=&quot;展开&quot;"
+        message="Hardcoded string &quot;Развернуть&quot;, should use `@string` resource"
+        errorLine1="                        android:contentDescription=&quot;Развернуть&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1968,8 +1968,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;(点「刷新」读取)&quot;, should use `@string` resource"
-        errorLine1="                        android:text=&quot;(点「刷新」读取)&quot;"
+        message="Hardcoded string &quot;(точка「Обновить」читать)&quot;, should use `@string` resource"
+        errorLine1="                        android:text=&quot;(точка「Обновить」читать)&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1979,8 +1979,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;刷新&quot;, should use `@string` resource"
-        errorLine1="                                android:contentDescription=&quot;刷新&quot;"
+        message="Hardcoded string &quot;Обновить&quot;, should use `@string` resource"
+        errorLine1="                                android:contentDescription=&quot;Обновить&quot;"
         errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -1990,8 +1990,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;刷新&quot;, should use `@string` resource"
-        errorLine1="                                android:text=&quot;刷新&quot;"
+        message="Hardcoded string &quot;Обновить&quot;, should use `@string` resource"
+        errorLine1="                                android:text=&quot;Обновить&quot;"
         errorLine2="                                ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2001,8 +2001,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;复位&quot;, should use `@string` resource"
-        errorLine1="                                android:contentDescription=&quot;复位&quot;"
+        message="Hardcoded string &quot;сброс&quot;, should use `@string` resource"
+        errorLine1="                                android:contentDescription=&quot;сброс&quot;"
         errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2012,8 +2012,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;复位默认&quot;, should use `@string` resource"
-        errorLine1="                                android:text=&quot;复位默认&quot;"
+        message="Hardcoded string &quot;сбросить настройки по умолчанию&quot;, should use `@string` resource"
+        errorLine1="                                android:text=&quot;сбросить настройки по умолчанию&quot;"
         errorLine2="                                ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2023,8 +2023,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;日志&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;日志&quot;"
+        message="Hardcoded string &quot;Журнал&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;Журнал&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2034,8 +2034,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;运行日志&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;运行日志&quot;"
+        message="Hardcoded string &quot;Журнал запуска&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Журнал запуска&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2045,8 +2045,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;最近日志 · 可复制反馈问题&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;最近日志 · 可复制反馈问题&quot;"
+        message="Hardcoded string &quot;Последние журналы · Проблемы с копируемыми отзывами&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Последние журналы · Проблемы с копируемыми отзывами&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2056,8 +2056,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;展开&quot;, should use `@string` resource"
-        errorLine1="                        android:contentDescription=&quot;展开&quot;"
+        message="Hardcoded string &quot;Развернуть&quot;, should use `@string` resource"
+        errorLine1="                        android:contentDescription=&quot;Развернуть&quot;"
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2067,8 +2067,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;监听日志&quot;, should use `@string` resource"
-        errorLine1="                            android:text=&quot;监听日志&quot;"
+        message="Hardcoded string &quot;Журналы мониторинга&quot;, should use `@string` resource"
+        errorLine1="                            android:text=&quot;Журналы мониторинга&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2078,8 +2078,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;清除日志&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;清除日志&quot;"
+        message="Hardcoded string &quot;очистить журнал&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;очистить журнал&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2089,8 +2089,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;复制日志&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;复制日志&quot;"
+        message="Hardcoded string &quot;Копировать журнал&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;Копировать журнал&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2100,8 +2100,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;跳到底部&quot;, should use `@string` resource"
-        errorLine1="                            android:contentDescription=&quot;跳到底部&quot;"
+        message="Hardcoded string &quot;прыгнуть вниз&quot;, should use `@string` resource"
+        errorLine1="                            android:contentDescription=&quot;прыгнуть вниз&quot;"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2111,8 +2111,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;连接由前台服务保活 · 退出本界面不影响会话&quot;, should use `@string` resource"
-        errorLine1="                android:text=&quot;连接由前台服务保活 · 退出本界面不影响会话&quot;"
+        message="Hardcoded string &quot;Соединение поддерживается внешней службой. · Выход из этого интерфейса не влияет на сеанс&quot;, should use `@string` resource"
+        errorLine1="                android:text=&quot;Соединение поддерживается внешней службой. · Выход из этого интерфейса не влияет на сеанс&quot;"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_main.xml"
@@ -2122,8 +2122,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;返回&quot;, should use `@string` resource"
-        errorLine1="            android:contentDescription=&quot;返回&quot;"
+        message="Hardcoded string &quot;Возврат&quot;, should use `@string` resource"
+        errorLine1="            android:contentDescription=&quot;Возврат&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_phone_settings.xml"
@@ -2133,8 +2133,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机设置&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;车机设置&quot;"
+        message="Hardcoded string &quot;Настройки автомобиля&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Настройки автомобиля&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_phone_settings.xml"
@@ -2144,8 +2144,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;桌面&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;桌面&quot;"
+        message="Hardcoded string &quot;Рабочий стол&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Рабочий стол&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2155,8 +2155,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;车机设置&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;车机设置&quot;"
+        message="Hardcoded string &quot;Настройки автомобиля&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Настройки автомобиля&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2166,8 +2166,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;管理桌面应用&quot;, should use `@string` resource"
-        errorLine1="                android:text=&quot;管理桌面应用&quot;"
+        message="Hardcoded string &quot;Управление настольными приложениями&quot;, should use `@string` resource"
+        errorLine1="                android:text=&quot;Управление настольными приложениями&quot;"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2177,8 +2177,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;应用超采样&quot;, should use `@string` resource"
-        errorLine1="                android:text=&quot;应用超采样&quot;"
+        message="Hardcoded string &quot;Применить суперсэмплинг&quot;, should use `@string` resource"
+        errorLine1="                android:text=&quot;Применить суперсэмплинг&quot;"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2188,8 +2188,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;应用横屏&quot;, should use `@string` resource"
-        errorLine1="                android:text=&quot;应用横屏&quot;"
+        message="Hardcoded string &quot;Горизонтальный экран приложения&quot;, should use `@string` resource"
+        errorLine1="                android:text=&quot;Горизонтальный экран приложения&quot;"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2199,8 +2199,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;dock 栏设置&quot;, should use `@string` resource"
-        errorLine1="                android:text=&quot;dock 栏设置&quot;"
+        message="Hardcoded string &quot;dock Настройки столбца&quot;, should use `@string` resource"
+        errorLine1="                android:text=&quot;dock Настройки столбца&quot;"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2210,8 +2210,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;默认地图&quot;, should use `@string` resource"
-        errorLine1="                android:text=&quot;默认地图&quot;"
+        message="Hardcoded string &quot;Карта по умолчанию&quot;, should use `@string` resource"
+        errorLine1="                android:text=&quot;Карта по умолчанию&quot;"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings.xml"
@@ -2221,8 +2221,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;返回&quot;, should use `@string` resource"
-        errorLine1="            android:contentDescription=&quot;返回&quot;"
+        message="Hardcoded string &quot;Возврат&quot;, should use `@string` resource"
+        errorLine1="            android:contentDescription=&quot;Возврат&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/activity_settings_content.xml"
@@ -2243,8 +2243,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;虚拟显示器 + Presentation 渲染，可直接用标准 View/滚动/手势&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;虚拟显示器 + Presentation 渲染，可直接用标准 View/滚动/手势&quot;"
+        message="Hardcoded string &quot;виртуальный дисплей + Presentation рендеринг，Стандарт можно использовать напрямую View/прокрутка/жест&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;виртуальный дисплей + Presentation рендеринг，Стандарт можно использовать напрямую View/прокрутка/жест&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/car_home.xml"
@@ -2254,8 +2254,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;红色按钮&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;红色按钮&quot;"
+        message="Hardcoded string &quot;красная кнопка&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;красная кнопка&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/car_home.xml"
@@ -2265,8 +2265,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;绿色按钮&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;绿色按钮&quot;"
+        message="Hardcoded string &quot;зеленая кнопка&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;зеленая кнопка&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/car_home.xml"
@@ -2276,8 +2276,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;蓝色按钮&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;蓝色按钮&quot;"
+        message="Hardcoded string &quot;синяя кнопка&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;синяя кнопка&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/car_home.xml"
@@ -2287,8 +2287,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;▼ 可滚动区域：车机上滑动试试\n&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;▼ 可滚动区域：车机上滑动试试\n&quot;"
+        message="Hardcoded string &quot;▼ прокручиваемая область：Попробуйте скользить по машине\n&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;▼ прокручиваемая область：Попробуйте скользить по машине\n&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/car_home.xml"
@@ -2298,8 +2298,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;正在读取应用列表…&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;正在读取应用列表…&quot;"
+        message="Hardcoded string &quot;Чтение списка приложений…&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Чтение списка приложений…&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_desktop.xml"
@@ -2309,8 +2309,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;调整 dock 栏壁纸的暗幕透明度与高斯模糊程度，拖动即时生效。&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;调整 dock 栏壁纸的暗幕透明度与高斯模糊程度，拖动即时生效。&quot;"
+        message="Hardcoded string &quot;корректировать dock Барные обои Темный экран Прозрачность и уровень размытия по Гауссу，Перетаскивание вступает в силу немедленно。&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;корректировать dock Барные обои Темный экран Прозрачность и уровень размытия по Гауссу，Перетаскивание вступает в силу немедленно。&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_dock.xml"
@@ -2320,8 +2320,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;暗幕透明度&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;暗幕透明度&quot;"
+        message="Hardcoded string &quot;Прозрачность темного экрана&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Прозрачность темного экрана&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_dock.xml"
@@ -2331,8 +2331,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;背景模糊程度&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;背景模糊程度&quot;"
+        message="Hardcoded string &quot;Уровень размытия фона&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Уровень размытия фона&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_dock.xml"
@@ -2342,8 +2342,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;仪表盘地图屏使用的地图应用，选中即生效。&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;仪表盘地图屏使用的地图应用，选中即生效。&quot;"
+        message="Hardcoded string &quot;Приложение карты, используемое на экране карты приборной панели，Действует при выборе。&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Приложение карты, используемое на экране карты приборной панели，Действует при выборе。&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_map.xml"
@@ -2353,8 +2353,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;开启后竖屏应用在车机屏以横屏全屏渲染。设置持久生效，会话关闭不复原；应用在手机上也会跟随屏幕方向。注意：部分界面文字可能变大或变小，重启目标应用后恢复；对运行中的应用，需重启后生效。&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;开启后竖屏应用在车机屏以横屏全屏渲染。设置持久生效，会话关闭不复原；应用在手机上也会跟随屏幕方向。注意：部分界面文字可能变大或变小，重启目标应用后恢复；对运行中的应用，需重启后生效。&quot;"
+        message="Hardcoded string &quot;После включения приложения с вертикальным экраном будут отображаться на экране автомобиля в полноэкранном режиме.。Настройки вступают в силу навсегда，Сессия закрыта без восстановления；Приложения также будут следовать ориентации экрана на мобильных телефонах.。Примечание：Некоторый текст интерфейса может стать больше или меньше.，Восстановление после перезапуска целевого приложения；для запуска приложений，Должен вступить в силу после перезапуска。&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;После включения приложения с вертикальным экраном будут отображаться на экране автомобиля в полноэкранном режиме.。Настройки вступают в силу навсегда，Сессия закрыта без восстановления；Приложения также будут следовать ориентации экрана на мобильных телефонах.。Примечание：Некоторый текст интерфейса может стать больше или меньше.，Восстановление после перезапуска целевого приложения；для запуска приложений，Должен вступить в силу после перезапуска。&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_orientation.xml"
@@ -2364,8 +2364,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;正在读取应用列表…&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;正在读取应用列表…&quot;"
+        message="Hardcoded string &quot;Чтение списка приложений…&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Чтение списка приложений…&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_orientation.xml"
@@ -2375,8 +2375,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;超采样以 1.5× 分辨率渲染再缩回，竖屏应用顶部空带更小；横屏应用建议关闭（更清晰流畅）。自动 = 检测为竖屏应用时开启。&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;超采样以 1.5× 分辨率渲染再缩回，竖屏应用顶部空带更小；横屏应用建议关闭（更清晰流畅）。自动 = 检测为竖屏应用时开启。&quot;"
+        message="Hardcoded string &quot;Передискретизация с 1.5× Рендеринг разрешения и последующее сжатие，Пустая полоса вверху приложений с вертикальным экраном стала меньше.；Рекомендуется закрывать приложения с горизонтальным экраном.（Четче и плавнее）。автоматический = Включается при обнаружении приложения с вертикальным экраном.。&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;Передискретизация с 1.5× Рендеринг разрешения и последующее сжатие，Пустая полоса вверху приложений с вертикальным экраном стала меньше.；Рекомендуется закрывать приложения с горизонтальным экраном.（Четче и плавнее）。автоматический = Включается при обнаружении приложения с вертикальным экраном.。&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_supersample.xml"
@@ -2386,8 +2386,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;正在读取应用列表…&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;正在读取应用列表…&quot;"
+        message="Hardcoded string &quot;Чтение списка приложений…&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Чтение списка приложений…&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/fragment_panel_supersample.xml"
@@ -2397,8 +2397,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;自动&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;自动&quot;"
+        message="Hardcoded string &quot;автоматический&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;автоматический&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/item_app_ss.xml"
@@ -2408,8 +2408,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;开启&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;开启&quot;"
+        message="Hardcoded string &quot;включить&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;включить&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/item_app_ss.xml"
@@ -2419,8 +2419,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;关闭&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;关闭&quot;"
+        message="Hardcoded string &quot;закрыть&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;закрыть&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/item_app_ss.xml"
@@ -2430,8 +2430,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;正在播放&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;正在播放&quot;"
+        message="Hardcoded string &quot;Сейчас играю&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Сейчас играю&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/view_dashboard.xml"
@@ -2441,8 +2441,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;未在播放&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;未在播放&quot;"
+        message="Hardcoded string &quot;Не играю&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Не играю&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/view_dashboard.xml"
@@ -2452,8 +2452,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;媒体信息未连接&quot;, should use `@string` resource"
-        errorLine1="            android:text=&quot;媒体信息未连接&quot;"
+        message="Hardcoded string &quot;Медиа-информация не подключена&quot;, should use `@string` resource"
+        errorLine1="            android:text=&quot;Медиа-информация не подключена&quot;"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/view_dashboard.xml"
@@ -2463,8 +2463,8 @@
 
     <issue
         id="HardcodedText"
-        message="Hardcoded string &quot;⤢ 全屏地图&quot;, should use `@string` resource"
-        errorLine1="        android:text=&quot;⤢ 全屏地图&quot;"
+        message="Hardcoded string &quot;⤢ полноэкранная карта&quot;, should use `@string` resource"
+        errorLine1="        android:text=&quot;⤢ полноэкранная карта&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/layout/view_dashboard.xml"

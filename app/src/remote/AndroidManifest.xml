@@ -1,26 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- remote 变体叠加：远程调试桥专属权限与组件。只在 remote 变体合并，日常/发布包无此文件。 -->
+<!-- Наложение удаленного варианта: эксклюзивные разрешения и компоненты моста удаленной отладки. Объединено только в удаленном варианте, в пакете daily/release нет этого файла. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 重装闭环：PackageInstaller 发起安装（系统仍会弹确认） -->
+    <!-- Замкнутый цикл переустановки: PackageInstaller инициирует установку (система все равно будет запрашивать подтверждение). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".bridge.BridgeApp"
         android:usesCleartextTraffic="true"
         tools:replace="android:name,android:usesCleartextTraffic">
-        <!-- usesCleartextTraffic：调试桥按部署可能是纯 HTTP（如 frp+VPS 的
-             http://IP:8787），API 28+ 默认禁明文会让 APK 下载直接失败
-             （2026-10-21 实测 Cleartext HTTP traffic not permitted）。
-             只放开调试包；发布包不受影响。 -->
+        <!-- UseCleartextTraffic: Мост отладки может быть чистым HTTP (например, frp+VPS).
+             http://IP:8787），API 28+ по умолчанию отключает открытый текст, что приводит к сбою загрузки APK.
+             (21 октября 2026 г. фактическое измерение HTTP-трафика в открытом виде не разрешено).
+             Выпускаются только отладочные пакеты; пакеты релизов не затрагиваются. -->
 
-        <!-- 调试版唯一桌面入口「CarDeck 远程调试」：填地址/配对码，页内有「打开主界面」。
-             singleTop：安装确认/续接询问带参重入时走 onNewIntent，不叠加实例 -->
+        <!-- Единственный вход на рабочий стол для отладочной версии — «Удаленная отладка CarDeck»: введите адрес/код сопряжения, и на странице появится «Открыть основной интерфейс».
+             SingleTop: onNewIntent будет использоваться при повторном вводе запроса подтверждения/продолжения установки с параметрами, и экземпляр не будет наложен. -->
         <activity
             android:name=".bridge.BridgeSetupActivity"
             android:exported="true"
-            android:label="CarDeck 远程调试"
+            android:label="CarDeck удаленная отладка"
             android:launchMode="singleTop"
             android:theme="@style/Theme.CarPlaySender">
             <intent-filter>
@@ -29,8 +29,8 @@
             </intent-filter>
         </activity>
 
-        <!-- 摘掉调试版主界面的桌面图标（保留 Activity 本身：设置页/桥命令仍要打开它），
-             否则调试版出现两个入口、桌面三个 CarDeck，用户分不清 -->
+        <!-- Удалите значок рабочего стола основного интерфейса модератора отладки (сохраните само действие: страница настроек/команда моста все равно должны его открыть),
+             В противном случае в отладочной версии на рабочем столе будет два входа и три CarDecks, и пользователи не смогут их отличить. -->
         <activity
             android:name="io.github.shaonialife.cardeck.MainActivity"
             android:exported="true"
@@ -41,10 +41,10 @@
             </intent-filter>
         </activity>
 
-        <!-- PackageInstaller 状态回收：**必须声明 intent-filter**——自定义 action
-             没有过滤器时广播永远投递不到本接收器，安装确认（PENDING_USER_ACTION）
-             无人拉起、闭环断在第一环（2026-10-21 实测「点了没效果」根因）；
-             exported=false + setPackage 已限定只有本包/持 PendingIntent 者可发 -->
+        <!-- Переработка состояния PackageInstaller: **необходимо объявить фильтр намерений** — — настраиваемое действие
+             Без фильтра трансляция никогда не будет доставлена на этот ресивер, подтверждение установки (PENDING_USER_ACTION)
+             Никто не тянет его вверх, и замкнутый контур отключается на первом контуре (фактический тест от 21 октября 2026 г. «Нет эффекта при нажатии»);
+             Exported=false + setPackage ограничил отправку только этого пакета/владельцев PendingIntent -->
         <receiver
             android:name=".bridge.InstallReceiver"
             android:exported="false">

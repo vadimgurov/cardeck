@@ -7,9 +7,8 @@ import io.github.shaonialife.cardeck.transport.Iap2LinkChannel
 import io.github.shaonialife.cardeck.util.DeviceIdentity
 
 /**
- * BT 控制会话核心流程（Server/Client 共用，此前两份近乎复制）：
- * 构建发送端会话 → Phase 1 交付端点 → 保活泵（阻塞直至链路断开）。
- * socket 封装 / activeChannel 登记 / 生命周期收尾由两条路径各自处理。
+ * Основной процесс сеанса управления BT (общий для Сервера/Клиента, почти скопированный из двух предыдущих):
+ * Создание сеанса отправителя → конечная точка доставки фазы 1 → поддержание активности (блокировка до тех пор, пока канал не отключится).
  */
 internal fun Iap2LinkChannel.runSenderSession(
     context: Context,
@@ -19,9 +18,9 @@ internal fun Iap2LinkChannel.runSenderSession(
     onWifiCredentials: (Iap2SenderSession.WifiConfiguration) -> Unit,
     onEndpointUpdate: (Iap2SenderSession.CarPlayEndpoint) -> Unit,
     onLinkClosed: () -> Unit = {},
-    /** 本进程已知的车机热点 SSID（无新凭据时沿用，避免每轮拆链）。 */
+    /** SSID точки доступа автомобиля и машины, известный в этом процессе (он будет использоваться, когда нет новых учетных данных, чтобы избежать отключения соединения в каждом раунде). */
     knownCarSsid: () -> String? = { null },
-    /** 0x1D01 画像判定的链路代际（CLASSIC_MIB3/EVENT_LINK），Phase 1 完成后回调。 */
+    /** 0x1D01 Генерация ссылки для определения портрета (CLASSIC_MIB3/EVENT_LINK), обратный вызов после завершения этапа 1. */
     onGeneration: (ReceiverProfile.LinkGeneration) -> Unit = {},
 ) {
     val session =
@@ -33,27 +32,37 @@ internal fun Iap2LinkChannel.runSenderSession(
             onWifiCredentials,
             onEndpointUpdate,
             knownCarSsid,
-            // MFi 挑战长度按车机身份持久化（省掉 20B 静默 6 秒的试探）
+            // Длина запроса MFi сохраняется в соответствии с идентификацией транспортного средства (за исключением бесшумной
+            // пробной версии 20B в течение 6 секунд).
             context.applicationContext,
         )
     val endpoint = session.run(timeoutMillis)
     onGeneration(session.linkGeneration)
     onEndpoint(endpoint)
-    // Phase 2 过渡：保持控制通道存活记录配件消息；AirPlay 配对由 onEndpoint 回调发起
+    // Переход к этапу 2: поддержание работоспособности канала управления и запись дополнительных сообщений;
+    // Сопряжение AirPlay инициируется обратным вызовом onEndpoint.
+
     session.pumpIncomingForever()
-    // 链路断开（保活泵退出）：通知主控释放「会话处理中」——否则车机拆链后重连带来的
-    // 新端点会被僵尸轮次堵门（2026-10-22 奥迪 3315 真机定谳，见 SessionController.onSenderLinkClosed）
+    // Связь отключена (насос поддержания активности отключается): уведомите главный элемент управления об отключении
+    // «Обработки сеанса» - в противном случае транспортное средство и машина будут повторно соединены после отключения связи.
+
+    // Новая конечная точка будет заблокирована зомби-раундами (исправлена реальная машина Audi 3315 22 октября 2026
+    // г., см. SessionController.onSenderLinkClosed).
+
     onLinkClosed()
 }
 
 /**
- * 会话启动时解析真实蓝牙 MAC（0x4300 / 0x4E0E 用）。
+ * анализирует реальный MAC-адрес Bluetooth при запуске сеанса (для 0x4300/0x4E0E).
  *
- * **必须 forceRetry**：`DeviceIdentity` 对解析失败有 10 秒静默窗口，而 BT 会话往往在
- * Shizuku 刚就绪的同一毫秒构造——首次解析（Shizuku 尚未 ready）失败后，10 秒内的所有
- * 调用都直接返回占位 `02:00:00:00:00:00`。奥迪会拿 0x4300 的传输标识与 RFCOMM 对端
- * 核对，占位值导致它**静默丢弃**（链路层照常 ACK、CSM 层不再回应）。
- * 2026-10-19 奥迪 0.1.7 日志即此：整轮都是占位值，车机始终没下发 0x4301。
+ * **требуется ForceRetry**: `DeviceIdentity` имеет 10-секундное окно молчания для сбоев синтаксического анализа,
+ * в то время как сеансы BT, как правило,
+ * Та же миллисекундная конструкция, в которой Шизуку только что готова — и все это в течение 10 секунд после
+ * неудачного первого синтаксического анализа (Шизуку еще не готова)
+ * Вызовы   напрямую возвращают заполнитель `02:00:00:00:00:00`. Audi будет использовать идентификатор передачи 0x4300 для связи с RFCOMM.
+ * Проверьте, значение-заполнитель приводит к его **тихому удалению** (канальный уровень подтверждает как обычно,
+ * а уровень CSM больше не отвечает).
+ * 19 октября 2026 г. Audi 0.1.7 Журнал находится здесь: все колесо является значением-заполнителем, а машина никогда не выдавала 0x4301.
  */
 private fun resolveBluetoothMac(
     context: Context,
@@ -64,11 +73,16 @@ private fun resolveBluetoothMac(
     val mac = DeviceIdentity.bluetoothMac(context, forceRetry = true)
     if (mac == DeviceIdentity.PLACEHOLDER_MAC) {
         log(
-            "BT: ⚠ 未能解析真实蓝牙 MAC（仍是占位值）——车机会校验 0x4300 的传输标识，" +
-                "占位值可能导致它不下发 0x4301。请确认 Shizuku 已启动并已授权",
+            "BT: ⚠ Не удалось проанализировать настоящий MAC-адрес Bluetooth (все еще значение-заполнитель) — автомобиль " +
+                "проверит идентификацию передачи 0x4300," +
+                "Значение заполнителя может привести к тому, что 0x4301 не будет выдан. Пожалуйста, подтвердите, что " +
+                "Shizuku активирован и авторизован.",
         )
     } else {
-        log("BT: 本机蓝牙 MAC=$mac（0x4300/0x4E0E 与 ctrl 广播 TXT id 同源）")
+        log(
+            "BT: встроенный Bluetooth MAC=$mac (0x4300/0x4E0E имеет то же происхождение, что и идентификатор TXT " +
+                "широковещательной передачи ctrl)",
+        )
     }
     return mac
 }

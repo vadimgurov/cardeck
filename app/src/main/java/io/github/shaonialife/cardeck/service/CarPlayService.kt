@@ -16,9 +16,9 @@ import io.github.shaonialife.cardeck.util.Bg
 import io.github.shaonialife.cardeck.util.DebugFileLog
 
 /**
- * 前台保活服务：连接建立期间以 connectedDevice 类型常驻，
- * 防止 app 退到后台后被系统/MagicOS 省电策略杀死导致断连。
- * 连接逻辑仍运行在 MainActivity 派生的线程里——本服务负责保住进程。
+ * внешняя служба поддержания активности: резидентно с типом linkedDevice во время установления соединения,
+ * предотвращает закрытие приложения политикой энергосбережения системы/MagicOS после перехода в фоновый режим, что приводит к отключению.
+ * Логика подключения   по-прежнему выполняется в потоке, производном от MainActivity — этот сервис отвечает за поддержание процесса.
  */
 class CarPlayService : Service() {
     private var wakeLock: android.os.PowerManager.WakeLock? = null
@@ -27,8 +27,10 @@ class CarPlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     /**
-     * 息屏保活：CPU 唤醒锁维持编码/协议线程与 TCP 存活探测的响应；
-     * WiFi 低延迟锁阻止无线进入激进省电（否则接收端 20s 内判死拆链）。
+     * Поддержание активности экрана: блокировка пробуждения ЦП поддерживает реакцию потока кодирования/протокола и
+     * обнаружение активности TCP;
+     * Блокировка Wi-Fi с низкой задержкой предотвращает радикальное энергосбережение беспроводной сети (в противном
+     * случае принимающая сторона будет считаться отключенной в течение 20 секунд, и соединение будет отключено).
      */
     private fun acquireLocks() {
         if (wakeLock?.isHeld == true && wifiLock?.isHeld == true) return
@@ -62,8 +64,10 @@ class CarPlayService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        // 下车：车机蓝牙 ACL 断开（由 startService 投递——服务在跑时进程已是前台服务态，
-        // 不受后台启动限制）。disconnect 内部会 stopService → onDestroy。
+        // Выход из автомобиля: автомобильно-машинный Bluetooth ACL отключен (доставляется startService — процесс уже
+        // находится в приоритетном состоянии службы, когда служба работает.
+
+        // На него не распространяются ограничения на фоновый запуск). Disconnect приведет к внутренней остановке Service → onDestroy.
         if (intent?.action == ACTION_AUTO_STOP_SESSION) {
             fileLog("SVC: получено сообщение «Автоматически завершается при выходе из машины» —— Закрыть разговор.")
             if (SessionController.isSessionRunning()) {
@@ -74,12 +78,20 @@ class CarPlayService : Service() {
             }
             return START_NOT_STICKY
         }
-        // 必须显式指定类型为 connectedDevice：
-        // 2 参 startForeground 会拾取 manifest 声明的全部类型（含 mediaProjection），
-        // 而 Android 14 启动 mediaProjection 类型要求 AppOps PROJECT_MEDIA（用户当次授权才有效）——
-        // 重启/授权过期后直接 SecurityException 崩溃（2026-10-09 实测踩坑）。
-        // 但**已有投影时**必须继续带上 mediaProjection 类型：否则这次 startForeground
-        // 会把类型摘掉，Android 14 会连带停掉投影（自动连接刚拿到的令牌就废了）。
+        // Тип должен быть явно указан как linkedDevice:
+        // 2. Параметр startForeground подберет все типы, объявленные в манифесте (включая mediaProjection).
+        // Тип запуска mediaProjection в Android 14 требует AppOps PROJECT_MEDIA (действительно только в том случае, если
+        // пользователь разрешает это) ——
+
+        // SecurityException аварийно завершает работу сразу после перезапуска/истечения срока авторизации (фактическое
+        // тестирование состоялось 9 октября 2026 г.).
+
+        // Но **когда проекция уже есть** вы должны продолжать использовать тип mediaProjection: в противном случае на
+        // этот раз startForeground
+
+        // Тип будет удален, а Android 14 также прекратит проецирование (только что полученный автоматически подключенный
+        // токен будет признан недействительным).
+
         val fgsTypes =
             if (mediaProjection != null) {
                 android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
@@ -94,22 +106,32 @@ class CarPlayService : Service() {
             fgsTypes,
         )
         acquireLocks()
-        // 授权结果在（用户刚确认投屏）时：升级前台类型再创建投影（try/catch 兜底不崩）
+        // Когда получен результат авторизации (пользователь только что подтвердил скринкаст): обновите тип интерфейса, а
+        // затем создайте проекцию (попробовать/поймать безопасно)
+
         if (pendingProjectionResult != null) {
             upgradeToProjection()
             takeProjection()
         } else if (mediaProjection != null) {
             upgradeToProjection()
         }
-        // 上车自动连接：进程可能是被 ACL 广播冷启动的，先建会话对象（BT client/server、
-        // WiFi 连接器、mDNS 广播器都在 ensureSessionObjects 里），再走与首页按钮相同的流程。
-        // 放后台线程：冷启动时 ensure 要读偏好/绑定 UserService，别压在服务主线程上。
+        // Автоматическое подключение на плате: процесс может быть запущен с помощью широковещательной рассылки ACL.
+        // Создайте объект сеанса (клиент/сервер BT,
+
+        // Разъем Wi-Fi и вещательная станция mDNS находятся в убедитьсяеSessionObjects), а затем выполните тот же
+        // процесс, что и кнопку «Домой».
+
+        // Поместите фоновый поток: обязательно читайте настройки/привязку UserService во время холодного запуска и не
+        // помещайте его в основной поток службы.
+
         if (intent?.action == ACTION_AUTO_START_SESSION) {
             fileLog("SVC: Получить «Автоматически запускаться при посадке в машину» — начать сеанс")
             val app = applicationContext
             Bg.run("auto-session-start") {
                 SessionController.ensure(app)
-                // 自动连接默认带声音：先静默领取投屏令牌；失败退回只推视频
+                // Автоматическое соединение по умолчанию имеет звук: сначала получите токен скринкаста в автоматическом режиме;
+                // в случае неудачи он вернется к отправке только видео.
+
                 SessionController.audioEnabledForSession = acquireProjectionSilently()
                 SessionController.startConnection(app)
             }
@@ -118,14 +140,15 @@ class CarPlayService : Service() {
     }
 
     /**
-     * 自动连接时静默领取 MediaProjection（AudioPlaybackCapture 的授权来源）。
+     * автоматически получает MediaProjection (авторизованный источник AudioPlaybackCapture) при автоматическом подключении.
      *
-     * Android 14 的顺序硬约束：**先**有授权结果 → **再**把 FGS 类型升级为
-     * mediaProjection → 才能调 `getMediaProjection`。这里直接复用
-     * [pendingProjectionResult] + [upgradeToProjection] + [takeProjection]，
-     * 与手动授权走同一条路径（唯一区别是令牌来自 [SilentProjectionActivity]）。
+     * Жесткие ограничения порядка в       Android 14: **сначала** получите результат авторизации → **затем** обновите тип FGS до
+     * mediaProjection → можно настроить `getMediaProjection`. Непосредственное повторное использование здесь
+     * [pendingProjectionResult] + [upgradeToProjection] + [takeProjection],
+     * проходит тот же путь, что и ручная авторизация (с той лишь разницей, что токен происходит от [SilentProjectionActivity]).
      *
-     * @return 是否拿到实例；false 时自动连接只推视频（不弹窗、不重试）
+     * @return Получать ли экземпляр; если false, он автоматически подключится и отправит только видео (без
+     * всплывающего окна, без повторной попытки)
      */
     private fun acquireProjectionSilently(): Boolean {
         val grant =
@@ -155,12 +178,14 @@ class CarPlayService : Service() {
             val manager =
                 getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
             val projection = manager.getMediaProjection(code, data)
-            // Android 14+：createVirtualDisplay 前必须注册回调（资源管理强制）
+            // Android 14+: обратный вызов должен быть зарегистрирован перед созданием VirtualDisplay (обязательное управление ресурсами)
             projection?.registerCallback(
                 object : android.media.projection.MediaProjection.Callback() {
                     override fun onStop() {
                         mediaProjection = null
-                        // 关键诊断：授权丢失会导致音频/镜像不可用（此前只写 logcat，HKS 加密看不到）
+                        // Диагностика ключа: потеря авторизации приведет к недоступности аудио/зеркала (ранее записывался только logcat,
+                        // а шифрование HKS не было видно)
+
                         fileLog("SVC: MediaProjection был остановлен системой (onStop) — аудио/зеркало необходимо повторно авторизовать")
                     }
                 },
@@ -193,8 +218,10 @@ class CarPlayService : Service() {
 
     override fun onDestroy() {
         releaseLocks()
-        // Android 14+：MediaProjection 与前台的 mediaProjection 类型绑定——
-        // 保活服务停止（如用户点「断开连接」）时系统会连带停止投影。
+        // Android 14+: MediaProjection привязан к типу mediaProjection переднего плана ——
+        // Когда служба поддержки активности остановлена (например, пользователь нажимает «Отключить»), система также
+        // прекращает проецирование.
+
         fileLog(
             "SVC: onDestroy (служба поддержки активности остановлена) mediaProjection=" +
                 (if (mediaProjection != null) "Все еще там (будет переработано системой)" else "null"),
@@ -202,7 +229,7 @@ class CarPlayService : Service() {
         super.onDestroy()
     }
 
-    /** 投影生命周期等关键事件：logcat + 文件双写（HKS 环境下文件是唯一可读通道）。 */
+    /** Ключевые события, такие как жизненный цикл проекции: logcat + двойная запись файла (файл — единственный читаемый канал в среде HKS). */
     private fun fileLog(message: String) {
         android.util.Log.i("CarPlayService", message)
         DebugFileLog
@@ -213,17 +240,17 @@ class CarPlayService : Service() {
         private const val CHANNEL_ID = "carplay_connection"
         private const val NOTIFICATION_ID = 1
 
-        /** 上车自动连接：车机蓝牙 ACL 连上时由 CarBluetoothReceiver 投递。 */
+        /** Автоматическое подключение при посадке в автомобиль: автомобильный список ACL Bluetooth доставляется CarBluetoothReceiver при подключении. */
         const val ACTION_AUTO_START_SESSION = "io.github.shaonialife.cardeck.action.AUTO_START"
 
-        /** 下车自动收摊：ACL 断开时投递（只有服务在跑才发，见 CarBluetoothReceiver）。 */
+        /** Автоматически закрывать кабину после выхода из машины: доставляется при отключении ACL (отправляется только при работающей службе, см. CarBluetoothReceiver). */
         const val ACTION_AUTO_STOP_SESSION = "io.github.shaonialife.cardeck.action.AUTO_STOP"
 
-        /** 镜像模式：授权后由 MainActivity 写入；服务重声明 FGS 类型后方可创建虚拟屏。 */
+        /** Режим зеркала: пишет MainActivity после авторизации; виртуальный экран можно создать только после того, как сервис объявит тип FGS. */
         @Volatile
         var mediaProjection: android.media.projection.MediaProjection? = null
 
-        /** 授权结果暂存：由服务在前台类型升级后调用 getMediaProjection（Android 14+ 顺序要求）。 */
+        /** Промежуточная обработка результатов авторизации: вызывается службой после обновления основного типа getMediaProjection (требования к заказу для Android 14+). */
         @Volatile
         var pendingProjectionResult: Pair<Int, Intent>? = null
 
@@ -250,7 +277,9 @@ class CarPlayService : Service() {
                 },
             )
         }
-        // 点击通知 → 打开 App 主界面（此前缺 setContentIntent，点击无反应）
+        // Нажмите на уведомление → откройте основной интерфейс приложения (раньше setContentIntent отсутствовал, и при
+        // нажатии не было ответа)
+
         val contentIntent =
             android.app.PendingIntent.getActivity(
                 this,

@@ -9,9 +9,9 @@ import java.math.BigInteger
 import java.security.SecureRandom
 
 /**
- * 配对栈端到端回环：MockReceiver 严格按参考接收端（xcertplay PairSetup/PairVerify/Srp6a）
- * 的算法实现服务端，验证我们的客户端能完整走通 pair-setup + pair-verify，
- * 且双方派生的控制密钥方向一致。
+ * Сквозная обратная связь стека сопряжения: MockReceiver строго следует за принимающей стороной (xcertplay PairSetup/PairVerify/Srp6a)
+ * Алгоритм   реализует на стороне сервера проверку того, что наш клиент может полностью пройти настройку пары + проверку пары.
+ * и клавиши управления, полученные обеими сторонами, находятся в одном направлении.
  */
 class AirPlayPairingTest {
     private val random = SecureRandom()
@@ -27,14 +27,16 @@ class AirPlayPairingTest {
         assertNotNull(receiverIdentity)
         assertEquals(receiver.pairingId, receiverIdentity!!.pairingId)
         assertArrayEquals(receiver.staticKey.publicKey, receiverIdentity.publicKey)
-        assertTrue("接收端应保存控制器公钥", receiver.pairings.containsKey(identity.pairingId))
+        assertTrue("Принимающая сторона должна сохранить открытый ключ контроллера.", receiver.pairings.containsKey(identity.pairingId))
 
         val keys = PairVerifyClient(identity, transport) { }.run(receiver.staticKey.publicKey)
         assertEquals(32, keys.phoneWriteKey.size)
         assertEquals(32, keys.phoneReadKey.size)
 
-        // 方向交叉验证：接收端 readKey 解我们发出的方向，writeKey 是它发给我们的方向
-        assertNotNull("接收端应完成 pair-verify", receiver.lastReadKey)
+        // Перекрестная проверка направлений: readKey принимающей стороны понимает направление, которое мы отправили, а
+        // writeKey — это направление, которое он отправил нам.
+
+        assertNotNull("Принимающая сторона должна завершить pair-verify", receiver.lastReadKey)
         assertArrayEquals(receiver.lastReadKey, keys.phoneWriteKey)
         assertArrayEquals(receiver.lastWriteKey, keys.phoneReadKey)
     }
@@ -54,7 +56,7 @@ class AirPlayPairingTest {
         assertArrayEquals(big, decoded[Tlv8.TYPE_PUBLIC_KEY])
     }
 
-    /** 按参考接收端算法实现的服务端。 */
+    /** Сервер реализован по алгоритму эталонного приемника. */
     private class MockReceiver {
         val staticKey = AirPlayCrypto.ed25519Generate()
         val pairingId = "3e6f5739-b2bf-4ebf-bb87-5b6b57cc42e5"
@@ -66,14 +68,14 @@ class AirPlayPairingTest {
 
         private val random = SecureRandom()
 
-        // SRP 服务端状态
+        // Статус SRP-сервера
         private var salt = ByteArray(0)
         private var publicKeyB = BigInteger.ZERO
         private var verifier = BigInteger.ZERO
         private var privateB = BigInteger.ZERO
         private var sessionKey = ByteArray(0)
 
-        // pair-verify 状态
+        // статус проверки пары
         private var pvEphemeralPublic = ByteArray(0)
         private var pvShared = ByteArray(0)
         private var pvEncryptionKey = ByteArray(0)
@@ -243,9 +245,11 @@ class AirPlayPairingTest {
             val controllerSignature = sub[Tlv8.TYPE_SIGNATURE] ?: return error(4)
             val controllerLtpk = pairings[controllerId.toString(Charsets.UTF_8)] ?: return error(4)
 
-            // 客户端临时公钥需从 M1 找回：简化测试路径里客户端把它放在 identifier 前——
-            // 实际按参考算法应为 clientEphemeral || controllerId || serverEphemeral。
-            // 这里从 pair-verify 会话中重建（测试中我们保存了它）。
+            // Временный открытый ключ клиента необходимо получить из M1: клиент помещает его перед идентификатором в
+            // упрощенном тестовом пути ——
+
+            // Фактический эталонный алгоритм должен быть clientEphemeral || идентификатор контроллера || серверЭфемерный.
+            // Это воссоздано из сеанса проверки пары (мы сохранили его для тестирования).
             val clientEphemeral = pvClientEphemeral ?: return error(4)
             if (!AirPlayCrypto.ed25519Verify(controllerLtpk, clientEphemeral + controllerId + pvEphemeralPublic, controllerSignature)) {
                 return error(4)

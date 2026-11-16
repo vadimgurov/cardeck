@@ -17,8 +17,9 @@ import io.github.shaonialife.cardeck.launcher.settings.SettingsToastHost
 import io.github.shaonialife.cardeck.launcher.settings.SupersamplePanelFragment
 
 /**
- * 车机设置（双栏宿主：左菜单 / 右内容 Fragment 容器）。
- * 内容页以 Fragment 实现（settings 包），车机双栏与手机侧二级菜单共用同一套面板。
+ * Настройки автомобиля  (хост с двумя столбцами: левое меню/правый контейнер фрагментов содержимого).
+ * Страница содержимого   реализована с помощью Fragment (пакета настроек), а двойные столбцы автомобиля и
+ * мобильного телефона используют одну и ту же панель.
  */
 class SettingsActivity :
     AppCompatActivity(),
@@ -30,7 +31,9 @@ class SettingsActivity :
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (VirtualLauncher.dockAtBottom) {
-            // 竖屏窄屏：双栏挤压——转发手机侧二级菜单（列表 → 内容页）
+            // Вертикальный узкий экран: сжатие в две колонки — вперед вторичное меню на стороне мобильного телефона (список
+            // → страница содержания)
+
             startActivity(
                 android.content.Intent(
                     this,
@@ -48,7 +51,7 @@ class SettingsActivity :
         if (savedInstanceState == null) showMenu(0) else restoreCurrentMenu()
     }
 
-    /** 从 XML 菜单条目收集（按 id 顺序即菜单顺序）。 */
+    /** Собирается из записей меню XML (в порядке идентификаторов, т. е. в порядке меню). */
     private fun collectMenus() {
         val ids =
             intArrayOf(
@@ -65,7 +68,7 @@ class SettingsActivity :
         }
     }
 
-    /** 菜单切换：选中态样式 + 替换右栏 Fragment。 */
+    /** Переключение меню: выбранный стиль + замена фрагмента правого столбца. */
     private fun showMenu(index: Int) {
         if (index == currentMenu) {
             applyMenuStyle(index)
@@ -123,7 +126,7 @@ class SettingsActivity :
 
     override fun onBackPressed() = close()
 
-    /** 页内轻提示（不用系统 Toast：虚拟屏上显示位置不可控）。 */
+    /** Световая подсказка на странице (системный тост не требуется: положение отображения на виртуальном экране неконтролируемо). */
     override fun showToast(text: String) {
         val view = toastView ?: return
         view.text = text

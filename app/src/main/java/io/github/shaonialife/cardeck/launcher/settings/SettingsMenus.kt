@@ -3,7 +3,7 @@ package io.github.shaonialife.cardeck.launcher.settings
 import androidx.fragment.app.Fragment
 import io.github.shaonialife.cardeck.R
 
-/** 车机设置菜单注册表：车机双栏与手机二级菜单共用（菜单项/标题/Fragment 工厂）。 */
+/** Реестр меню настроек автомобиля и машины: двойные столбцы автомобиля и машины используются совместно со вторичным меню мобильного телефона (пункт меню/название/фабрика фрагментов). */
 object SettingsMenus {
     const val DESKTOP = 0
     const val SUPERSAMPLE = 1

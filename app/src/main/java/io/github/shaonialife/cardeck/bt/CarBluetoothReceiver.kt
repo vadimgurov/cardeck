@@ -10,24 +10,29 @@ import io.github.shaonialife.cardeck.service.CarPlayService
 import io.github.shaonialife.cardeck.util.DebugFileLog
 
 /**
- * 上车自动连接 / 下车自动收摊。
+ * автоматически подключается при посадке в автобус/автоматически закрывает кабинку при выходе из автобуса.
  *
- * **为什么用清单静态接收器**：`ACTION_ACL_CONNECTED` / `ACTION_ACL_DISCONNECTED` 在
- * 隐式广播豁免清单里（Android 开发者文档「隐式广播例外情况」明确列出），所以即使
- * 应用进程被杀，车机蓝牙连上的瞬间也能把进程拉起来。
+ * **Зачем использовать статический приемник манифеста**: `ACTION_ACL_CONNECTED` / `ACTION_ACL_DISCONNECTED` в
+ * находится в списке исключений неявного вещания (четко указан в документации разработчика Android «Неявные
+ * исключения вещания»), поэтому даже если
+ * Процесс приложения   убит, и процесс можно будет подтянуть в момент подключения автомобиля по Bluetooth.
  *
- * **为什么能启动前台服务**：Android 12+ 限制后台启动 FGS，豁免清单里**没有**
- * 「蓝牙广播」这一项；本应用能起是因为持有 `SYSTEM_ALERT_WINDOW`（暗幕/触摸探针
- * 依赖它）——它是官方豁免项（targetSdk 34 下只需要权限存在；Android 15+ 才额外
- * 要求当时有可见悬浮窗）。没授悬浮窗权限时 `startForegroundService` 会抛
- * `ForegroundServiceStartNotAllowedException`，这里只记日志——用户手动打开 App
- * 连接一次即可（那次有可见 Activity，不受限制）。
+ * **Почему можно запустить службу переднего плана**: Android 12+ запрещает запуск FGS в фоновом режиме, и ее **нет** в списке исключений
+ * «Трансляция по Bluetooth»; это приложение можно использовать, поскольку оно имеет `SYSTEM_ALERT_WINDOW` (темный экран/сенсорный датчик).
+ * зависит от этого) - это официальное исключение (требуются только разрешения под targetSdk 34; Android 15+ дополнительно
+ * Для   в данный момент требуется видимое плавающее окно). Если разрешение на плавающее окно не предоставлено,
+ * `startForegroundService` выдаст
+ * `ForegroundServiceStartNotAllowedException`, здесь записываются только логи - пользователь открывает приложение вручную
+ * можно подключить один раз (в это время активность видна и не ограничена).
  *
- * **目标过滤**：优先用户选定的目标车机（[TargetDevicePrefs]）；未选定时按车机名称
- * 关键词兜底。耳机/手表等 ACL 连接不会误触发。
+ * **Целевая фильтрация**: установка приоритета целевого транспортного средства, выбранного пользователем
+ * ([TargetDevicePrefs]); если не выбрано, нажмите название автомобиля
+ * Ключевые слова  . Подключения ACL, такие как наушники/часы, не будут активированы случайно.
  *
- * 音频注意：自动连接只推视频——AudioPlaybackCapture 需要 MediaProjection 授权令牌，
- * 系统不允许无令牌静默获取（appops PROJECT_MEDIA 只是其中一道闸，不产生令牌）。
+ * Аудио Примечание. При автоматическом подключении передается только видео. Для AudioPlaybackCapture требуется
+ * токен авторизации MediaProjection.
+ * Система   не позволяет осуществлять автоматическое получение без токена (приложение PROJECT_MEDIA является
+ * лишь одним из шлюзов и не генерирует токен).
  */
 class CarBluetoothReceiver : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
@@ -43,19 +48,19 @@ class CarBluetoothReceiver : BroadcastReceiver() {
         }
         val device = deviceOf(intent) ?: return
         val app = context.applicationContext
-        // 「上车自动连接」开关（设置 → 显示，默认开）
+        // Переключатель «Автоматически подключаться при посадке в машину» (Настройки → Дисплей, по умолчанию включено)
         if (!AutoConnectPrefs.enabled(app)) return
-        // 这两个访问需要 BLUETOOTH_CONNECT；未授权时放弃（无法判断是不是目标车机）
+        // Эти два доступа требуют BLUETOOTH_CONNECT; сдаться, если не разрешено (невозможно определить, целевая это машина или нет)
         val address = runCatching { device.address }.getOrNull() ?: return
         val name = runCatching { device.name }.getOrNull()
 
         if (!isCarDevice(app, address, name)) {
-            DebugFileLog.append(app, "AUTO: 忽略非车机蓝牙 ${name ?: "?"}（$address）")
+            DebugFileLog.append(app, "АВТО: игнорировать неавтомобильный Bluetooth ${name ?: "?"}（$address）")
             return
         }
 
         if (action == BluetoothDevice.ACTION_ACL_CONNECTED) {
-            DebugFileLog.append(app, "AUTO: 车机蓝牙已连上 ${name ?: "?"}（$address）——自动拉起会话")
+            DebugFileLog.append(app, "АВТО: Bluetooth автомобиля подключен к ${name ?: "?"} ($address) — Автоматически запускать сеанс.")
             runCatching {
                 context.startForegroundService(
                     Intent(context, CarPlayService::class.java)
@@ -64,13 +69,16 @@ class CarBluetoothReceiver : BroadcastReceiver() {
             }.onFailure { error ->
                 DebugFileLog.append(
                     app,
-                    "AUTO: 自动启动被系统拦截（${error.javaClass.simpleName}: ${error.message}）" +
-                        "——请授予「显示在其他应用上层」后重试，或手动打开 App 连接一次",
+                    "АВТО: Автоматический запуск был перехвачен системой (${error.javaClass.simpleName}: ${error.message})" +
+                        "—— Разрешите параметр «Показывать поверх других приложений» и повторите попытку или вручную " +
+                        "откройте приложение, чтобы подключиться один раз.",
                 )
             }
         } else {
-            DebugFileLog.append(app, "AUTO: 车机蓝牙已断开 ${name ?: "?"}（$address）——结束会话")
-            // 会话在跑时服务就是前台进程，startService 允许；不在跑说明本来就没有会话
+            DebugFileLog.append(app, "АВТО: Bluetooth автомобиля отключен ${name ?: "?"} ($address) — — Завершить сеанс.")
+            // Когда сеанс запущен, служба является процессом переднего плана, startService это разрешает; если он не
+            // запущен, это означает, что сеанса вообще нет.
+
             runCatching {
                 context.startService(
                     Intent(context, CarPlayService::class.java)
@@ -100,7 +108,7 @@ class CarBluetoothReceiver : BroadcastReceiver() {
     }
 
     private companion object {
-        /** 未选目标车机时的兜底：常见车机蓝牙名关键词（真车 + 测试台）。 */
+        /** Что нужно знать, если целевой автомобиль не выбран: общие ключевые слова имени автомобиля и машины Bluetooth (реальный автомобиль + испытательный стенд). */
         val CAR_KEYWORDS = listOf("BMW", "MINI", "AUDI", "PORSCHE", "MERCEDES", "BENZ", "VOLVO", "CARPLAY")
     }
 }

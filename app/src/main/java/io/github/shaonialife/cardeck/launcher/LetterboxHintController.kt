@@ -7,21 +7,25 @@ import io.github.shaonialife.cardeck.shizuku.Shell
 import io.github.shaonialife.cardeck.util.Bg
 
 /**
- * 「强制横屏未生效」提示的编排：事件驱动探测 → 定位黑边 → 生成卡片 → 一键重启。
+ * Подсказка «Принудительное горизонтальное расположение экрана не действует»: обнаружение на основе событий →
+ * обнаружение черных краев → создание карточек → перезапуск одним щелчком мыши.
  *
- * 为什么会需要它（2026-10-18 荣耀真机复现）：应用先运行、连接车机后才写入
- * `am compat` 强制横屏时，系统虽然杀掉了进程，但保留下来的任务会按**旧配置**恢复
- * ActivityRecord（`displayChangedWithoutRestart=true`），于是 `overrideOrientation`
- * 仍是 PORTRAIT、`isLetterboxRunning=true`、`letterboxReason=FIXED_ORIENTATION`。
- * 只有 force-stop 后重新启动才会按新的方向覆盖重建。
+ * Зачем он нужен   (18.10.2026 Почитай новое появление реальной машины): Сначала запускается приложение,
+ * подключается к машине и потом пишется
+ * `am compat` При принудительном горизонтальном экране, хотя система завершает процесс, остальные задачи будут
+ * восстановлены в соответствии с **старой конфигурацией**
+ * ActivityRecord(`displayChangedWithoutRestart=true`), затем `overrideOrientation`
+ * по-прежнему ПОРТРЕТ, `isLetterboxRunning=true`, `letterboxReason=FIXED_ORIENTATION`.
+ * перезапишет и перестроит в новом направлении только после принудительной остановки и перезапуска.
  *
- * 探测只在事件点触发（连接建立、应用启动、地图全屏、重启之后），不做轮询；
- * 判定与几何计算都是纯函数（见 LetterboxHint.kt），可单测。
+ * Обнаружение   срабатывает только в точках событий (установление соединения, запуск приложения, полноэкранный
+ * режим карты, после перезапуска) и не осуществляет опрос;
+ * Решение   и геометрические расчеты являются чистыми функциями (см. LetterboxHint.kt) и могут измеряться индивидуально.
  */
 object LetterboxHintController {
     private const val TAG = "LetterboxHint"
 
-    /** 用户点过「关闭」/确认修不好：本次会话不再提示。 */
+    /** Пользователь нажал «Закрыть»/подтвердил, что восстановление невозможно завершить: в этом сеансе никаких запросов не будет. */
     private val dismissed = HashSet<String>()
 
     private enum class State { NORMAL, BUSY, FAILED }
@@ -29,7 +33,7 @@ object LetterboxHintController {
     @Volatile
     private var state = State.NORMAL
 
-    /** 当前提示对应的目标（null = 未显示）。 */
+    /** Цель, соответствующая текущему приглашению (ноль = не отображается). */
     private data class Target(
         val packageName: String,
         val component: String,
@@ -39,7 +43,7 @@ object LetterboxHintController {
     @Volatile
     private var target: Target? = null
 
-    /** 卡片矩形（输出画面坐标，顶部原点）；触摸命中直接用它。 */
+    /** Прямоугольник карты (координаты выходного экрана, начало координат сверху); коснитесь и нажмите, чтобы использовать его напрямую. */
     @Volatile
     private var cardLeft = 0f
 
@@ -57,13 +61,13 @@ object LetterboxHintController {
 
     fun isVisible(): Boolean = target != null
 
-    /** 卡片是否命中（输出画面坐标；由 TouchRouter 在注入前调用）。 */
+    /** Поражена ли карта (координаты выходного экрана; вызываются TouchRouter перед внедрением). */
     fun contains(
         x: Float,
         y: Float,
     ): Boolean = target != null && x >= cardLeft && x < cardRight && y >= cardTop && y < cardBottom
 
-    /** 卡片被点按：NORMAL=重启应用；BUSY=忽略；FAILED=关闭。 */
+    /** Карта была нажата: NORMAL=перезапустить приложение; ЗАНЯТО = игнорировать; НЕУДАЧА = закрыть. */
     fun onTap() {
         when (state) {
             State.NORMAL -> {
@@ -82,7 +86,7 @@ object LetterboxHintController {
         clear()
     }
 
-    /** 回桌面 / 会话结束：清掉提示并恢复状态。 */
+    /** Вернитесь на рабочий стол/завершите сеанс: очистите запрос и восстановите статус. */
     fun clear() {
         target = null
         state = State.NORMAL
@@ -93,19 +97,23 @@ object LetterboxHintController {
         VirtualLauncher.setOverlayCard(null)
     }
 
-    /** 新会话：清空「本次会话不再提示」记录。 */
+    /** Новый сеанс: очистите запись «Больше нет запросов для этого сеанса». */
     fun resetSession() {
         synchronized(dismissed) { dismissed.clear() }
         clear()
     }
 
     /**
-     * 事件点探测（连接建立 / 应用启动 / 地图全屏后调用）。放后台执行：
-     * 一次 `dumpsys activity activities` 约 20ms，但仍不应占用 UI 线程。
+     * Обнаружение точки события  (вызывается после установления соединения/запуска приложения/полного экрана карты).
+     * Выполнить в фоновом режиме:
+     * один раз `dumpsys activity activities` занимает около 20 мс, но все равно не должен связывать поток пользовательского интерфейса.
      *
-     * [displayIdHint]：调用方**确知**的目标屏（launchApp/地图启动传入）。不传时按
-     * 合成器当前活动屏推断——但切屏要等目标屏出首帧（最长 2s），探测早于切换完成
-     * 会看错屏、读出空结果（头条这类首帧慢的应用曾因此漏提示，2026-10-18）。
+     * [displayIdHint]: вызывающий абонент **знает** целевой экран (входящий запуск запуска приложения/карты).
+     * Нажмите, когда не идет передача
+     * Синтезатор       в настоящее время определяет активный экран, но переключение экранов должно ждать первого
+     * кадра целевого экрана (до 2 с), и обнаружение завершается раньше, чем переключение.
+     * увидит неправильный экран и зачитает пустые результаты (приложения с медленными первыми кадрами, такие как
+     * Toutiao, однажды из-за этого пропустили подсказки, 18 октября 2026 г.).
      */
     fun scheduleProbe(
         context: Context,
@@ -141,7 +149,9 @@ object LetterboxHintController {
                     if (isVisible()) clear()
                     return
                 }
-            // 方向覆盖是异步串行写入的：探测前等队列排空，否则可能读到写入前的状态
+            // Покрытие направлений записывается асинхронно последовательно: перед проверкой дождитесь освобождения очереди,
+            // иначе состояние перед записью может быть прочитано.
+
             AppOrientationCompat.awaitPending()
             val enabled = AppOrientationCompat.enabledPackages(context)
             if (enabled.isEmpty()) {
@@ -166,11 +176,17 @@ object LetterboxHintController {
                 }
                 return
             }
-            // 系统侧覆盖必须真的生效，否则「强制重启」注定无效（误导性提示）。
-            // 偏好开着而系统侧缺失是**可自愈**的（会话写入失败/被外部清掉）：
-            // 按用户意愿补写覆盖。`am compat` 会当场杀掉目标进程，所以补写后必须
-            // 主动把它拉回原屏——否则用户看到的是「点开应用又被打回桌面、毫无提示」
-            // （2026-10-18 实测头条：只剩这条路径会静默失败）。
+            // Переопределение на стороне системы действительно должно вступить в силу, иначе «принудительный перезапуск»
+            // обречен на неэффективность (вводящее в заблуждение сообщение).
+
+            // Настройки включены, но отсутствуют на стороне системы и являются **самовосстанавливающимися** (сбой записи
+            // сеанса/удаляется извне):
+
+            // Перезапишите по желанию пользователя. `am compat` уничтожит целевой процесс на месте, поэтому вы должны
+            // Возьмите на себя инициативу вернуть его на исходный экран — в противном случае пользователь увидит «нажмите,
+            // чтобы открыть приложение, а затем вернетесь на рабочий стол без каких-либо подсказок».
+
+            // (18 октября 2026 г. Фактический заголовок теста: Только этот путь завершится неудачно).
             val changeIds = AppOrientationCompat.changeIdsRegistered()
             var systemOn =
                 changeIds && AppOrientationCompat.isSystemEnabledFor(activity.packageName)
@@ -183,10 +199,12 @@ object LetterboxHintController {
                 systemOn = healed || AppOrientationCompat.isSystemEnabledFor(activity.packageName)
                 VirtualLauncher.logSink?.invoke(
                     "ПОДСКАЗКА: отсутствует покрытие горизонтального экрана на стороне системы «${activity.packageName}» — заполните" +
-                        "${if (healed) "成功" else "失败"}",
+                        "${if (healed) "успех" else "не удалось"}",
                 )
                 if (systemOn) {
-                    // 补写已杀掉进程：等它退出后在原屏重启（与按钮动作等价，但自动完成）
+                    // Перепишите убитый процесс: подождите, пока он завершится, а затем перезапустите его на исходном экране
+                    // (эквивалентно действию кнопки, но выполняется автоматически)
+
                     Thread.sleep(600)
                     val start =
                         Shell.exec(
@@ -227,12 +245,20 @@ object LetterboxHintController {
                 if (isVisible()) clear()
                 return
             }
-            // 黑边太窄（放不下卡片）时 showCard 返回 false 且不挂卡片；日志只记真实展示
+            // Если черная рамка слишком узкая (невозможно разместить карту), showCard возвращает false и карта не
+            // подвешивается; журнал записывает только фактическое отображение
+
             val wasVisible = isVisible()
-            // 补写并重启后仍竖屏 → 说明这个应用压根不吃方向覆盖，直接给「仍然竖屏」
-            // 终态卡（不再诱导用户再点一次必然失败的重启）
+            // После перепрошивки и перезапуска экран по-прежнему вертикальный → Это означает, что это приложение вообще не
+            // использует преимущества охвата ориентации, а напрямую выдает "все еще вертикальный экран"
+
+            // Карточка конечного состояния (больше не побуждает пользователей нажимать кнопку перезагрузки, которая
+            // неизбежно завершится неудачей)
+
             state = if (healedAndRelaunched) State.FAILED else State.NORMAL
-            // 自愈后复探过的话以最新读数为准（组件可能已换成重建后的实例）
+            // При повторном тестировании после самовосстановления последнее показание должно иметь преимущественную силу
+            // (возможно, компонент был заменен перестроенным экземпляром).
+
             target = Target(current.packageName, current.component, displayId)
             val shown = showCard(current, state)
             if (!shown) {
@@ -254,8 +280,9 @@ object LetterboxHintController {
     }
 
     /**
-     * 当前应用区实际显示的屏：地图全屏时是地图屏，否则是活动应用屏。
-     * 桌面（GridActivity）不在「应用横屏」名单里，探测会自然跳过。
+     * Экран фактически отображается в текущей области приложения: когда карта развернута в полноэкранном режиме, это
+     * экран карты, в противном случае — это активный экран приложения.
+     * Desktop (GridActivity) отсутствует в списке «Горизонтальный экран приложения», и обнаружение будет естественным образом пропущено.
      */
     private fun visibleDisplayId(): Int? {
         if (VirtualLauncher.mapFullscreen && VirtualLauncher.mapDisplayId >= 0) {
@@ -266,11 +293,14 @@ object LetterboxHintController {
     }
 
     /**
-     * 依据 letterbox 矩形生成并挂上卡片。
+     * генерирует и вешает карточки на основе прямоугольника почтового ящика.
      *
-     * 坐标系：dumpsys 的 bounds 是**应用屏自身像素**；合成器把整块屏拉伸/缩放到
-     * 应用区，故按 应用区宽 / 屏宽 换算成输出画面坐标（两轴比例相等，取横向）。
-     * 卡片只在黑边够宽时显示——宽度由文字实测决定，没有硬编码阈值。
+     * Система координат      : границами dumpsys являются **собственные пиксели экрана приложения**; синтезатор
+     * растягивает/масштабирует весь экран, чтобы
+     * область приложения, поэтому она преобразуется в координаты выходного экрана в соответствии с шириной области
+     * приложения/шириной экрана (соотношение двух осей одинаково, и принимается горизонтальное направление).
+     * Карты       отображаются только в том случае, если черная рамка достаточно широка — ширина определяется
+     * фактическим размером текста, жестко запрограммированного порога нет.
      */
     private fun showCard(
         activity: LetterboxActivity,
@@ -286,7 +316,7 @@ object LetterboxHintController {
         val density = VirtualLauncher.uiDensity()
         val margin = LetterboxCardPainter.marginPx(density)
         val needed = LetterboxCardPainter.minWidthPx(density) + 2f * margin
-        // 黑边太窄（与全屏横屏已无区别）→ 不显示
+        // Черная рамка слишком узкая (не отличается от полноэкранного горизонтального экрана) → не отображается
         val side = chooseLetterboxSide(leftBar, rightBar, needed) ?: return false
         val barWidth = if (side == LetterboxSide.LEFT) leftBar else rightBar
         val width = minOf(LetterboxCardPainter.maxWidthPx(density), barWidth - 2f * margin).toInt()
@@ -324,8 +354,10 @@ object LetterboxHintController {
         }
 
     /**
-     * 强制重启目标应用：force-stop → 在**原屏**重新启动 → 复探。
-     * 后台线程执行；动作前先等方向覆盖队列排空（否则重启后仍读到旧覆盖）。
+     * Принудительно перезапустить целевое приложение: принудительно остановить → Перезапустить на **исходном
+     * экране** → Повторное исследование.
+     * выполнение фонового потока; прежде чем предпринимать какие-либо действия, дождитесь освобождения очереди
+     * покрытия направлений (в противном случае старое покрытие все равно будет прочитано после перезапуска).
      */
     private fun restart(t: Target) {
         state = State.BUSY
@@ -334,9 +366,11 @@ object LetterboxHintController {
         Bg.run("letterbox-restart") {
             runCatching {
                 AppOrientationCompat.awaitPending()
-                // am compat 的写入确实会杀进程，但任务按旧配置恢复；这里显式 stop 让
-                // 下次启动走全新路径（实测：重启后 overrideOrientation=NOSENSOR、
-                // areBoundsLetterboxed=false）。
+                // Написание am compat действительно убьет процесс, но задача восстановится по старой конфигурации; здесь явная
+                // остановка будет
+
+                // При следующем запуске выберите новый путь (фактический тест: после перезапуска overrideOrientation=NOSENSOR,
+                // areBoundsLetterboxed=false).
                 Shell.exec("am force-stop ${t.packageName}", timeoutMs = 8_000)
                 Thread.sleep(400)
                 val start =
@@ -349,7 +383,7 @@ object LetterboxHintController {
                         "СОВЕТ: Не удалось перезапустить ${t.packageName}. exit=${start.exitCode} out=${start.output.take(120)}",
                     )
                 }
-                // 等应用重建窗口后再复探
+                // Подождите, пока приложение перестроит окно, прежде чем повторить попытку.
                 Thread.sleep(2_000)
                 val (w, h) = VirtualLauncher.hintDisplaySize(t.displayId) ?: return@runCatching
                 val ctx = VirtualLauncher.appContext() ?: return@runCatching
@@ -366,7 +400,9 @@ object LetterboxHintController {
                 if (still) {
                     state = State.FAILED
                     if (!showCard(activity!!, State.FAILED)) {
-                        // 黑边放不下卡片（或屏已释放）：直接收掉，避免重启无反馈
+                        // Черная рамка не может удерживать карту (или экран был освобожден): закройте ее напрямую, чтобы избежать
+                        // перезапуска без обратной связи.
+
                         clear()
                     }
                     VirtualLauncher.logSink?.invoke(
@@ -384,13 +420,13 @@ object LetterboxHintController {
         }
     }
 
-    /** BUSY 态重画：沿用当前卡片的宽度/位置，避免重新解析。 */
+    /** Перерисовка состояния ЗАНЯТО: используйте ширину/положение текущей карты, чтобы избежать повторной обработки. */
     private fun reRenderBusy() {
         val density = VirtualLauncher.uiDensity()
         val width = (cardRight - cardLeft).toInt()
         val maxHeight = (VirtualLauncher.appAreaRect()?.height() ?: 0f).toInt()
         val bitmap = LetterboxCardPainter.render(density, width, maxHeight, LetterboxCardState.BUSY) ?: return
-        // 上下以原矩形中心对齐（高度可能变化）
+        // Выровняйте верх и низ по центру исходного прямоугольника (высота может измениться)
         val centerY = (cardTop + cardBottom) / 2f
         cardTop = centerY - bitmap.height / 2f
         cardBottom = cardTop + bitmap.height
@@ -398,12 +434,12 @@ object LetterboxHintController {
         VirtualLauncher.setOverlayCard(OverlayCard(bitmap, cardLeft, cardTop, cardRight, cardBottom))
     }
 
-    /** 诊断用：当前提示的包名（未显示时 null）。 */
+    /** Для диагностики: запрашиваемое в данный момент имя пакета (нуль, если не отображается). */
     fun currentPackage(): String? = target?.packageName
 
-    /** 是否有探测在跑（测试/诊断）。 */
+    /** Работают ли датчики (тестирование/диагностика). */
     fun isProbing(): Boolean = probeInFlight
 
-    /** 上次卡片的屏幕坐标快照（诊断/测试用）。 */
+    /** Снимок координат экрана последней карты (для целей диагностики/тестирования). */
     fun cardRect(): FloatArray = floatArrayOf(cardLeft, cardTop, cardRight, cardBottom)
 }

@@ -8,13 +8,15 @@ import android.net.Uri
 import java.io.File
 
 /**
- * 车机壁纸存储：当前壁纸 = 用户选择的图片（files/wallpaper.jpg）或内置默认
- * （assets/wallpaper_default.jpg，Apple CarPlay 官方深色壁纸压缩版）。
+ * Хранилище автомобильных обоев: текущие обои = выбранное пользователем изображение (files/wallpaper.jpg) или
+ * встроенное изображение по умолчанию.
+ * (assets/wallpaper_default.jpg, официальная сжатая версия темных обоев Apple CarPlay).
  *
- * 合成器以位图上传 GL 纹理；更换壁纸后经 [version] 递增通知重载。
+ * Компоновщик   загружает текстуры GL в виде растровых изображений; перезагружается через уведомление об
+ * увеличении [version] после смены обоев.
  */
 object WallpaperStore {
-    /** 内置默认壁纸（assets 内文件名）。 */
+    /** Встроенные обои по умолчанию (имя файла в активах). */
     const val DEFAULT_ASSET = "wallpaper_default.jpg"
 
     private const val USER_FILE = "wallpaper.jpg"
@@ -23,14 +25,14 @@ object WallpaperStore {
         java.util.concurrent.atomic
             .AtomicLong(0)
 
-    /** 当前壁纸版本（更换后递增；接收方据此判断是否需要重载）。 */
+    /** Текущая версия обоев (увеличивается после замены, на основании этого ресивер определяет, нужна ли перезагрузка). */
     val version: Long get() = versionCounter.get()
 
-    // ---- 变更通知（监听器模式；接收方注册后应立即读一次当前状态兜底） ----
+    // ---- Уведомление об изменении (режим прослушивателя; получатель должен прочитать текущий статус сразу после регистрации) ----
 
     private val listeners = java.util.concurrent.CopyOnWriteArraySet<(Long) -> Unit>()
 
-    /** 注册壁纸变更监听（在主线程回调；参数为新版本号）。 */
+    /** Зарегистрируйте мониторинг смены обоев (обратный вызов в основном потоке; параметр — номер новой версии). */
     fun addListener(listener: (Long) -> Unit) {
         listeners.add(listener)
     }
@@ -44,12 +46,13 @@ object WallpaperStore {
         listeners.forEach { runCatching { it(version) } }
     }
 
-    /** 用户壁纸文件（null = 使用内置默认）。 */
+    /** Пользовательский файл обоев (нуль = использовать встроенный файл по умолчанию). */
     fun userWallpaperFile(context: Context): File? = File(context.filesDir, USER_FILE).takeIf { it.exists() && it.length() > 0 }
 
     /**
-     * 解码当前壁纸（GL 线程调用；失败回退内置默认，再失败回退 null 由合成器画纯色）。
-     * 按 [maxSize] 限制边长（显存友好；aspectFill 由合成器按比例缩放绘制）。
+     * декодирует текущие обои (вызываются потоком GL; не удается вернуться к встроенным значениям по умолчанию и не
+     * удается вернуться к нулю, и синтезатор рисует сплошной цвет).
+     * ограничивает длину ребер до [maxSize] (безопасно для памяти; аспектное заполнение отрисовывается компоновщиком пропорционально).
      */
     fun decode(
         context: Context,
@@ -96,7 +99,7 @@ object WallpaperStore {
             }
         }.getOrNull()
 
-    /** 复制用户选择的图片到内部存储并标记变更（重复选择同一图也覆盖，幂等）。 */
+    /** Скопируйте выбранное пользователем изображение во внутреннюю память и отметьте изменения (повторное выделение того же изображения также перезапишет его, идемпотентное). */
     fun setFromUri(
         context: Context,
         uri: Uri,
@@ -111,7 +114,7 @@ object WallpaperStore {
             true
         }.getOrDefault(false)
 
-    /** 恢复内置默认壁纸。 */
+    /** Восстановить встроенные обои по умолчанию. */
     fun resetToDefault(context: Context): Boolean =
         runCatching {
             File(context.filesDir, USER_FILE).delete()
@@ -129,13 +132,13 @@ object WallpaperStore {
         return sample
     }
 
-    // ---- 桌面切片：全流画布的 aspectFill 位图（GridActivity/DockActivity 共用） ----
+    // ---- Нарезка рабочего стола: растровое изображениеspectFill полнопоточного холста (совместно с GridActivity/DockActivity) ----
 
-    /** 双尺寸缓存（桌面 = 超采样屏尺寸、dock = 流尺寸各一份）。 */
+    /** Кэш двойного размера (рабочий стол = размер экрана с суперсэмплированием, док-станция = размер потока). */
     private val canvasCache = HashMap<String, Bitmap>()
     private var canvasCacheVersion = -1L
 
-    /** 画布位图就绪监听（首次构建/版本更换重建后回调；参数 = 画布版本号）。 */
+    /** Прослушиватель готовности растрового изображения холста (обратный вызов после первой сборки/изменения версии и перестроения; параметр = номер версии холста). */
     private val canvasReadyListeners = java.util.concurrent.CopyOnWriteArrayList<(Long) -> Unit>()
 
     fun addCanvasReadyListener(listener: (Long) -> Unit) {
@@ -147,8 +150,10 @@ object WallpaperStore {
     }
 
     /**
-     * 按「整个视频流画布」做 aspectFill 的壁纸位图（调用方把切片偏移到自己的窗口位置）。
-     * 按尺寸+版本缓存（桌面与 dock 各一份）；后台线程调用，返回的位图只读。
+     * использует «полный холст видеопотока» для создания растрового изображения обоев аспектфилла (вызывающая
+     * сторона смещает фрагмент в соответствии с его собственным положением в окне).
+     * кэшируется по размеру + версии (по одной копии для рабочего стола и дока); вызывается фоновым потоком,
+     * возвращаемое растровое изображение доступно только для чтения.
      */
     @Synchronized
     fun aspectFillCanvas(
@@ -173,8 +178,12 @@ object WallpaperStore {
         val drawWidth = source.width * scale
         val drawHeight = source.height * scale
         val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
-        // 必须用「目标矩形」重载缩放绘制——drawBitmap(bmp, x, y, paint) 按原图像素
-        // 尺寸绘制：源图小于画布时（如竖屏照片 < 横屏画布宽）右侧留空（透明黑）
+        // Вы должны использовать «целевой прямоугольник», чтобы перегрузить масштабируемый рисунок — drawBitmap(bmp, x,
+        // y, Paint) в соответствии с пикселями исходного изображения.
+
+        // Размер рисунка: если исходное изображение меньше холста (например, фотография на вертикальном экране < ширина
+        // холста на горизонтальном экране), оставьте пустым (прозрачный черный) с правой стороны.
+
         val dest =
             android.graphics.Rect(
                 ((canvasWidth - drawWidth) / 2f).toInt(),

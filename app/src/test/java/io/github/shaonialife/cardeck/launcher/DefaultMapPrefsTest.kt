@@ -6,20 +6,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 默认地图解析回归测试。
+ * Регрессионный тест анализа карты по умолчанию.
  *
- * 重点是「未设置默认地图」这条路径：旧实现里 `resolve()` 在该分支回调
- * `VirtualLauncher.defaultMapComponent()`、后者又转调回 `resolve()`，构成无限递归
- * → StackOverflowError。症状是卸载重装后地图卡不渲染（偏好被清空才触发），而
- * 用户在设置里重选一次即恢复——很容易被误判成虚拟屏/渲染问题（2026-10-18 实测）。
+ * Фокусом   является путь «карта по умолчанию не установлена»: в старой реализации `resolve()` вызывался обратно в этой ветке.
+ * `VirtualLauncher.defaultMapComponent()`, последний переносится обратно в `resolve()`, образуя бесконечную рекурсию
+ * → StackOverflowError. Симптом заключается в том, что карточка карты не отображается после удаления и повторной
+ * установки (она срабатывает только при очистке настроек), и
+ * Пользователи   могут восстановиться после повторного выбора его один раз в настройках — это легко может быть
+ * ошибочно принято за проблему виртуального экрана/рендеринга (фактическое тестирование состоялось 18 октября 2026 г.).
  *
- * 这里用包名字符串代替 ComponentName：`resolveDefaultMap` 是泛型化的纯函数，
- * 单测环境里 Android 类（ComponentName）的方法都是未实现的空桩。
+ * использует строку имени пакета вместо ComponentName: `resolveDefaultMap` — это общая чистая функция.
+ * Все методы класса Android (ComponentName) в единой тестовой среде   представляют собой нереализованные пустые заглушки.
  */
 class DefaultMapPrefsTest {
     private val priority = listOf("car.map", "phone.map", "baidu.map")
 
-    /** 用字符串做「已安装应用 → 可启动组件」的替身。 */
+    /** Используйте строку вместо «Установленное приложение → Запускаемый компонент». */
     private fun pick(
         manual: String?,
         installed: Set<String>,
@@ -30,31 +32,31 @@ class DefaultMapPrefsTest {
             componentFor = { pkg -> if (pkg in installed) pkg else null },
         )
 
-    /** 未设置默认地图：按优先序取第一个「已安装」的（旧实现此处会栈溢出）。 */
+    /** Карта по умолчанию не установлена: выберите первую «установленную» в порядке приоритета (здесь старая реализация приведет к переполнению стека). */
     @Test
     fun unsetFallsBackToPriorityOrder() {
         assertEquals("phone.map", pick(manual = null, installed = setOf("phone.map", "baidu.map")))
     }
 
-    /** 显式设置优先于优先序。 */
+    /** Явные настройки имеют приоритет над приоритетом. */
     @Test
     fun manualChoiceWins() {
         assertEquals("baidu.map", pick(manual = "baidu.map", installed = setOf("car.map", "baidu.map")))
     }
 
-    /** 显式设置的应用已卸载：回落到优先序，而不是返回 null/崩溃。 */
+    /** Явно установить удаление приложения: вернуться к приоритету вместо возврата значения null или сбоя. */
     @Test
     fun uninstalledManualFallsBack() {
         assertEquals("car.map", pick(manual = "gone.map", installed = setOf("car.map")))
     }
 
-    /** 一台地图都没有：返回 null（调用方显示「地图 tile 空」提示）。 */
+    /** Карты нет: верните ноль (вызывающая сторона отображает подсказку «Плитка карты пуста»). */
     @Test
     fun noneInstalledReturnsNull() {
         assertNull(pick(manual = null, installed = emptySet()))
     }
 
-    /** 反复解析必须每次都能终止（旧实现会 StackOverflowError）。 */
+    /** Повторный анализ должен завершаться каждый раз (старые реализации вызывали ошибку StackOverflowError). */
     @Test
     fun resolveTerminatesWithoutRecursion() {
         repeat(100) { assertNull(pick(manual = null, installed = emptySet())) }
@@ -62,12 +64,14 @@ class DefaultMapPrefsTest {
 }
 
 /**
- * 车机版地图启动入口（高德/百度）的候选顺序与回退。
+ * Возможный порядок и резервный вход при запуске карты версии автомобиля и машины (Amap/Baidu).
  *
- * 背景：车机版地图的 LAUNCHER intent 常落在启动页而不是地图主界面，所以需要显式
- * 指定主 Activity；但**显式入口不保证在所有固件/版本存在**（百度车机版在不同定制
- * 固件上就有 NaviAutoActivity / SlashActivity 两种）。因此必须给候选列表：
- * 显式主界面优先，失败回退 launcher 解析结果。
+ * Предыстория: намерение LAUNCHER автомобильной версии карты часто попадает на стартовую страницу, а не в
+ * основной интерфейс карты, поэтому его необходимо указать явно.
+ * указывает основной вид деятельности; но **явная запись не гарантируется во всех прошивках/версиях** (версия
+ * машины Baidu настраивается в разных версиях).
+ * На прошивке   есть два типа NaviAutoActivity/SlashActivity). Итак, список кандидатов должен быть указан:
+ * отдает приоритет явному основному интерфейсу и в случае сбоя возвращается к результату анализа средства запуска.
  */
 class MapLaunchCandidatesTest {
     @Test
@@ -80,10 +84,10 @@ class MapLaunchCandidatesTest {
 
     @Test
     fun baiduCarEditionUsesLauncherEntryOnly() {
-        // 百度车机版（com.baidu.naviauto）不设显式主界面入口：实测 22.0.1 的包内
-        // 没有地图主界面 Activity，地图由 mapautosdk 在 launcher 的 DefaultActivity
-        // 内渲染。曾误写成 .NaviAutoActivity（不存在），am start 直接报
-        // "Activity class does not exist"——不再保留该候选。
+        // Версия автомобиля и машины Baidu (com.baidu.naviauto) не имеет явного входа в главный интерфейс: измерено в пакете 22.0.1.
+        // Основной интерфейс карты отсутствует. Активность. Карта создается Mapautosdk в DefaultActivity программы запуска.
+        // Внутренний рендеринг. Ошибочно было написано как .NaviAutoActivity (не существует), о запуске сообщается напрямую
+        // «Класс активности не существует» — этот кандидат больше не сохраняется.
         assertEquals(
             listOf("com.baidu.naviauto/.SlashActivity.DefaultActivity"),
             mapLaunchCandidates("com.baidu.naviauto", "com.baidu.naviauto/.SlashActivity.DefaultActivity"),
@@ -92,7 +96,7 @@ class MapLaunchCandidatesTest {
 
     @Test
     fun phoneMapsFallBackToLauncherComponentOnly() {
-        // 手机版没有已知的专用主界面：只保留 launcher 解析结果
+        // Мобильная версия не имеет известного выделенного основного интерфейса: сохраняются только результаты анализа лаунчера.
         listOf("com.autonavi.minimap", "com.baidu.BaiduMap", "com.tencent.map").forEach { pkg ->
             assertEquals(listOf("$pkg/.Launcher"), mapLaunchCandidates(pkg, "$pkg/.Launcher"))
         }
@@ -100,7 +104,7 @@ class MapLaunchCandidatesTest {
 
     @Test
     fun explicitEntryIsNotDuplicatedWhenItIsTheLauncher() {
-        // launcher 本身就指向主界面时不要重复尝试同一个 component
+        // Когда сама программа запуска указывает на основной интерфейс, не пытайтесь повторно использовать один и тот же компонент.
         assertEquals(
             listOf("com.baidu.naviauto/.NaviAutoActivity"),
             mapLaunchCandidates("com.baidu.naviauto", "com.baidu.naviauto/.NaviAutoActivity"),
@@ -111,9 +115,10 @@ class MapLaunchCandidatesTest {
     fun baiduCarEditionIsWhitelistedAheadOfPhoneMaps() {
         val priority = VirtualLauncher.MAP_PACKAGES_PRIORITY
         val auto = priority.indexOf("com.baidu.naviauto")
-        assertTrue("百度车机版必须在白名单里", auto >= 0)
+        assertTrue("Версия автомобиля и машины Baidu должна быть в белом списке.", auto >= 0)
         assertTrue(
-            "车机版应排在手机版之前（车机上优先用横屏适配好的车机版）",
+            "Автомобильная версия должна ранжироваться перед мобильной версией.（На автомобиле отдавайте приоритет " +
+                "использованию версии автомобиля, адаптированной к горизонтальному экрану.）",
             auto < priority.indexOf("com.baidu.BaiduMap"),
         )
         assertTrue(auto < priority.indexOf("com.autonavi.minimap"))

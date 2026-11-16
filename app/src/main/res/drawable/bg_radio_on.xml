@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 单选已选态：蓝色圆 + 白点 -->
+<!-- Состояние выбранного радио: синий кружок + белая точка. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">

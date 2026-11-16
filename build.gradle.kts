@@ -4,9 +4,9 @@ plugins {
     id("com.diffplug.spotless") version "7.2.1"
 }
 
-// 代码格式化：ktlint（Kotlin 官方代码风格），规则见根目录 .editorconfig
-//  ./gradlew spotlessApply   —— 自动格式化
-//  ./gradlew spotlessCheck   —— 仅校验（pre-commit 钩子提交前自动执行）
+// Форматирование кода: ktlint (официальный стиль кода Kotlin), правила см. в корневом каталоге .editorconfig.
+//  ./gradlew SpotlessApply — автоматическое форматирование
+//  ./gradlew SpotlessCheck — только проверка (автоматически выполняется перед фиксацией перехватчика перед фиксацией)
 spotless {
     kotlin {
         target("app/src/**/*.kt")
