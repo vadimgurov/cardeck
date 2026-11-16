@@ -270,10 +270,10 @@ internal object LetterboxCardPainter {
     /** 卡片最小宽度：由按钮文案与标题实测宽度决定。 */
     fun minWidthPx(density: Float): Float {
         val button = textPaint(BUTTON_SP * density, Color.WHITE, bold = true)
-        val buttonW = button.measureText("强制重启") + 2f * BUTTON_PAD_H_DP * density
+        val buttonW = button.measureText("принудительный перезапуск") + 2f * BUTTON_PAD_H_DP * density
         val title = textPaint(TITLE_SP * density, Color.WHITE, bold = true)
         // 标题至少容纳 5 个汉字（再窄会碎成单字换行）
-        val titleW = title.measureText("横屏未生效")
+        val titleW = title.measureText("Горизонтальный экран не действует")
         return 2f * PAD_H_DP * density + maxOf(buttonW, titleW)
     }
 
@@ -294,9 +294,15 @@ internal object LetterboxCardPainter {
         if (width < minWidthPx(density)) return null
         val (titleText, bodyText, buttonText) =
             when (state) {
-                LetterboxCardState.NORMAL -> Triple("横屏未生效", "仍是竖屏窗口", "强制重启")
-                LetterboxCardState.BUSY -> Triple("正在重启", "将以横屏打开", "请稍候")
-                LetterboxCardState.FAILED -> Triple("仍然竖屏", "可能不支持", "关闭")
+                LetterboxCardState.NORMAL ->
+                    Triple(
+                        "Горизонтальный экран не " +
+                            "действует",
+                        "Все еще вертикальное окно",
+                        "принудительный перезапуск",
+                    )
+                LetterboxCardState.BUSY -> Triple("Перезапуск", "Откроется в альбомной ориентации", "пожалуйста, подождите")
+                LetterboxCardState.FAILED -> Triple("Все еще вертикальный экран", "Может не поддерживаться", "Выключено")
             }
         val titlePaint = textPaint(TITLE_SP * density, TITLE_COLOR, bold = true)
         val bodyPaint = textPaint(BODY_SP * density, BODY_COLOR, bold = false)

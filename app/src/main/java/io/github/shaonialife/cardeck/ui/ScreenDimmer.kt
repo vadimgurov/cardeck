@@ -89,14 +89,17 @@ object ScreenDimmer {
             if (!enabled) return
             enableStayAwake(ctx)
             h?.post { schedule() }
-            Log.i("CarPlaySender", "DIMMER: 会话开始——常亮/自动暗幕生效（${IDLE_TIMEOUT_MS / 1000}s 无操作后变暗）")
+            Log.i(
+                "CarPlaySender",
+                "DIMMER: сеанс начат; затемнение после ${IDLE_TIMEOUT_MS / 1000} с бездействия",
+            )
         } else {
             h?.removeCallbacks(showRunnable)
             // 会话结束时如果暗幕正盖着（车机自己断开），立即撤掉，让用户看到手机正常界面
             h?.post { hideDim() }
             restorePanelIfNeeded()
             restoreTimeout(ctx)
-            Log.i("CarPlaySender", "DIMMER: 会话结束——自动暗幕已停、屏幕超时已恢复")
+            Log.i("CarPlaySender", "ДИММЕР: сеанс завершен – автоматическое затемнение остановлено, время ожидания экрана восстановлено")
         }
     }
 
@@ -110,7 +113,7 @@ object ScreenDimmer {
             return
         }
         if (!Settings.canDrawOverlays(context)) {
-            Log.w(TAG, "缺少悬浮窗权限，暗幕/触摸探针不可用（常亮不可用）")
+            Log.w(TAG, "Отсутствие разрешения на плавающее окно, темный экран/сенсорный датчик недоступен (всегда включено недоступно)")
             appContext = context.applicationContext
             windowManager = null
             handler = Handler(Looper.getMainLooper())
@@ -128,11 +131,14 @@ object ScreenDimmer {
             if (enabled && sessionActive) schedule()
         }
         if (!enabled) {
-            Log.i("CarPlaySender", "DIMMER: 触摸探针已启动（常亮/暗幕关闭）")
+            Log.i("CarPlaySender", "ДИММЕР: сенсорный датчик включен (всегда включен/темный экран выключен)")
         } else if (sessionActive) {
-            Log.i("CarPlaySender", "DIMMER: 已启动（常亮 + ${IDLE_TIMEOUT_MS / 1000}s 无操作后暗幕，点击恢复）")
+            Log.i(
+                "CarPlaySender",
+                "DIMMER: запущено; затемнение после ${IDLE_TIMEOUT_MS / 1000} с бездействия",
+            )
         } else {
-            Log.i("CarPlaySender", "DIMMER: 触摸探针已启动（未在投屏——常亮/自动暗幕待会话开始后生效）")
+            Log.i("CarPlaySender", "DIMMER: ожидание начала сеанса; автозатемнение пока отключено")
         }
     }
 
@@ -144,7 +150,7 @@ object ScreenDimmer {
         handler?.removeCallbacks(showRunnable)
         handler?.post { hideDim() }
         restorePanelIfNeeded()
-        Log.i("CarPlaySender", "DIMMER: 常亮/暗幕已关闭（触摸探针保留）")
+        Log.i("CarPlaySender", "ДИММЕР: всегда включен/темный экран выключен (сенсорный щуп сохранен)")
     }
 
     /**
@@ -182,7 +188,7 @@ object ScreenDimmer {
         val ctx = appContext
         appContext = null
         if (ctx != null) restoreTimeout(ctx)
-        Log.i("CarPlaySender", "DIMMER: 已停止（屏幕超时恢复）")
+        Log.i("CarPlaySender", "DIMMER: остановлено (восстановление тайм-аута экрана)")
     }
 
     /** 暗幕是否已就绪（attach 完成且具备悬浮窗能力）。 */
@@ -227,12 +233,12 @@ object ScreenDimmer {
         if (!force && !autoDimAllowed) return
         val ctx = appContext
         if (ctx == null) {
-            android.util.Log.w("ScreenDimmer", "showDim: appContext 为空（attach 未执行）")
+            android.util.Log.w("ScreenDimmer", "showDim: appContext пуст (присоединение не выполняется)")
             return
         }
         val wm = windowManager
         if (wm == null) {
-            android.util.Log.w("ScreenDimmer", "showDim: windowManager 为空（悬浮窗权限缺失？）")
+            android.util.Log.w("ScreenDimmer", "showDim: windowManager пуст (отсутствуют разрешения для плавающего окна?)")
             return
         }
         if (dimShown) return
@@ -256,11 +262,11 @@ object ScreenDimmer {
             .onSuccess {
                 dimView = view
                 dimShown = true
-                Log.i("CarPlaySender", "DIMMER: 暗幕已显示")
+                Log.i("CarPlaySender", "DIMMER: отображается темный экран.")
                 // 真·假息屏：暗幕上好后直接断物理屏电源。系统保持交互态（常亮超时已设
                 // 为永不，不会真睡下去），虚拟屏完全不受影响；触摸经探针唤醒。
                 setPanelPower(false)
-            }.onFailure { Log.w(TAG, "暗幕添加失败：${it.message}") }
+            }.onFailure { Log.w(TAG, "Не удалось добавить темную штору: ${it.message}") }
     }
 
     private fun hideDim() {
@@ -302,7 +308,7 @@ object ScreenDimmer {
                 }
         runCatching { wm.addView(view, params) }
             .onSuccess { watchView = view }
-            .onFailure { Log.w(TAG, "触摸探针添加失败：${it.message}") }
+            .onFailure { Log.w(TAG, "Не удалось добавить сенсорный датчик: ${it.message}") }
     }
 
     // ---- 真·假息屏：SurfaceControl 层断/上物理屏电源（经 Shizuku UserService） ----
@@ -312,18 +318,18 @@ object ScreenDimmer {
         Bg.run("dimmer-panel") {
             val svc = CarInputClient.service
             if (svc == null) {
-                Log.i(TAG, "面板电源跳过（UserService 未就绪，仅暗幕）")
+                Log.i(TAG, "Пропуск питания панели (UserService не готов, только темный экран)")
                 return@run
             }
             val ok =
                 runCatching { svc.setScreenPower(on) }
-                    .onFailure { Log.w(TAG, "setScreenPower($on) 调用失败：$it") }
+                    .onFailure { Log.w(TAG, "Вызов setScreenPower($on) не удался: $it") }
                     .getOrDefault(false)
             if (ok) {
                 panelOffByUs = !on
-                Log.i("CarPlaySender", "DIMMER: 面板电源 ${if (on) "恢复" else "断开"}（真·假息屏）")
+                Log.i("CarPlaySender", "ДИММЕР: источник питания панели ${if (on) "включено" else "выключено"} (Истинный и ложный экран)")
             } else {
-                Log.i(TAG, "面板电源 $on 失败（ROM 不支持？保持暗幕态）")
+                Log.i(TAG, "Сбой блока питания панели $on (ПЗУ не поддерживается? Сохраняйте состояние темного экрана)")
             }
         }
     }
@@ -368,19 +374,23 @@ object ScreenDimmer {
                         Intent.ACTION_SCREEN_OFF -> {
                             if (panelOffByUs) {
                                 panelOffByUs = false
-                                Log.i(TAG, "系统真休眠——面板交还系统电源管理（假息屏标记已清）")
+                                Log.i(
+                                    TAG,
+                                    "Система действительно спит - панель возвращается в режим управления питанием " +
+                                        "системы (отметка на экране сна снята)",
+                                )
                             }
                             if (dimShown) {
                                 handler?.removeCallbacks(showRunnable)
                                 hideDim()
-                                Log.i(TAG, "真休眠——暗幕已撤（锁屏接管遮蔽职责）")
+                                Log.i(TAG, "True Sleep — удален темный экран (экран блокировки берет на себя функцию маскировки)")
                             }
                         }
 
                         Intent.ACTION_USER_PRESENT -> {
                             if (enabled && sessionActive && isAttached()) {
                                 schedule()
-                                Log.i(TAG, "解锁——重新排程自动假息屏计时")
+                                Log.i(TAG, "Разблокировать - перенести автоматическое время экрана праздничного экрана")
                             }
                         }
                     }
@@ -412,7 +422,7 @@ object ScreenDimmer {
                     .trim()
                     .toIntOrNull()
             if (current == null) {
-                Log.w(TAG, "读取屏幕超时失败（Shizuku 未就绪？）")
+                Log.w(TAG, "Не удалось прочитать тайм-аут экрана (Шизуку не готова?)")
                 return@run
             }
             val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -420,7 +430,7 @@ object ScreenDimmer {
                 prefs.edit().putInt("screen_off_timeout_backup", current).apply()
             }
             Shell.exec("settings put system screen_off_timeout $TIMEOUT_MAX")
-            Log.i("CarPlaySender", "DIMMER: 屏幕超时设为永不（原值 $current）")
+            Log.i("CarPlaySender", "DIMMER: установите для тайм-аута экрана значение «никогда» (исходное значение $current).")
         }
     }
 
@@ -431,7 +441,7 @@ object ScreenDimmer {
             val backup = prefs.getInt("screen_off_timeout_backup", 60_000)
             prefs.edit().remove("screen_off_timeout_backup").apply()
             Shell.exec("settings put system screen_off_timeout $backup")
-            Log.i("CarPlaySender", "DIMMER: 屏幕超时恢复为 $backup")
+            Log.i("CarPlaySender", "DIMMER: тайм-аут экрана снова установлен на $backup.")
         }
     }
 }

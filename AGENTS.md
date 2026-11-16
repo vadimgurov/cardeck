@@ -1038,7 +1038,7 @@ DockActivity，不受信）+ CarPlayApp（原生应用屏）+ CarPlayAppHi（超
   只靠长度会把 telephony 的 usage 0xB3 当成「快进」误发。描述符缺失时才回退长度判据。
   ③ 判定实现均有单测钉死语义（`ConsumerKeysTest` / `TouchReportsTest`，含奥迪与
   DiPlay 两套真实描述符），改这些解析器先看测试。
-- **风格**：Kotlin，中文注释（注释写「为什么/实测依据」而非复述代码）；UI 文案中文。
+- **风格**：Kotlin，中文注释（注释写「为什么/实测依据」而非复述代码）；UI 文案俄文。
   `reference/` 下是 GPL 参考仓库（gitignore，勿复制代码入本项目、勿外传）。
 
 ## 知识沉淀约定

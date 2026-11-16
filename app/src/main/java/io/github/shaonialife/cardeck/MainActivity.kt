@@ -60,7 +60,9 @@ class MainActivity : AppCompatActivity() {
 
     /** 连接中的默认副标题（无阶段提示时）。 */
     private companion object {
-        const val DEFAULT_CONNECTING_HINT = "蓝牙 iAP2 握手 → 加入车机热点 → 建立 CarPlay 会话"
+        const val DEFAULT_CONNECTING_HINT =
+            "Подтверждение Bluetooth iAP2 → Подключиться к автомобильной точке доступа → " +
+                "Установить сеанс CarPlay"
         const val KEY_DISCLAIMER_DEADLINE = "disclaimer_deadline"
     }
 
@@ -156,7 +158,7 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            log("BLUETOOTH_CONNECT 授权: $granted")
+            log("Лицензия BLUETOOTH_CONNECT: $granted")
             if (granted && pendingStartAfterBtPermission.compareAndSet(true, false)) {
                 // 授权期间 Shizuku 可能被停掉：这里同样走前置检查
                 ensureShizukuReady { showAudioChoiceDialog() }
@@ -172,7 +174,7 @@ class MainActivity : AppCompatActivity() {
     private val wallpaperPicker =
         registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri == null) {
-                log("WALLPAPER: 未选择图片")
+                log("ОБОИ: Изображения не выбраны")
                 return@registerForActivityResult
             }
             val ok =
@@ -181,19 +183,19 @@ class MainActivity : AppCompatActivity() {
             log(
                 "WALLPAPER: ${if (ok) "壁纸已更新（会话进行中约 1 秒内上车；下次连接自动生效）" else "保存失败"}",
             )
-            if (ok) snack("壁纸已更新") else snack("保存失败")
+            if (ok) snack("Обои обновлены") else snack("Сохранить не удалось")
         }
 
     private val audioPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            log("MODE: RECORD_AUDIO 授权: $granted（音频通道需要）")
+            log("MODE: RECORD_AUDIO Авторизация: $granted (требуется для аудиоканала)")
         }
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val data = result.data
             if (result.resultCode != RESULT_OK || data == null) {
-                log("MODE: 投屏权限被拒绝（车机侧声音不可用）")
+                log("РЕЖИМ: разрешение на показ скринкаста отклонено (звук со стороны автомобиля недоступен)")
                 return@registerForActivityResult
             }
             // Android 14+ 顺序：先把结果交给服务，由服务升级 FGS 类型后调 getMediaProjection
@@ -201,7 +203,7 @@ class MainActivity : AppCompatActivity() {
                 result.resultCode to data
             CarPlayService
                 .start(this)
-            log("MODE: ✓ 投屏权限已授予（重启手机后需重新授权）")
+            log("РЕЖИМ: ✓ Разрешение на скринкаст предоставлено (требуется повторная авторизация после перезагрузки телефона)")
             // 会话已在进行中授权（授权晚于连接）：等投影就绪后动态补启音频通道
             Bg.run("audio-late-start") {
                 val deadline = SystemClock.uptimeMillis() + 5_000L
@@ -210,7 +212,7 @@ class MainActivity : AppCompatActivity() {
                     Thread.sleep(200)
                 }
                 if (CarPlayService.mediaProjection == null) {
-                    log("MODE: 投影 5 秒未就绪（服务异常？），音频通道本次未启动")
+                    log("РЕЖИМ: Проекция не готова в течение 5 секунд (неисправность службы?), аудиоканал на этот раз не запускается")
                     return@run
                 }
                 SessionController.maybeStartAudioNow(applicationContext)
@@ -244,20 +246,21 @@ class MainActivity : AppCompatActivity() {
             buildList {
                 add(
                     DarkMessageDialog.Action(
-                        "仅视频（更流畅）",
+                        "Только видео (более плавное)",
                         DarkMessageDialog.Emphasis.PRIMARY,
                     ) { beginWithAudio(enabled = false) },
                 )
-                add(DarkMessageDialog.Action("开启声音") { beginWithAudio(enabled = true) })
-                if (!landscape) add(DarkMessageDialog.Action("取消") {})
+                add(DarkMessageDialog.Action("Включить звук") { beginWithAudio(enabled = true) })
+                if (!landscape) add(DarkMessageDialog.Action("Отмена") {})
             }
         DarkMessageDialog.show(
             activity = this,
-            title = "是否在车机侧播放声音？",
+            title = "Хотите воспроизвести звук со стороны автомобиля?",
             message =
-                "开启后手机媒体/导航声音投到车机播放、手机本机静音（不开启则车上无声）。\n" +
-                    "音视频同时传会增加负载，以看视频为主时可先不开启。\n" +
-                    "开启声音需要「投屏」权限，会一并申请。",
+                "После включения в автомобиле будет воспроизводиться звук мультимедиа/навигации мобильного телефона, а " +
+                    "сам телефон будет отключен (если он не включен, звука в машине не будет). \n" +
+                    "Одновременная передача аудио и видео увеличит нагрузку, поэтому при просмотре видео ее можно отключить. \n" +
+                    "Для включения звука требуется разрешение «Screencast», которое будет применяться вместе.",
             actions = actions,
         )
     }
@@ -266,12 +269,14 @@ class MainActivity : AppCompatActivity() {
     private fun promptCancelConnecting() {
         DarkMessageDialog.show(
             activity = this,
-            title = "取消连接？",
-            message = "将停止当前连接尝试：蓝牙与 WiFi 链路都会断开，需重新点「启动连接」。",
+            title = "Отменить соединение?",
+            message =
+                "Текущая попытка подключения будет остановлена: каналы Bluetooth и Wi-Fi будут отключены, и вам " +
+                    "нужно будет снова нажать «Начать подключение».",
             actions =
                 listOf(
-                    DarkMessageDialog.Action("继续连接") {},
-                    DarkMessageDialog.Action("取消连接", DarkMessageDialog.Emphasis.DANGER) {
+                    DarkMessageDialog.Action("Продолжить подключение") {},
+                    DarkMessageDialog.Action("Отменить соединение", DarkMessageDialog.Emphasis.DANGER) {
                         // 关闭仍在等待的「加入热点」确认弹窗（其 onChoice(null) 会与
                         // connectCancelled 一起让 autoJoin 流程立即中止）
                         wifiJoinDialog?.cancel()
@@ -307,21 +312,23 @@ class MainActivity : AppCompatActivity() {
             if (!on) {
                 DarkMessageDialog.show(
                     activity = this,
-                    title = "蓝牙未开启",
-                    message = "与车机的无线配对通信依赖蓝牙。请先开启手机蓝牙，并确认已与车机配对。",
+                    title = "Bluetooth не включен",
+                    message =
+                        "Беспроводная связь с автомобилем осуществляется через Bluetooth. Сначала включите " +
+                            "Bluetooth на вашем телефоне и подтвердите, что он сопряжен с автомобилем.",
                     actions =
                         listOf(
-                            DarkMessageDialog.Action("取消") {},
-                            DarkMessageDialog.Action("去开启蓝牙", DarkMessageDialog.Emphasis.PRIMARY) {
+                            DarkMessageDialog.Action("Отмена") {},
+                            DarkMessageDialog.Action("Перейдите, чтобы включить Bluetooth", DarkMessageDialog.Emphasis.PRIMARY) {
                                 runCatching {
                                     startActivity(
                                         android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS),
                                     )
-                                }.onFailure { log("BT: 无法打开蓝牙设置，请手动开启") }
+                                }.onFailure { log("BT: Невозможно открыть настройки Bluetooth, откройте их вручную.") }
                             },
                         ),
                 )
-                log("BT: 蓝牙未开启——本次连接未发起")
+                log("BT: Bluetooth не включен — это соединение не инициировано")
                 return@ensureWifiLocationReady
             }
             onReady()
@@ -356,24 +363,34 @@ class MainActivity : AppCompatActivity() {
         if (!locationOn) {
             DarkMessageDialog.show(
                 activity = this,
-                title = "需要开启位置服务",
+                title = "Необходимо включить службы определения местоположения.",
                 message =
-                    "Android 12 加入车机热点（应用专属 WiFi）要求位置服务开启——系统用它判定" +
-                        "可连接的 WiFi，不会记录你的位置。\n\n请打开位置服务后重试；也可以到" +
-                        "WLAN 设置手动连接热点。",
+                    "Добавление в Android 12 автомобильной точки доступа (Wi-Fi для конкретного приложения) требует " +
+                        "включения служб определения местоположения — система использует это для определения" +
+                        "Подключаемый Wi-Fi, который не регистрирует ваше местоположение. \n\nВключите службы " +
+                        "определения местоположения и повторите попытку; вы также можете пойти в" +
+                        "Настройки WLAN вручную подключаются к точкам доступа.",
                 actions =
                     listOf(
-                        DarkMessageDialog.Action("取消") {},
-                        DarkMessageDialog.Action("去开启", DarkMessageDialog.Emphasis.PRIMARY) {
+                        DarkMessageDialog.Action("Отмена") {},
+                        DarkMessageDialog.Action("открыть", DarkMessageDialog.Emphasis.PRIMARY) {
                             runCatching {
                                 startActivity(
                                     android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS),
                                 )
-                            }.onFailure { log("WIFI: 无法打开位置服务设置，请手动开启") }
+                            }.onFailure {
+                                log(
+                                    "WIFI: невозможно открыть настройки службы определения местоположения, " +
+                                        "включите ее вручную.",
+                                )
+                            }
                         },
                     ),
             )
-            log("WIFI: 位置服务未开启——Android 12 下应用专属网络不可用，本次连接未发起")
+            log(
+                "WIFI: служба определения местоположения не включена — сеть для конкретного приложения недоступна в " +
+                    "Android 12, и это соединение не было инициировано.",
+            )
             return
         }
         onReady()
@@ -386,7 +403,7 @@ class MainActivity : AppCompatActivity() {
 
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            log("ACCESS_FINE_LOCATION 授权: $granted")
+            log("ACCESS_FINE_LOCATION Авторизация: $granted")
             if (granted && pendingStartAfterLocationPermission.compareAndSet(true, false)) {
                 ensureShizukuReady { showAudioChoiceDialog() }
             }
@@ -399,14 +416,16 @@ class MainActivity : AppCompatActivity() {
     private fun promptDisconnect() {
         DarkMessageDialog.show(
             activity = this,
-            title = "断开连接？",
+            title = "Отключиться?",
             message =
-                "将停止车机推流并关闭保活服务，车机画面会立即中断。\n\n" +
-                    "注意：投屏授权会随服务停止失效，下次如需车机侧声音请重新授权。",
+                "Потоковая передача данных в автомобиль и машину будет остановлена, служба поддержки активности будет " +
+                    "отключена, а экран автомобиля и машины будет немедленно прерван. \n\n" +
+                    "Примечание. Срок действия разрешения на зеркалирование экрана истечет после остановки службы. Если " +
+                    "в следующий раз вам понадобится звук со стороны автомобиля, повторно авторизуйте его.",
             actions =
                 listOf(
-                    DarkMessageDialog.Action("取消") {},
-                    DarkMessageDialog.Action("断开", DarkMessageDialog.Emphasis.DANGER) {
+                    DarkMessageDialog.Action("Отмена") {},
+                    DarkMessageDialog.Action("Отключить", DarkMessageDialog.Emphasis.DANGER) {
                         SessionController.disconnect(this)
                     },
                 ),
@@ -433,7 +452,10 @@ class MainActivity : AppCompatActivity() {
     private fun ensureNotificationAccessAsync() {
         Bg.run("notification-access") {
             if (ShizukuGate.state(this) != ShizukuGate.State.READY) {
-                log("MEDIA: Shizuku 未就绪——暂无法自动授予通知使用权（就绪后会补）")
+                log(
+                    "МЕДИА: Шизуку не готова - право на использование уведомлений не может быть предоставлено " +
+                        "автоматически на данный момент (будет добавлено, когда оно будет готово)",
+                )
                 return@run
             }
             NotificationAccess.ensureGranted(this, ::log)
@@ -448,7 +470,7 @@ class MainActivity : AppCompatActivity() {
             onReady()
             return
         }
-        log("SHIZUKU: 未就绪（$state）——已阻止本次连接")
+        log("ШИЗУКУ: Не готов ($state) — это соединение заблокировано.")
         promptShizukuNotReady(state)
     }
 
@@ -459,30 +481,30 @@ class MainActivity : AppCompatActivity() {
     private fun promptShizukuNotReady(state: ShizukuGate.State) {
         val guidance = ShizukuGate.guidanceOf(state)
         val actions = mutableListOf<DarkMessageDialog.Action>()
-        actions += DarkMessageDialog.Action("取消") {}
+        actions += DarkMessageDialog.Action("Отмена") {}
         actions +=
-            DarkMessageDialog.Action("重试检查") {
+            DarkMessageDialog.Action("повторить проверку") {
                 ensureShizukuReady { showAudioChoiceDialog() }
             }
         when (state) {
             ShizukuGate.State.NOT_RUNNING ->
                 actions +=
-                    DarkMessageDialog.Action("打开 Shizuku", DarkMessageDialog.Emphasis.PRIMARY) {
+                    DarkMessageDialog.Action("Открыть Шизуку", DarkMessageDialog.Emphasis.PRIMARY) {
                         val intent = packageManager.getLaunchIntentForPackage(ShizukuGate.PACKAGE_NAME)
                         if (intent == null) {
-                            snack("无法打开 Shizuku App——请手动打开")
+                            snack("Невозможно открыть приложение Shizuku. Откройте вручную.")
                         } else {
                             runCatching { startActivity(intent) }
-                                .onFailure { snack("无法打开 Shizuku App——请手动打开") }
+                                .onFailure { snack("Невозможно открыть приложение Shizuku. Откройте вручную.") }
                         }
                     }
 
             ShizukuGate.State.UNAUTHORIZED ->
                 actions +=
-                    DarkMessageDialog.Action("请求授权", DarkMessageDialog.Emphasis.PRIMARY) {
+                    DarkMessageDialog.Action("Запросить авторизацию", DarkMessageDialog.Emphasis.PRIMARY) {
                         pendingShizukuThenConnect = true
                         ShizukuGate.requestPermission()
-                        snack("请在 Shizuku 的授权窗口点「允许」——允许后会自动继续")
+                        snack("Пожалуйста, нажмите «Разрешить» в окне авторизации Шизуку — после разрешения она продолжится автоматически.")
                     }
 
             // 未安装：没有可执行的主操作（不给编造的安装链接）
@@ -502,17 +524,20 @@ class MainActivity : AppCompatActivity() {
         // 不再有「兼容档」这种人工分支。
         SessionController.audioPreferCompat = false
         if (!enabled) {
-            log("MODE: 本次连接仅推视频（未开启车机侧声音）")
+            log("РЕЖИМ: Данное подключение передает только видео (звук на стороне автомобиля не включается)")
             startConnectionNow()
             return
         }
         if (CarPlayService.mediaProjection != null) {
-            log("MODE: 已选择开启声音（投屏权限已就绪）")
+            log("РЕЖИМ: выбрано для включения звука (разрешение на трансляцию экрана готово)")
             startConnectionNow()
             return
         }
         // 开启声音需要投屏权限（播放捕获的授权来源）：先申请，授权完成后再启动连接
-        log("MODE: 开启声音需要投屏权限——先后申请（音频捕获依赖），授权后自动开始连接")
+        log(
+            "РЕЖИМ: Для включения звука требуется разрешение на скринкаст — подайте заявку на него поочередно (от этого " +
+                "зависит захват звука), и после авторизации соединение начнется автоматически.",
+        )
         pendingStartAfterProjection.set(true)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
@@ -529,7 +554,7 @@ class MainActivity : AppCompatActivity() {
             // 兜底守卫：授权回调等延迟路径也可能走到这里，Shizuku 中途停掉时同样要拦住
             val gate = ShizukuGate.state(this)
             if (gate != ShizukuGate.State.READY) {
-                log("SHIZUKU: 未就绪（$gate）——已阻止本次连接")
+                log("ШИЗУКУ: Не готов ($gate) — это соединение заблокировано.")
                 promptShizukuNotReady(gate)
                 return@runOnUiThread
             }
@@ -637,7 +662,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         val granted = grantResult == PackageManager.PERMISSION_GRANTED
-                        log("SHIZUKU: 授权结果 granted=$granted")
+                        log("ШИЗУКУ: Результат авторизации предоставлен = $granted")
                         updateReadyRow()
                         updateShizukuChip()
                         if (granted) {
@@ -649,7 +674,7 @@ class MainActivity : AppCompatActivity() {
                             pendingShizukuThenConnect = false
                             ensureShizukuReady { showAudioChoiceDialog() }
                         } else if (!granted) {
-                            snack("未获得 Shizuku 授权——连接仍不可用")
+                            snack("Не авторизовано Шизуку – соединение по-прежнему недоступно")
                         }
                     }
                 }.also {
@@ -779,7 +804,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.rowShizuku).setOnClickListener {
             val state = ShizukuGate.state(this)
             if (state == ShizukuGate.State.READY) {
-                snack("Shizuku 已就绪——虚拟屏与触摸注入可用")
+                snack("Shizuku готов — доступен виртуальный экран и сенсорное впрыскивание.")
             } else {
                 promptShizukuNotReady(state)
             }
@@ -794,7 +819,7 @@ class MainActivity : AppCompatActivity() {
             preferences.edit().putBoolean("alwaysOn", checked).apply()
             if (checked) {
                 if (!android.provider.Settings.canDrawOverlays(this)) {
-                    promptOverlayPermission("已开启「常亮+暗幕」。")
+                    promptOverlayPermission("«Всегда включен + темный экран» включен.")
                 } else {
                     ScreenDimmer
                         .attach(this)
@@ -809,7 +834,7 @@ class MainActivity : AppCompatActivity() {
                         .detach()
                 }
             }
-            log("MODE: 常亮+暗幕 ${if (checked) "开启" else "关闭"}")
+            log("РЕЖИМ: Всегда включено+Темный режим ${if (checked) "вкл." else "выкл."}")
         }
 
         // ---- 英雄卡主操作 ----
@@ -832,19 +857,22 @@ class MainActivity : AppCompatActivity() {
             if (psk != null) {
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("carplay-wifi", psk))
-                snack("热点密码已复制（${psk.length} 位）——粘贴到密码框即可")
+                snack("Пароль точки доступа скопирован (биты ${psk.length}) — просто вставьте его в поле пароля.")
                 log(
-                    "WiFi: 热点密码已复制到剪贴板，选择 \"$ssid\" 粘贴密码；" +
-                        "若提示\"无法访问互联网\"请选择保持连接",
+                    "Wi-Fi: пароль точки доступа скопирован в буфер обмена. Чтобы вставить пароль, выберите \"$ssid\";" +
+                        "Если появится сообщение о том, что \" не может получить доступ к Интернету \", выберите оставаться на связи.",
                 )
             } else {
-                snack("暂无热点密码——蓝牙连上后自动获取")
-                log("WiFi: 尚未拿到热点密码（需蓝牙会话 0x5703）——打开 WLAN 设置手动选择 \"$ssid\"")
+                snack("Пароля от точки доступа пока нет — он будет получен автоматически после подключения Bluetooth")
+                log(
+                    "Wi-Fi: у меня еще нет пароля к точке доступа (требуется сеанс Bluetooth 0x5703) — откройте " +
+                        "настройки WLAN и вручную выберите \"$ssid\"",
+                )
             }
             try {
                 startActivity(android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
             } catch (_: Exception) {
-                log("WiFi: 无法打开WLAN设置，请手动前往 设置 > WLAN")
+                log("Wi-Fi: невозможно открыть настройки WLAN. Перейдите в «Настройки» > «WLAN» вручную.")
             }
         }
 
@@ -867,12 +895,12 @@ class MainActivity : AppCompatActivity() {
             if (!ScreenDimmer
                     .isAttached()
             ) {
-                snack("暗幕未就绪（连接成功后自动启用）")
+                snack("Темный экран не готов (включается автоматически после успешного подключения)")
                 return@setOnClickListener
             }
             ScreenDimmer
                 .enterDimNow()
-            log("DIMMER: 手动假息屏（点击屏幕恢复）")
+            log("DIMMER: вручную отключить экран (нажмите на экран, чтобы восстановить)")
         }
 
         findViewById<TextView>(R.id.btnWallpaperPick).setOnClickListener {
@@ -887,7 +915,7 @@ class MainActivity : AppCompatActivity() {
                 WallpaperStore
                     .resetToDefault(this)
             log("WALLPAPER: ${if (ok) "已恢复内置默认（CarPlay 官方深色壁纸）" else "恢复失败"}")
-            snack(if (ok) "已恢复默认壁纸" else "恢复失败")
+            snack(if (ok) "Обои по умолчанию восстановлены" else "Восстановление не удалось")
         }
 
         // ---- 折叠卡：高级 / 日志 ----
@@ -918,12 +946,12 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageView>(R.id.btnCopyLog).setOnClickListener {
             val text = SessionController.logText()
             if (text.isEmpty()) {
-                snack("日志为空")
+                snack("Журнал пуст")
                 return@setOnClickListener
             }
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("CarDeck 日志", text))
-            snack("已复制 ${text.length} 字符日志")
+            clipboard.setPrimaryClip(ClipData.newPlainText("Журнал CarDeck", text))
+            snack("Журнал символов ${text.length} скопирован.")
         }
         findViewById<ImageView>(R.id.btnExportLog).setOnClickListener { exportLogFile() }
         // 长按导全部历史：默认只导本次启动，历史日志量大时按需手动取
@@ -951,7 +979,7 @@ class MainActivity : AppCompatActivity() {
         // 启动即检查：常亮开 + 无悬浮窗权限 → 主动请求
         if (ScreenDimmer.enabled) {
             if (!android.provider.Settings.canDrawOverlays(this)) {
-                promptOverlayPermission("「常亮+暗幕」已开启。")
+                promptOverlayPermission("«Всегда включен + темный экран» включен.")
             } else {
                 // attach 只挂触摸探针、不排自动暗幕定时器：自动暗幕/常亮由会话驱动
                 // （ScreenDimmer.setSessionActive），否则未连接时也会 45s 后变黑
@@ -965,9 +993,15 @@ class MainActivity : AppCompatActivity() {
         VirtualLauncher.logSink = { line -> log(line) }
         CarInputClient.logSink = { line -> log(line) }
 
-        log("CarDeck Phase 0 就绪")
-        log("真车：与车机蓝牙配对 + 手机加入车机热点 -> 点「启动连接」（自动主动连入车机）")
-        log("测试台：两台手机蓝牙配对 -> 备用机跑 xcertplay 无线模式 -> 点「启动连接」等待回连")
+        log("CarDeck Фаза 0 готова")
+        log(
+            "Настоящий автомобиль: соединение Bluetooth с автомобилем + добавление телефона в точку доступа автомобиля " +
+                "-> нажмите «Начать подключение» (автоматическое подключение к автомобилю)",
+        )
+        log(
+            "Тестовый стенд: соединение двух мобильных телефонов по Bluetooth -> Запустите беспроводной режим xcertplay " +
+                "на резервном компьютере -> Нажмите «Начать подключение», чтобы дождаться повторного подключения.",
+        )
     }
 
     private fun bindExpandable(
@@ -1007,8 +1041,8 @@ class MainActivity : AppCompatActivity() {
         }
         // 启动残留屏检查进行中：状态与副标题临时切换为检查提示
         if (s == HeroState.IDLE && startupCheckRunning) {
-            heroStateText.text = "检查中"
-            heroSubline.text = "正在检查残留屏…"
+            heroStateText.text = "Под проверкой"
+            heroSubline.text = "Проверка наличия остаточного экрана..."
             heroProgress.visibility = View.VISIBLE
         }
         // 空闲但 Shizuku 未就绪：副标题直接说明「点了也连不上」，避免用户反复点
@@ -1016,8 +1050,8 @@ class MainActivity : AppCompatActivity() {
             val gate = ShizukuGate.state(this)
             if (gate != ShizukuGate.State.READY) {
                 heroSubline.text =
-                    "Shizuku 未就绪（${ShizukuGate.guidanceOf(gate).title}）——" +
-                    "无法连接，点下方「Shizuku」查看怎么处理"
+                    "Шизуку не готова (${ShizukuGate.guidanceOf(gate).title})——" +
+                    "Невозможно подключиться. Нажмите «Шизуку» ниже, чтобы узнать, что делать."
             }
         }
         updateConnectedSubline()
@@ -1038,7 +1072,7 @@ class MainActivity : AppCompatActivity() {
         val fps = sent - lastSentFrames
         lastSentFrames = sent
         heroStats.text =
-            "分辨率 ${SessionController.activeScalePercent}% · " +
+            "Разрешение ${SessionController.activeScalePercent}% ·" +
             "$fps/${SessionController.activeTargetFps} fps"
     }
 
@@ -1078,9 +1112,9 @@ class MainActivity : AppCompatActivity() {
 
         heroStateText.text =
             when (s) {
-                HeroState.IDLE -> "未连接"
-                HeroState.CONNECTING -> "正在连接"
-                HeroState.CONNECTED -> "已连接"
+                HeroState.IDLE -> "Не подключено"
+                HeroState.CONNECTING -> "Подключение"
+                HeroState.CONNECTED -> "Подключено"
             }
         heroProgress.visibility = if (s == HeroState.CONNECTING) View.VISIBLE else View.GONE
         heroStats.visibility = if (s == HeroState.CONNECTED) View.VISIBLE else View.GONE
@@ -1090,20 +1124,20 @@ class MainActivity : AppCompatActivity() {
                 val pending = pendingResidualDisplays
                 heroSubline.text =
                     if (pending != null) {
-                        "上次会话异常退出，遗留 ${pending.size} 个虚拟屏待清理"
+                        "Последний сеанс завершился аварийно, оставив виртуальные экраны ${pending.size} подлежащими очистке."
                     } else {
-                        "与车机蓝牙完成配对后，点击下方按钮发起无线连接"
+                        "После сопряжения с Bluetooth автомобиля нажмите кнопку ниже, чтобы инициировать беспроводное соединение."
                     }
-                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_play, "启动连接")
+                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_play, "Подключить")
                 audioTag.visibility = View.GONE
             }
             HeroState.CONNECTING -> {
                 heroSubline.text = SessionController.phaseHint ?: DEFAULT_CONNECTING_HINT
-                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "取消连接")
+                styleCta(R.drawable.bg_cta_fill, R.color.m3_on_primary, R.drawable.ic_close, "Отменить соединение")
                 audioTag.visibility = View.GONE
             }
             HeroState.CONNECTED -> {
-                styleCta(R.drawable.bg_cta_outline_err, R.color.m3_error, R.drawable.ic_power, "断开连接")
+                styleCta(R.drawable.bg_cta_outline_err, R.color.m3_error, R.drawable.ic_power, "Отключить")
                 audioTag.visibility = View.VISIBLE
             }
         }
@@ -1137,8 +1171,8 @@ class MainActivity : AppCompatActivity() {
             ssidInput.text
                 .toString()
                 .trim()
-                .ifEmpty { "车机热点" }
-        heroSubline.text = String.format(Locale.US, "已连接 · %s · %02d:%02d · 视频推流中", ssid, mm, ss)
+                .ifEmpty { "Точка доступа автомобиля" }
+        heroSubline.text = String.format(Locale.US, "Подключено · %s · %02d:%02d · Потоковое видео", ssid, mm, ss)
     }
 
     private fun updateAudioTag() {
@@ -1153,7 +1187,7 @@ class MainActivity : AppCompatActivity() {
             )!!
         DrawableCompat.setTint(icon.mutate(), getColor(if (on) R.color.m3_ok else R.color.m3_outline))
         audioTag.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null)
-        audioTag.text = if (on) "车机侧声音 · 开启" else "车机侧声音 · 关闭"
+        audioTag.text = if (on) "Звук со стороны автомобиля · Вкл." else "Звук со стороны автомобиля · Выкл."
     }
 
     /**
@@ -1196,19 +1230,19 @@ class MainActivity : AppCompatActivity() {
             val target = TargetDevicePrefs.get(this)
             if (bondedCount > 0) {
                 btBadge.background.mutate().setTint(getColor(R.color.m3_ok_dot))
-                btBadge.text = "就绪"
+                btBadge.text = "Готово"
                 btDesc.text =
                     if (target != null) {
-                        "目标「${target.name}」· 只向该设备发请求"
+                        "Цель «${target.name}» · Отправлять запросы только на это устройство"
                     } else if (bondedCount > 1) {
-                        "已配对 $bondedCount 台 · 未指定目标将逐个尝试"
+                        "Парные единицы $bondedCount · Неуказанные цели будут проверены один за другим"
                     } else {
-                        "已与 $bondedCount 台设备配对 · 连接自动回连"
+                        "Сопряжено с устройствами $bondedCount · Соединение восстанавливается автоматически"
                     }
             } else {
                 btBadge.background.mutate().setTint(getColor(R.color.m3_amber))
-                btBadge.text = "未配对"
-                btDesc.text = "尚未配对——点「选择设备」扫描并配对车机"
+                btBadge.text = "Не в паре"
+                btDesc.text = "Еще не подключено — нажмите «Выбрать устройство», чтобы отсканировать и подключить автомобиль к устройству."
             }
             // 目标设备已不在已配对列表（如系统里删了配对）时提示重选
             if (target != null && bondedCount > 0) {
@@ -1223,8 +1257,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 if (!stillBonded) {
                     btBadge.background.mutate().setTint(getColor(R.color.m3_amber))
-                    btBadge.text = "需重选"
-                    btDesc.text = "目标「${target.name}」已不在配对列表——请重新选择设备"
+                    btBadge.text = "Необходимо повторно выбрать"
+                    btDesc.text = "Цели «${target.name}» больше нет в списке сопряжения. Выберите другое устройство."
                 }
             }
             // 弹窗内可扫描并直接配对未配对设备，因此不再只在「已有配对」时显示：
@@ -1236,13 +1270,13 @@ class MainActivity : AppCompatActivity() {
         val projectionReady =
             CarPlayService.mediaProjection != null
         if (projectionReady) {
-            btnAudio.text = "已授权"
+            btnAudio.text = "Авторизованный"
             btnAudio.setTextColor(getColor(R.color.m3_ok))
-            audioDesc.text = "投屏权限已就绪 · 连接时可选开启"
+            audioDesc.text = "Разрешение на трансляцию экрана готово. Включается дополнительно при подключении."
         } else {
-            btnAudio.text = "授权"
+            btnAudio.text = "Разрешить"
             btnAudio.setTextColor(getColor(R.color.m3_primary))
-            audioDesc.text = "需要「投屏」权限，可选 · 关闭时车机无声音"
+            audioDesc.text = "Требуется разрешение «Скринкаст», необязательно · В закрытом состоянии из автомобиля не слышно звука."
         }
         readyCount.text = "$ready/4"
     }
@@ -1257,13 +1291,13 @@ class MainActivity : AppCompatActivity() {
             getColor(if (ready) R.color.m3_ok_dot else R.color.m3_amber),
         )
         shizukuBadge.setTextColor(getColor(if (ready) R.color.m3_ok else R.color.m3_on_sec_container))
-        shizukuBadge.text = if (ready) "就绪" else "未就绪"
+        shizukuBadge.text = if (ready) "Готово" else "Не готов"
         shizukuDesc.text =
             when (state) {
-                ShizukuGate.State.READY -> "shell 权限已就绪 · 虚拟屏与触摸可用"
-                ShizukuGate.State.NOT_RUNNING -> "服务未运行——点此查看怎么启动"
-                ShizukuGate.State.UNAUTHORIZED -> "未授权本应用——点此请求授权"
-                ShizukuGate.State.NOT_INSTALLED -> "未安装 Shizuku——点此查看说明"
+                ShizukuGate.State.READY -> "Разрешения оболочки готовы · Доступны виртуальный экран и сенсорный ввод."
+                ShizukuGate.State.NOT_RUNNING -> "Служба не запущена — нажмите здесь, чтобы узнать, как ее запустить."
+                ShizukuGate.State.UNAUTHORIZED -> "Это приложение не авторизовано — нажмите здесь, чтобы запросить авторизацию."
+                ShizukuGate.State.NOT_INSTALLED -> "Shizuku не установлена — нажмите здесь, чтобы получить инструкции."
             }
     }
 
@@ -1292,15 +1326,19 @@ class MainActivity : AppCompatActivity() {
 
     private val targetScanPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            log("BT-SCAN: BLUETOOTH_SCAN 授权: $granted")
+            log("BT-SCAN: BLUETOOTH_SCAN Лицензия: $granted")
             if (granted && pendingTargetScan) {
                 pendingTargetScan = false
                 targetPicker?.let { startTargetScan(it) }
             } else if (!granted) {
                 pendingTargetScan = false
                 targetPicker?.let { _ ->
-                    updatePickerStatus("未授予「附近的设备」权限——无法扫描；可到系统设置授权后重开本弹窗", warn = true)
-                    pickerToast("未授予「附近的设备」权限——无法扫描附近设备")
+                    updatePickerStatus(
+                        "Разрешение «Устройства поблизости» не предоставлено — невозможно сканировать; вы " +
+                            "можете зайти в настройки системы для авторизации, а затем снова открыть это всплывающее окно",
+                        warn = true,
+                    )
+                    pickerToast("Разрешение «Устройства поблизости» не предоставлено — невозможно сканировать устройства поблизости.")
                 }
             }
         }
@@ -1324,7 +1362,7 @@ class MainActivity : AppCompatActivity() {
                 null
             }
         if (adapter == null || !adapter.isEnabled) {
-            snack("蓝牙未开启——请先开启蓝牙")
+            snack("Bluetooth не включен. Сначала включите Bluetooth.")
             return
         }
         val view = layoutInflater.inflate(R.layout.dialog_target_picker, null)
@@ -1366,17 +1404,20 @@ class MainActivity : AppCompatActivity() {
             removeAllViews()
             addView(
                 inflateTargetRow(
-                    name = "自动（不指定目标）",
-                    address = "逐个尝试 · 接受任一设备连入",
-                    action = if (current == null) "当前" else "选择",
+                    name = "Автоматически (цель не указана)",
+                    address = "Попробуйте их один за другим · Принимайте соединения с любого устройства",
+                    action = if (current == null) "текущий" else "Выбрать",
                     highlighted = current == null,
                     iconTint = R.color.m3_outline,
                 ) {
                     TargetDevicePrefs.set(this@MainActivity, null)
-                    log("TARGET: 已取消目标指定——出站逐个尝试已配对设备，入站接受任一设备")
+                    log(
+                        "ЦЕЛЬ: таргетинг отменен: исходящие попытки соединяют устройства одно за другим, входящие " +
+                            "принимаются любые устройства.",
+                    )
                     // 先关弹窗再提示（snackbar 在 Activity 窗口内，会被弹窗盖住）
                     targetPicker?.dismiss()
-                    snack("已切换为自动（不指定目标）")
+                    snack("Переключен на автоматический режим (цель не указана)")
                 },
             )
         }
@@ -1390,7 +1431,7 @@ class MainActivity : AppCompatActivity() {
                 inflateTargetRow(
                     name = name,
                     address = address,
-                    action = if (isCurrent) "当前" else "选择",
+                    action = if (isCurrent) "текущий" else "Выбрать",
                     highlighted = isCurrent,
                     iconTint = R.color.m3_primary,
                 ) {
@@ -1457,7 +1498,7 @@ class MainActivity : AppCompatActivity() {
                 PackageManager.PERMISSION_GRANTED
         if (!granted) {
             pendingTargetScan = true
-            updatePickerStatus("需要「附近的设备」权限才能扫描…", warn = true)
+            updatePickerStatus("Для сканирования требуется разрешение «Ближайшие устройства»...", warn = true)
             targetScanPermissionLauncher.launch(Manifest.permission.BLUETOOTH_SCAN)
             return
         }
@@ -1469,7 +1510,7 @@ class MainActivity : AppCompatActivity() {
                 .toSet()
         scannedTargets.clear()
         scannedList.removeAllViews()
-        updatePickerStatus("正在扫描附近的蓝牙设备…")
+        updatePickerStatus("Сканирование устройств Bluetooth рядом…")
         stopTargetScan()
         val receiver =
             object : BroadcastReceiver() {
@@ -1512,9 +1553,13 @@ class MainActivity : AppCompatActivity() {
                 false
             }
         if (!started) {
-            updatePickerStatus("扫描启动失败——请确认蓝牙已开启后点「重新扫描」", warn = true)
+            updatePickerStatus(
+                "Не удалось начать сканирование. Подтвердите, что Bluetooth включен, и нажмите «Повторное " +
+                    "сканирование».",
+                warn = true,
+            )
         } else {
-            log("BT-SCAN: 开始扫描附近蓝牙设备")
+            log("BT-SCAN: начать сканирование ближайших устройств Bluetooth.")
         }
     }
 
@@ -1538,7 +1583,7 @@ class MainActivity : AppCompatActivity() {
         // 扫描仍在继续：状态行保留并计数，用户知道还可以继续等其它设备。
         // 刻意不走 updatePickerStatus——它会把列表滚到状态行，发现新设备时抢滚动位置。
         dialog.findViewById<TextView>(R.id.scanStatus)?.apply {
-            text = "继续扫描中…已发现 ${scannedTargets.size} 台未配对设备"
+            text = "Сканирование продолжается...${scannedTargets.size} найдены несопряженные устройства"
             setTextColor(getColor(R.color.m3_mono_dim))
             visibility = View.VISIBLE
         }
@@ -1546,7 +1591,7 @@ class MainActivity : AppCompatActivity() {
             inflateTargetRow(
                 name = name,
                 address = "$address · ${rssi}dBm",
-                action = "配对",
+                action = "спаривание",
                 highlighted = false,
                 iconTint = R.color.m3_amber,
             ) {
@@ -1570,16 +1615,16 @@ class MainActivity : AppCompatActivity() {
             try {
                 device.createBond()
             } catch (error: SecurityException) {
-                log("BT-PAIR: 配对「$name」失败 - 缺少权限：${error.message}")
+                log("BT-PAIR: Не удалось выполнить сопряжение «$name» — отсутствуют разрешения: ${error.message}")
                 false
             }
         if (ok) {
-            log("BT-PAIR: 已发起与「$name」($address) 的配对——请在系统弹窗确认")
-            pickerNotice("正在配对「$name」：请在系统弹窗确认")
+            log("BT-PAIR: Установлено соединение с «$name» ($address) — подтвердите во всплывающем окне системы.")
+            pickerNotice("Сопряжение «$name»: подтвердите во всплывающем окне системы.")
         } else {
             pendingBondAddress = null
-            log("BT-PAIR: 配对「$name」($address) 发起失败（设备可能已配对或蓝牙忙）")
-            pickerNotice("无法发起配对——请在系统蓝牙设置中手动配对")
+            log("BT-PAIR: Не удалось инициировать сопряжение «$name» ($address) (возможно, устройство сопряжено или Bluetooth занят)")
+            pickerNotice("Невозможно инициировать сопряжение — выполните сопряжение вручную в настройках Bluetooth системы.")
         }
     }
 
@@ -1661,7 +1706,7 @@ class MainActivity : AppCompatActivity() {
             BluetoothDevice.BOND_BONDED -> {
                 pendingBondAddress = null
                 val name = deviceDisplayName(device)
-                log("BT-PAIR: ✓ 已与「$name」($address) 完成配对——自动设为目标")
+                log("BT-PAIR: ✓ В сочетании с «$name» ($address) — автоматически устанавливается в качестве цели.")
                 // 先关弹窗再提示：snackbar 在 Activity 窗口内，弹窗未关时会被盖住
                 dialog.dismiss()
                 setTarget(device, name)
@@ -1674,8 +1719,8 @@ class MainActivity : AppCompatActivity() {
                         val dropped = BtProfiles.disconnect(app, device)
                         if (dropped.isNotEmpty()) {
                             log(
-                                "BT-PAIR: 已断开配对后自动建立的 ${dropped.joinToString("/")} 连接" +
-                                    "（保持仅配对，避免车机拒绝 CarPlay）",
+                                "BT-PAIR: ${dropped.joinToString("/")} подключить" +
+                                    "(Продолжайте сопряжение только для того, чтобы автомобиль не отклонил CarPlay)",
                             )
                         }
                         if (attempt == 0) {
@@ -1691,9 +1736,12 @@ class MainActivity : AppCompatActivity() {
 
             BluetoothDevice.BOND_NONE -> {
                 pendingBondAddress = null
-                log("BT-PAIR: 与 $address 配对未完成（用户取消或失败）")
+                log("BT-PAIR: сопряжение с $address не завершено (отменено пользователем или не удалось)")
                 // 弹窗仍开着：用 Toast（浮在弹窗之上）+ 弹窗内状态行，不用被遮挡的 snackbar
-                pickerNotice("配对未完成——可再点「配对」重试，或到系统蓝牙设置手动配对")
+                pickerNotice(
+                    "Сопряжение не завершено. Вы можете нажать «Сопряжение», чтобы повторить попытку, или " +
+                        "перейти к настройкам Bluetooth системы, чтобы выполнить сопряжение вручную.",
+                )
             }
             // BOND_BONDING：继续等（系统确认框未应答）
         }
@@ -1714,15 +1762,15 @@ class MainActivity : AppCompatActivity() {
         val previous = TargetDevicePrefs.get(this)
         TargetDevicePrefs.set(this, TargetDevicePrefs.Target(device.address, name))
         log(
-            "TARGET: 目标车机已设为「$name」(${device.address})" +
-                "——出站只连该设备、入站拒绝其它设备" +
+            "ЦЕЛЬ: Целевому транспортному средству присвоено значение «$name» (${device.address})." +
+                "—— Подключайте это устройство только для исходящего трафика и отклоняйте входящие подключения других устройств." +
                 if (previous != null && previous.address != device.address) {
-                    "（原目标「${previous.name}」）"
+                    "(Предыдущая цель: \"${previous.name}\")"
                 } else {
                     ""
                 },
         )
-        snack("目标已设为「$name」——只向该设备发请求")
+        snack("В качестве цели установлено «$name» — отправлять запросы только на это устройство.")
         updateReadyRow()
     }
 
@@ -1765,7 +1813,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 device.address
             } catch (_: SecurityException) {
-                "未知设备"
+                "неизвестное устройство"
             }
         }
 
@@ -1785,7 +1833,7 @@ class MainActivity : AppCompatActivity() {
             ShizukuGate
                 .state(this) ==
                 ShizukuGate.State.READY
-        shizukuChip.text = if (ready) "车机服务在线" else "Shizuku 未就绪"
+        shizukuChip.text = if (ready) "Служба автомобиля доступна" else "Шизуку не готова"
         shizukuChip.compoundDrawables.getOrNull(0)?.let {
             DrawableCompat.setTint(
                 it.mutate(),
@@ -1829,42 +1877,45 @@ class MainActivity : AppCompatActivity() {
      * 存储满/媒体库异常失败）。
      */
     private fun exportLogFile(scope: LogExporter.Scope = LogExporter.Scope.CURRENT_SESSION) {
-        snack(if (scope == LogExporter.Scope.ALL) "正在导出全部日志…" else "正在导出本次启动的日志…")
+        snack(if (scope == LogExporter.Scope.ALL) "Экспорт всех журналов..." else "Экспорт журналов этого запуска...")
         val fallback = SessionController.logText()
         Bg.run("export-log") {
             val result = LogExporter.export(applicationContext, fallback, scope)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (result == null) {
-                    snack("导出失败——请检查存储空间后重试", 4_000L)
+                    snack("Не удалось выполнить экспорт. Проверьте место для хранения и повторите попытку.", 4_000L)
                     return@runOnUiThread
                 }
-                log("日志已导出（${scope.label}）: ${result.displayPath}（${result.bytes} 字节）")
+                log("Экспортирован журнал (${scope.label}): ${result.displayPath} (${result.bytes} байт)")
                 val scopeNote =
                     if (scope == LogExporter.Scope.CURRENT_SESSION) {
-                        "仅含本次 App 启动之后的日志。需要更早的历史，请长按导出按钮。"
+                        "Включаются только журналы после запуска этого приложения. Для более старой истории нажмите и " +
+                            "удерживайте кнопку экспорта."
                     } else {
-                        "包含历史日志（文件上限 2MB，超出时只保留最近一段）。"
+                        "Содержит исторические журналы (предел файла составляет 2 МБ, в случае превышения будет сохранен " +
+                            "только самый последний сегмент)."
                     }
                 DarkMessageDialog.show(
                     this,
-                    title = "日志已导出",
+                    title = "Журнал экспортирован.",
                     message =
-                        "文件位置：\n${result.displayPath}\n\n" +
-                            "大小：${formatBytes(result.bytes)}\n$scopeNote\n\n" +
-                            "可在「文件管理 → 下载 → CarDeck」中找到，也可直接分享给开发者排查问题。",
+                        "Местоположение файла:\n${result.displayPath}\n\n" +
+                            "Размер: ${formatBytes(result.bytes)}\n$scopeNote\n\n" +
+                            "Его можно найти в «Управление файлами → Загрузка → CarDeck», или им можно поделиться " +
+                            "напрямую с разработчиками для устранения проблем.",
                     actions =
                         listOf(
-                            DarkMessageDialog.Action("打开文件", DarkMessageDialog.Emphasis.PRIMARY) {
+                            DarkMessageDialog.Action("открыть файл", DarkMessageDialog.Emphasis.PRIMARY) {
                                 openExportedFile(result.uri, result.displayPath)
                             },
-                            DarkMessageDialog.Action("打开文件夹") {
+                            DarkMessageDialog.Action("открыть папку") {
                                 openExportFolder(result.displayPath)
                             },
-                            DarkMessageDialog.Action("分享文件") {
+                            DarkMessageDialog.Action("обмениваться файлами") {
                                 shareExportedFile(result.uri)
                             },
-                            DarkMessageDialog.Action("关闭", onClick = {}),
+                            DarkMessageDialog.Action("Выключено", onClick = {}),
                         ),
                 )
             }
@@ -1874,7 +1925,7 @@ class MainActivity : AppCompatActivity() {
     /** 人类可读大小：<1KB 显示字节（整数除法会显示成误导性的「0 KB」）。 */
     private fun formatBytes(bytes: Long): String =
         when {
-            bytes < 1024 -> "$bytes 字节"
+            bytes < 1024 -> "$bytes байт"
             bytes < 1024 * 1024 -> "${bytes / 1024} KB"
             else -> String.format(Locale.US, "%.1f MB", bytes / 1024.0 / 1024.0)
         }
@@ -1920,11 +1971,11 @@ class MainActivity : AppCompatActivity() {
             }
         for (intent in listOf(explicit, implicit, storageRoot)) {
             if (runCatching { startActivity(intent) }.isSuccess) {
-                if (intent !== explicit) snack("请按路径打开：$folder", 5_000L)
+                if (intent !== explicit) snack("Пожалуйста, откройте по пути: $folder", 5_000L)
                 return
             }
         }
-        snack("请到「文件管理 → 下载 → CarDeck」查看", 5_000L)
+        snack("Для просмотра перейдите в «Управление файлами → Загрузка → CarDeck».", 5_000L)
     }
 
     /** 用系统默认应用打开（多数 ROM 会落到文件管理器 / 文本查看器预览）。 */
@@ -1948,10 +1999,14 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         if (runCatching { startActivity(storageRoot) }.isSuccess) {
-            snack("请按路径打开：$displayPath", 5_000L)
+            snack("Пожалуйста, откройте по пути: $displayPath.", 5_000L)
             return
         }
-        snack("没有可打开文件的应用——请到文件管理器中按上述路径查找", 5_000L)
+        snack(
+            "Не существует приложения, которое могло бы открыть файл. Чтобы найти его, перейдите в файловый менеджер и " +
+                "следуйте указанному выше пути.",
+            5_000L,
+        )
     }
 
     /** 分享日志文件（微信/QQ/邮件等），内容 URI 带临时读权限。 */
@@ -1962,8 +2017,8 @@ class MainActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-        runCatching { startActivity(Intent.createChooser(send, "分享日志文件")) }
-            .onFailure { snack("没有可分享的应用") }
+        runCatching { startActivity(Intent.createChooser(send, "Делитесь файлами журналов")) }
+            .onFailure { snack("Нет приложений, которыми можно поделиться") }
     }
 
     private fun updateLogBottomButton() {
@@ -1993,7 +2048,12 @@ class MainActivity : AppCompatActivity() {
         // 改文本前已在底部（或用户上翻阅读中）：决定本次是否自动跟底
         val follow = consoleAtBottom()
         logText.text =
-            if (SessionController.logEnabled) text else "日志采集已关闭（打开「监听日志」开关恢复）"
+            if (SessionController.logEnabled) {
+                text
+            } else {
+                "Сбор журналов отключен (для восстановления включите " +
+                    "переключатель «Журнал мониторинга»)"
+            }
         logText.post {
             if (follow) scrollConsoleToBottom() else updateLogBottomButton()
         }
@@ -2060,7 +2120,7 @@ class MainActivity : AppCompatActivity() {
             startupCheckRunning = true
             tickHero()
         }
-        shellStateText.text = "读取中…"
+        shellStateText.text = "Чтение…"
         Bg.run("shell-state") {
             if (ShizukuGate
                     .state(this) !=
@@ -2069,7 +2129,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     startupCheckRunning = false
                     if (heroState == HeroState.IDLE) applyHeroState(HeroState.IDLE)
-                    shellStateText.text = "Shizuku 未就绪——shell 状态读取需要 Shizuku"
+                    shellStateText.text = "Шизуку не готова — для чтения статуса Shell требуется Шизуку"
                 }
                 return@run
             }
@@ -2088,20 +2148,23 @@ class MainActivity : AppCompatActivity() {
             val timeout = sh("settings get system screen_off_timeout").ifBlank { "?" }
             val text =
                 buildString {
-                    appendLine("letterbox 宽高比: $letterbox  （1.05=会话调优生效；0.0=系统默认）")
-                    appendLine("force_resizable: $forceResizable  （平板模式实验；默认 null/0）")
-                    appendLine("overlay_display_devices: $overlay  （叠加屏实验残留；应为 null）")
+                    appendLine(
+                        "Соотношение сторон почтового ящика: $letterbox (1,05 = настройка сеанса вступает в силу; " +
+                            "0,0 = системное значение по умолчанию)",
+                    )
+                    appendLine("Force_resizable: $forceResizable (экспериментальный режим планшета; по умолчанию ноль/0)")
+                    appendLine("overlay_display_devices: $overlay (остатки эксперимента с наложением экрана; должно быть нулевым)")
                     appendLine("wm size: $wmSize")
                     appendLine("wm density: $wmDensity")
-                    appendLine("CarPlay 虚拟屏: " + displays.trim().replace("\n", ", ").ifEmpty { "无" })
-                    appendLine("screen_off_timeout: $timeout  （App 常亮功能管理）")
+                    appendLine("Виртуальный экран CarPlay:" + displays.trim().replace("\n", ", ").ifEmpty { "Нет" })
+                    appendLine("screen_off_timeout: $timeout (управление постоянно включенными функциями приложения)")
                 }
             runOnUiThread { shellStateText.text = text.trim() }
             if (startupCheck) {
                 var residual = carDisplays.filter { it.first !in currentSessionDisplayIds() }
                 if (residual.isNotEmpty()) {
                     log(
-                        "SHELL: 启动检测到 ${residual.size} 个残留虚拟屏: " +
+                        "SHELL: при загрузке обнаружены ${residual.size} остаточные виртуальные экраны:" +
                             residual.joinToString(", ") { "${it.second}(${it.first})" },
                     )
                     // 残留屏 = 上次会话异常退出（进程被杀）：横屏覆盖的会话末复原
@@ -2110,13 +2173,13 @@ class MainActivity : AppCompatActivity() {
                         val reset =
                             AppOrientationCompat
                                 .resetAll(applicationContext)
-                        if (reset > 0) log("ORIENTATION: 残留会话的横屏覆盖已复原 $reset 个")
+                        if (reset > 0) log("ОРИЕНТАЦИЯ: восстановлено горизонтальное наложение для остаточных сеансов $reset")
                     }
                     // 先自动清理一轮（含旧版本 UserService 进程回收——其持有的屏跨进程
                     // 无法 release，只有进程回收能释放；重装 APK 后 Shizuku 按版本复用的
                     // 旧进程正是「点清理释放 0/N」的根因，2026-10-16）。清不掉的再问用户。
                     val released = releaseDisplays(residual.map { it.first })
-                    log("SHELL: 启动残留自动清理（释放 $released/${residual.size}）")
+                    log("SHELL: запустить автоматическую остаточную очистку (выпустить $released/${residual.size})")
                     if (released > 0) {
                         residual =
                             parseCarPlayDisplays(sh("dumpsys display"))
@@ -2171,22 +2234,23 @@ class MainActivity : AppCompatActivity() {
         val names = residual.joinToString("\n") { "· ${it.second}（displayId=${it.first}）" }
         DarkMessageDialog.show(
             activity = this,
-            title = "检测到残留虚拟屏",
+            title = "Обнаружен остаточный виртуальный экран",
             message =
-                "发现 ${residual.size} 个上次会话遗留的 CarPlay 虚拟屏：\n$names\n\n" +
-                    "残留屏会持续占用显示资源，并可能影响下次连接。是否立即清理？",
+                "Найдены виртуальные экраны ${residual.size} CarPlay, оставшиеся с прошлого сеанса:\n$names\n\n" +
+                    "Остаточный экран будет продолжать занимать ресурсы дисплея и может повлиять на следующее " +
+                    "подключение. Убираться немедленно?",
             actions =
                 listOf(
-                    DarkMessageDialog.Action("暂不") {},
-                    DarkMessageDialog.Action("清理", DarkMessageDialog.Emphasis.PRIMARY) {
+                    DarkMessageDialog.Action("Еще нет") {},
+                    DarkMessageDialog.Action("убирать", DarkMessageDialog.Emphasis.PRIMARY) {
                         pendingResidualDisplays = null
                         updateResidualChip()
                         if (heroState == HeroState.IDLE) applyHeroState(HeroState.IDLE)
                         Bg.run("residual-cleanup") {
                             val released = releaseDisplays(residual.map { it.first })
-                            log("SHELL: 残留虚拟屏清理完成（释放 $released/${residual.size}）")
+                            log("SHELL: очистка остаточного виртуального экрана завершена (выпуск $released/${residual.size})")
                             runOnUiThread {
-                                snack("已释放 $released/${residual.size} 个残留屏")
+                                snack("$released/${residual.size} остаточные экраны выпущены")
                                 refreshShellState()
                             }
                         }
@@ -2235,13 +2299,13 @@ class MainActivity : AppCompatActivity() {
 
     /** 一键把 shell 全局状态复位为系统默认值（含残留虚拟屏释放，保留当前会话屏）。 */
     private fun resetShellState() {
-        shellStateText.text = "复位中…"
+        shellStateText.text = "Сброс..."
         Bg.run("shell-reset") {
             if (ShizukuGate
                     .state(this) !=
                 ShizukuGate.State.READY
             ) {
-                runOnUiThread { shellStateText.text = "Shizuku 未就绪——shell 复位需要 Shizuku" }
+                runOnUiThread { shellStateText.text = "Шизуку не готова — для сброса оболочки требуется Шизуку" }
                 return@run
             }
 
@@ -2250,8 +2314,8 @@ class MainActivity : AppCompatActivity() {
                     .exec(cmd, 5_000L)
             val steps =
                 listOf(
-                    "letterbox 宽高比" to "cmd window reset-letterbox-style aspectRatio",
-                    "overlay 叠加屏" to "settings delete global overlay_display_devices",
+                    "соотношение сторон почтового ящика" to "cmd window reset-letterbox-style aspectRatio",
+                    "наложение экрана наложения" to "settings delete global overlay_display_devices",
                     "force_resizable" to "settings delete global force_resizable_activities",
                     "wm size" to "wm size reset",
                     "wm density" to "wm density reset",
@@ -2268,12 +2332,12 @@ class MainActivity : AppCompatActivity() {
                     .filter { it !in currentSessionDisplayIds() }
                     .toList()
             val released = releaseDisplays(ids)
-            val summary = results.joinToString("；") + "；残留屏释放 $released/${ids.size}"
+            val summary = results.joinToString("；") + ";Остаток освобождения экрана $released/${ids.size}"
             log("SHELL-RESET: $summary")
             runOnUiThread {
-                shellStateText.text = "复位结果：\n" + results.joinToString("\n") +
-                    "\n残留虚拟屏: 释放 $released/${ids.size}（保留当前会话屏）\n" +
-                    "提示：letterbox 调优会在下次连接时自动重新应用"
+                shellStateText.text = "Результат сброса:\n" + results.joinToString("\n") +
+                    "\nОстаточный виртуальный экран: выпустите $released/${ids.size} (сохраните экран текущего сеанса)\n" +
+                    "Совет: настройка почтового ящика автоматически применяется повторно при следующем подключении."
                 refreshShellState()
             }
         }
@@ -2284,17 +2348,21 @@ class MainActivity : AppCompatActivity() {
         if (android.provider.Settings.canDrawOverlays(this)) return
         DarkMessageDialog.show(
             activity = this,
-            title = "需要「显示在其他应用上层」权限",
+            title = "Требуется разрешение «Показывать поверх других приложений».",
             message =
                 "$reason\n\n" +
-                    "用途：无操作时真息屏（屏幕断电但不锁屏，防止手机锁屏后车机触摸失效）。" +
-                    "不会读取或遮挡其他应用内容，点击屏幕立即恢复。",
+                    "Цель: настоящий экран, когда нет никаких операций (экран выключен, но не блокирует экран, чтобы " +
+                    "предотвратить отключение сенсорного экрана автомобиля после блокировки экрана телефоном)." +
+                    "Он не будет читать или блокировать другой контент приложения, и его можно немедленно восстановить, коснувшись экрана.",
             actions =
                 listOf(
-                    DarkMessageDialog.Action("暂不") {
-                        log("DIMMER: 用户暂未授权悬浮窗（暗幕不可用，常亮仍生效）")
+                    DarkMessageDialog.Action("Еще нет") {
+                        log(
+                            "ДИММЕР: Пользователь еще не авторизовал плавающее окно (темный экран недоступен, постоянное " +
+                                "освещение все еще действует)",
+                        )
                     },
-                    DarkMessageDialog.Action("去授权", DarkMessageDialog.Emphasis.PRIMARY) {
+                    DarkMessageDialog.Action("авторизовать", DarkMessageDialog.Emphasis.PRIMARY) {
                         try {
                             startActivity(
                                 android.content.Intent(
@@ -2303,7 +2371,10 @@ class MainActivity : AppCompatActivity() {
                                 ),
                             )
                         } catch (_: Exception) {
-                            log("DIMMER: 无法打开授权页，请手动前往 设置>应用>特殊权限>显示在其他应用上层")
+                            log(
+                                "DIMMER: невозможно открыть страницу авторизации, вручную выберите «Настройки» > " +
+                                    "«Приложения» > «Специальные разрешения» > «Показать поверх других приложений».",
+                            )
                         }
                     },
                 ),

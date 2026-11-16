@@ -30,18 +30,18 @@ object DeltaPatch {
         base: File,
         out: File,
     ): String? {
-        if (!base.isFile) return "基线 APK 不存在"
+        if (!base.isFile) return "Базовый APK не существует."
         val sha = MessageDigest.getInstance("SHA-256")
         RandomAccessFile(patch, "r").use { pf ->
             val magic = ByteArray(8)
             pf.readFully(magic)
-            if (!String(magic, Charsets.US_ASCII).startsWith(MAGIC)) return "补丁格式不对"
+            if (!String(magic, Charsets.US_ASCII).startsWith(MAGIC)) return "Формат патча неправильный"
             val targetLen = pf.readLong()
             val targetSha = ByteArray(32).also { pf.readFully(it) }
             val baseLen = pf.readLong()
             val baseSha = ByteArray(32).also { pf.readFully(it) }
-            if (base.length() != baseLen) return "基线长度不符（${base.length()}/$baseLen）"
-            if (!sha256Of(base).contentEquals(baseSha)) return "基线 sha256 不符"
+            if (base.length() != baseLen) return "Длина базовой линии не соответствует (${base.length()}/$baseLen)"
+            if (!sha256Of(base).contentEquals(baseSha)) return "Базовый уровень sha256 не соответствует"
             RandomAccessFile(base, "r").use { bf ->
                 out.outputStream().use { output ->
                     val buf = ByteArray(64 * 1024)
@@ -55,7 +55,7 @@ object DeltaPatch {
                                 bf.seek(off)
                                 while (len > 0) {
                                     val n = bf.read(buf, 0, minOf(buf.size.toLong(), len).toInt())
-                                    if (n < 0) return "基线读取越界"
+                                    if (n < 0) return "Базовое чтение выходит за пределы"
                                     output.write(buf, 0, n)
                                     sha.update(buf, 0, n)
                                     written += n
@@ -68,7 +68,7 @@ object DeltaPatch {
                                 var len = pf.readLong()
                                 while (len > 0) {
                                     val n = pf.read(buf, 0, minOf(buf.size.toLong(), len).toInt())
-                                    if (n < 0) return "补丁读取越界"
+                                    if (n < 0) return "Патч прочитан за пределами"
                                     output.write(buf, 0, n)
                                     sha.update(buf, 0, n)
                                     written += n
@@ -76,12 +76,15 @@ object DeltaPatch {
                                 }
                             }
 
-                            else -> return "未知指令"
+                            else -> return "неизвестная команда"
                         }
-                        if (written > targetLen) return "产物超长"
+                        if (written > targetLen) return "Товар слишком длинный"
                         if (written == targetLen) break
                     }
-                    if (!sha.digest().contentEquals(targetSha)) return "产物 sha256 不符（补丁与基线可能不配套）"
+                    if (!sha.digest().contentEquals(targetSha)) {
+                        return "Продукт sha256 не соответствует (патч может не " +
+                            "соответствовать базовой версии)"
+                    }
                     return null
                 }
             }

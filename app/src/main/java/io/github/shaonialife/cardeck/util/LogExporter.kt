@@ -28,8 +28,8 @@ object LogExporter {
         val label: String,
         val fileNameTag: String,
     ) {
-        CURRENT_SESSION("仅本次启动", ""),
-        ALL("全部历史日志", "-all"),
+        CURRENT_SESSION("Только на этот раз", ""),
+        ALL("Все журналы истории", "-all"),
     }
 
     data class Result(
@@ -70,7 +70,7 @@ object LogExporter {
         return try {
             val bytes = body.toByteArray(Charsets.UTF_8)
             resolver.openOutputStream(uri)?.use { it.write(bytes) }
-                ?: throw IllegalStateException("openOutputStream 返回 null")
+                ?: throw IllegalStateException("openOutputStream возвращает ноль")
             resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             Result(uri, fileName, "$DISPLAY_ROOT/$RELATIVE_DIR/$fileName", bytes.size.toLong(), scope)
         } catch (_: Exception) {
@@ -86,27 +86,30 @@ object LogExporter {
         scope: Scope,
     ): String =
         buildString {
-            appendLine("CarDeck 运行日志")
-            appendLine("导出时间: " + SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date()))
-            appendLine("应用版本: " + versionName(context))
-            appendLine("导出范围: " + scope.label)
+            appendLine("Журнал работы CarDeck")
+            appendLine("Время экспорта:" + SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date()))
+            appendLine("Версия приложения:" + versionName(context))
+            appendLine("Экспортный диапазон:" + scope.label)
             appendLine(
-                "设备: ${Build.MANUFACTURER} ${Build.MODEL} | " +
+                "Устройство: ${Build.MANUFACTURER} ${Build.MODEL} |" +
                     "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
             )
             appendLine("==================================================")
             val fileLog = DebugFileLog.read(context, currentSessionOnly = scope == Scope.CURRENT_SESSION)
             if (!fileLog.isNullOrBlank()) {
                 if (scope == Scope.CURRENT_SESSION) {
-                    appendLine("（仅本次进程启动之后的日志；需要历史请点「导出全部」）")
+                    appendLine("(Только журналы после запуска этого процесса; если вам нужна история, нажмите «Экспортировать все»)")
                 } else {
-                    appendLine("（全部文件日志；文件最多 2MB，超出时系统只保留最近一段）")
+                    appendLine(
+                        "(Все файлы журналов; максимальный размер файла — 2 МБ. При превышении система сохраняет " +
+                            "только последний раздел)",
+                    )
                 }
                 append(fileLog)
                 if (!fileLog.endsWith('\n')) appendLine()
             } else {
                 // 启动标记刚写、其余日志还没落盘（或文件不可读）时，界面缓冲仍是有效来源
-                appendLine("（文件日志不可用——导出界面缓冲，可能不完整）")
+                appendLine("(Журнал файла недоступен — буферизация интерфейса экспорта, может быть неполной)")
                 append(fallbackText)
             }
         }

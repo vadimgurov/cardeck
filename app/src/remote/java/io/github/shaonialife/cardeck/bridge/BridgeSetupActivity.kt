@@ -33,7 +33,7 @@ class BridgeSetupActivity : AppCompatActivity() {
         object : Runnable {
             override fun run() {
                 // statusLine()：退避重连期间带「Ns 后自动重试」实时倒计时
-                statusText?.text = "状态：${BridgeClient.statusLine()}"
+                statusText?.text = "Статус: ${BridgeClient.statusLine()}"
                 refresh.postDelayed(this, 1_000)
             }
         }
@@ -41,7 +41,7 @@ class BridgeSetupActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "CarDeck 远程调试"
+        title = "Удаленная отладка CarDeck"
 
         val pad = (16 * resources.displayMetrics.density).toInt()
         val root =
@@ -61,7 +61,7 @@ class BridgeSetupActivity : AppCompatActivity() {
 
         val urlInput =
             EditText(this).apply {
-                hint = "wss://example.trycloudflare.com  或  ws://192.168.1.2:8787"
+                hint = "wss://example.trycloudflare.com или ws://192.168.1.2:8787"
                 setText(BridgePrefs.serverUrl(this@BridgeSetupActivity))
                 imeOptions = EditorInfo.IME_ACTION_NEXT
                 setSingleLine()
@@ -71,7 +71,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         val codeInput =
             EditText(this).apply {
-                hint = "6 位配对码（服务器控制台显示）"
+                hint = "6-значный код сопряжения (отображается на консоли сервера)"
                 setText(BridgePrefs.pairCode(this@BridgeSetupActivity))
                 setSingleLine()
                 setTextColor(0xFFE0E0E5.toInt())
@@ -79,7 +79,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         val connect =
             Button(this).apply {
-                text = "连接"
+                text = "подключить"
                 setOnClickListener {
                     BridgePrefs.save(
                         this@BridgeSetupActivity,
@@ -103,7 +103,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         val disconnect =
             Button(this).apply {
-                text = "断开"
+                text = "Отключить"
                 setOnClickListener {
                     BridgePrefs.setAutoConnect(this@BridgeSetupActivity, false)
                     BridgeClient.stop()
@@ -111,7 +111,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         val openMain =
             Button(this).apply {
-                text = "打开主界面"
+                text = "Откройте основной интерфейс"
                 setOnClickListener {
                     runCatching {
                         startActivity(
@@ -125,7 +125,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         val installPerm =
             Button(this).apply {
-                text = "授予「安装未知应用」权限"
+                text = "Предоставьте разрешение «Установить неизвестные приложения»."
                 visibility =
                     if (packageManager.canRequestPackageInstalls()) View.GONE else View.VISIBLE
                 setOnClickListener {
@@ -141,7 +141,7 @@ class BridgeSetupActivity : AppCompatActivity() {
             }
         statusText =
             TextView(this).apply {
-                text = "状态：${BridgeClient.statusLine()}"
+                text = "Статус: ${BridgeClient.statusLine()}"
                 setTextColor(0xFF3DD6C4.toInt())
                 textSize = 14f
             }
@@ -149,21 +149,23 @@ class BridgeSetupActivity : AppCompatActivity() {
         val note =
             TextView(this).apply {
                 text =
-                    "说明：\n" +
-                    "· 本应用与日常版（同名无「远程调试」后缀）互相独立，需各自授权一次" +
-                    "Shizuku 与通知使用权\n" +
-                    "· 连接后本机会向调试服务器持续推送运行日志（含热点名/蓝牙地址等），" +
-                    "仅用于故障排查\n" +
-                    "· 调试服务器仅能执行白名单命令（发起/断开连接、查询状态）"
+                    "Описание:\n" +
+                    "· Это приложение и ежедневная версия (с тем же именем без суффикса «удаленная отладка») независимы " +
+                    "друг от друга и требуют авторизации один раз." +
+                    "Шизуку и права на уведомления\n" +
+                    "· После подключения машина будет постоянно отправлять текущий журнал (включая имя точки " +
+                    "доступа/адрес Bluetooth и т. д.) на сервер отладки." +
+                    "Только для устранения неполадок\n" +
+                    "· Сервер отладки может выполнять только команды белого списка (инициировать/отключить, статус запроса)."
                 setTextColor(0xFFE0E0E5.toInt())
                 textSize = 13f
                 setLineSpacing(0f, 1.3f)
             }
 
         listOf(
-            label("调试服务器地址"),
+            label("Адрес сервера отладки"),
             urlInput,
-            label("配对码"),
+            label("код сопряжения"),
             codeInput,
             LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -213,15 +215,19 @@ class BridgeSetupActivity : AppCompatActivity() {
                 val confirm = ReinstallFlow.pendingConfirmIntent
                 if (confirm == null) {
                     android.widget.Toast
-                        .makeText(this, "安装确认已失效——请重新推送", android.widget.Toast.LENGTH_LONG)
+                        .makeText(this, "Срок действия подтверждения установки истек. Нажмите еще раз.", android.widget.Toast.LENGTH_LONG)
                         .show()
                 } else {
                     ReinstallFlow.pendingConfirmIntent = null
                     runCatching { startActivity(confirm) }
                         .onFailure {
                             android.widget.Toast
-                                .makeText(this, "安装确认启动失败：${it.message}", android.widget.Toast.LENGTH_LONG)
-                                .show()
+                                .makeText(
+                                    this,
+                                    "Не удалось подтвердить установку при запуске: " +
+                                        "${it.message}",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
                         }
                 }
             }
@@ -235,18 +241,19 @@ class BridgeSetupActivity : AppCompatActivity() {
         deltaNote: String? = null,
     ) {
         if (!file.exists()) return
-        val sizeText = deltaNote ?: "完整包 ${file.length() / 1024 / 1024}MB"
+        val sizeText = deltaNote ?: "Полный пакет ${file.length() / 1024 / 1024} МБ"
         DarkMessageDialog.show(
             this,
-            title = "安装调试新版本",
+            title = "Установите и отладьте новую версию",
             message =
-                "v$version（$sizeText）已下载并校验通过。\n" +
-                    "安装将断开当前车机连接，完成后会询问是否继续调试。",
+                "v$version ($sizeText) загружен и проверен. \n" +
+                    "Установка отключит текущее соединение автомобиля с машиной, и после завершения вам будет задан " +
+                    "вопрос, продолжать ли отладку.",
             actions =
                 listOf(
-                    DarkMessageDialog.Action("取消") {},
+                    DarkMessageDialog.Action("Отмена") {},
                     DarkMessageDialog.Action(
-                        "安装",
+                        "Установка",
                         emphasis = DarkMessageDialog.Emphasis.PRIMARY,
                     ) {
                         ReinstallFlow.installNow(this, file)
@@ -259,15 +266,15 @@ class BridgeSetupActivity : AppCompatActivity() {
     fun promptResume() {
         DarkMessageDialog.show(
             this,
-            title = "继续进入调试模式？",
-            message = "调试版已更新完成。继续后将自动连回调试服务器。",
+            title = "Перейти в режим отладки?",
+            message = "Отладочная версия обновлена. После продолжения вы автоматически подключитесь обратно к серверу отладки.",
             actions =
                 listOf(
-                    DarkMessageDialog.Action("以后再说") {
+                    DarkMessageDialog.Action("Поговорим об этом позже") {
                         BridgePrefs.setResumePending(this@BridgeSetupActivity, false)
                     },
                     DarkMessageDialog.Action(
-                        "继续",
+                        "продолжать",
                         emphasis = DarkMessageDialog.Emphasis.PRIMARY,
                     ) {
                         BridgePrefs.setResumePending(this@BridgeSetupActivity, false)

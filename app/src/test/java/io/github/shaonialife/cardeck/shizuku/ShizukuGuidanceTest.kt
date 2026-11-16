@@ -10,24 +10,24 @@ class ShizukuGuidanceTest {
     @Test
     fun notRunningTellsUserToStartService() {
         val guidance = ShizukuGate.guidanceOf(ShizukuGate.State.NOT_RUNNING)
-        assertTrue(guidance.title.contains("未运行"))
+        assertTrue(guidance.title.contains("не запущена"))
         // 必须给出可执行动作（打开 Shizuku App 启动），否则用户无从下手
-        assertEquals("打开 Shizuku", guidance.primaryLabel)
-        assertTrue(guidance.message.contains("启动"))
+        assertEquals("Открыть Shizuku", guidance.primaryLabel)
+        assertTrue(guidance.message.contains("Запустить"))
     }
 
     @Test
     fun unauthorizedTellsUserToGrant() {
         val guidance = ShizukuGate.guidanceOf(ShizukuGate.State.UNAUTHORIZED)
-        assertTrue(guidance.title.contains("未授权"))
-        assertEquals("请求授权", guidance.primaryLabel)
-        assertTrue(guidance.message.contains("允许"))
+        assertTrue(guidance.title.contains("не разрешено"))
+        assertEquals("Запросить разрешение", guidance.primaryLabel)
+        assertTrue(guidance.message.contains("Разрешить"))
     }
 
     @Test
     fun notInstalledHasNoFakeAction() {
         val guidance = ShizukuGate.guidanceOf(ShizukuGate.State.NOT_INSTALLED)
-        assertTrue(guidance.title.contains("安装"))
+        assertTrue(guidance.title.contains("установите"))
         // 未安装时不该给一个编造的跳转/下载按钮
         assertNull(guidance.primaryLabel)
         assertTrue(guidance.message.contains("Shizuku"))
@@ -48,7 +48,7 @@ class ShizukuGuidanceTest {
             ShizukuGate.State.NOT_RUNNING,
             ShizukuGate.State.UNAUTHORIZED,
         ).forEach {
-            assertTrue(ShizukuGate.guidanceOf(it).message.contains("失败"))
+            assertTrue(ShizukuGate.guidanceOf(it).message.contains("не будет работать"))
         }
     }
 

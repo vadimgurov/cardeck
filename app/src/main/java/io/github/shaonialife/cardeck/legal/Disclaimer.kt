@@ -14,8 +14,9 @@ object DisclaimerPrefs {
      * 用户接受的是「当时那一版」内容，条款变了就该重新确认。
      *
      * v2（2026-10-18）：应用改名 CarDeck，补「非官方」「非 MFi」与 MIT 开源说明。
+     * v3（2026-11-16）：界面与免责声明改为俄文。
      */
-    const val CURRENT_VERSION = 2
+    const val CURRENT_VERSION = 3
 
     private const val PREFS = "disclaimer"
     private const val KEY_ACCEPTED_VERSION = "accepted_version"
@@ -79,9 +80,9 @@ internal fun disclaimerBlockReason(
 ): String? =
     when {
         !countdownDone && contentScrollable && !scrolledToBottom ->
-            "请滑动阅读至底部，并等待 $remainingSeconds 秒"
+            "Прокрутите страницу вниз и подождите $remainingSeconds секунд."
 
-        !countdownDone -> "请等待 $remainingSeconds 秒后接受"
-        contentScrollable && !scrolledToBottom -> "请滑动阅读至底部"
+        !countdownDone -> "Пожалуйста, подождите $remainingSeconds секунд, прежде чем принять"
+        contentScrollable && !scrolledToBottom -> "Пожалуйста, прокрутите вниз, чтобы прочитать"
         else -> null
     }

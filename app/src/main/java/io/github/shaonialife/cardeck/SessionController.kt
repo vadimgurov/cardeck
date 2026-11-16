@@ -210,7 +210,7 @@ object SessionController {
             VirtualLauncher.activeAppDisplayId().takeIf { it > 0 }
                 ?: VirtualLauncher.appDisplayId
         if (displayId <= 0) {
-            appendLog("HID: 应用屏未就绪（displayId=$displayId）——导航键忽略")
+            appendLog("HID: экран приложения не готов (displayId=$displayId) – навигационные клавиши игнорируются.")
             return
         }
         if (CarInputClient.keyEvent(displayId, keyCode)) return
@@ -343,13 +343,13 @@ object SessionController {
     /** 取消「连接中」：停链路 + 置取消标志，卡在错误网络/等待回连时用户可主动脱身。 */
     fun cancelConnecting(context: Context) {
         connectCancelled = true
-        appendLog("SESSION: 用户取消连接——正在停止蓝牙/WiFi 链路")
+        appendLog("СЕАНС: Пользователь отменил соединение – остановка соединения Bluetooth/WiFi")
         disconnect(context)
         // 强制释放互斥：配对流程线程可能阻塞在不可中断的连接/mDNS 等待上（如手机
         // 不在热点网段时连热点 IP），finally 遥遥无期——用户显式取消即强制解锁，
         // 否则英雄卡永久「正在连接」（旧流程产出已被 retireSession 清理，无冲突）
         sessionStarting.set(false)
-        phaseHint = "已取消连接"
+        phaseHint = "Соединение отменено"
     }
 
     /**
@@ -367,7 +367,10 @@ object SessionController {
         if (videoSender?.isRunning == true) return
         if (sessionStarting.compareAndSet(true, false)) {
             connectCancelled = true
-            appendLog(">>> 本轮蓝牙链路断开——释放「会话处理中」，等待车机重连端点接手")
+            appendLog(
+                ">>> В этом раунде отключения соединения Bluetooth — отпустите «Обработку сеанса» и дождитесь, " +
+                    "пока конечная точка повторного соединения автомобиля с машиной вступит во владение.",
+            )
         }
     }
 
@@ -444,9 +447,9 @@ object SessionController {
                     // 而不是让英雄卡在「已连接」与失败之间静默摇摆
                     connector.onNetworkLost = { ssid ->
                         boundCarSsid = null
-                        phaseHint = "车机热点已断开（$ssid）"
-                        uiHintSink?.invoke("车机热点 \"$ssid\" 已断开——请重新启动连接")
-                        appendLog(">>> 车机热点 \"$ssid\" 已断开——本次会话需重新连接")
+                        phaseHint = "Точка доступа в автомобиле отключена ($ssid)"
+                        uiHintSink?.invoke("Автомобильная точка доступа \"$ssid\" отключена. Перезапустите соединение.")
+                        appendLog(">>> Автомобильная точка доступа \"$ssid\" отключена – необходимо переподключить эту сессию")
                     }
                 }
             val wifiCredentialHook: (Iap2SenderSession.WifiConfiguration) -> Unit =
@@ -459,14 +462,14 @@ object SessionController {
                 Iap2BluetoothServer(
                     context,
                     log = { line -> appendLog(line) },
-                    onEndpoint = { endpoint -> onCarPlayEndpoint(endpoint, "车机回连") },
+                    onEndpoint = { endpoint -> onCarPlayEndpoint(endpoint, "Соединение автомобиля с машиной") },
                     onWifiCredentials = wifiCredentialHook,
-                    onEndpointUpdate = { endpoint -> onLateEndpoint(endpoint, "车机回连") },
+                    onEndpointUpdate = { endpoint -> onLateEndpoint(endpoint, "Соединение автомобиля с машиной") },
                     onLinkClosed = ::onSenderLinkClosed,
                     knownCarSsid = ::knownCarHotspotSsid,
                     onGeneration = { g ->
                         senderLinkGenerationCache = g
-                        appendLog("IAPLINK: 代际缓存更新 → $g（AirPlay 阶段布防分派用）")
+                        appendLog("IAPLINK: обновление кэша между поколениями → $g (для отправки на охрану этапа AirPlay)")
                     },
                     targetProvider = targetProvider,
                 )
@@ -474,14 +477,14 @@ object SessionController {
                 Iap2BluetoothClient(
                     context,
                     log = { line -> appendLog(line) },
-                    onEndpoint = { endpoint -> onCarPlayEndpoint(endpoint, "主动连车机") },
+                    onEndpoint = { endpoint -> onCarPlayEndpoint(endpoint, "Активная машина для подключения автомобиля") },
                     onWifiCredentials = wifiCredentialHook,
-                    onEndpointUpdate = { endpoint -> onLateEndpoint(endpoint, "主动连车机") },
+                    onEndpointUpdate = { endpoint -> onLateEndpoint(endpoint, "Активная машина для подключения автомобиля") },
                     onLinkClosed = ::onSenderLinkClosed,
                     knownCarSsid = ::knownCarHotspotSsid,
                     onGeneration = { g ->
                         senderLinkGenerationCache = g
-                        appendLog("IAPLINK: 代际缓存更新 → $g（AirPlay 阶段布防分派用）")
+                        appendLog("IAPLINK: обновление кэша между поколениями → $g (для отправки на охрану этапа AirPlay)")
                     },
                     targetProvider = targetProvider,
                 )
@@ -519,7 +522,10 @@ object SessionController {
             }
             // 只恢复「已绑定服务」的情况：Shizuku 没起来时不必打扰用户（面板也不会是我们关的）
             if (CarInputClient.service != null && !CarInputClient.setPhysicalScreenPower(true)) {
-                appendLog("SCREEN: 启动恢复物理屏失败（ROM 未授权 shell 电源控制）")
+                appendLog(
+                    "ЭКРАН: не удалось начать восстановление физического экрана (ПЗУ не авторизовано для " +
+                        "управления питанием оболочки)",
+                )
             }
         }
     }
@@ -541,25 +547,28 @@ object SessionController {
      */
     fun startConnection(context: Context) {
         connectCancelled = false
-        phaseHint = "蓝牙就绪，等待车机回连…"
+        phaseHint = "Bluetooth готов, ждём повторного подключения автомобиля..."
         when (
             ShizukuGate
                 .state(context)
         ) {
             ShizukuGate.State.READY ->
-                appendLog("SHIZUKU: 就绪（触摸注入可用）")
+                appendLog("ШИЗУКУ: Готово (доступна сенсорная инъекция)")
 
             ShizukuGate.State.UNAUTHORIZED -> {
-                appendLog("SHIZUKU: 未授权本应用——已发起授权请求，请在弹窗点允许后重连")
+                appendLog(
+                    "SHIZUKU: Это приложение не авторизовано — был инициирован запрос на авторизацию, нажмите " +
+                        "«Разрешить» во всплывающем окне, а затем снова подключитесь.",
+                )
                 ShizukuGate
                     .requestPermission()
             }
 
             ShizukuGate.State.NOT_RUNNING ->
-                appendLog("SHIZUKU: 服务未运行——打开 Shizuku App 点「启动」")
+                appendLog("SHIZUKU: Служба не запущена. Откройте приложение Shizuku и нажмите «Пуск».")
 
             ShizukuGate.State.NOT_INSTALLED ->
-                appendLog("SHIZUKU: 未安装（隐形屏模式需要）")
+                appendLog("SHIZUKU: Не установлено (требуется для режима невидимого экрана)")
         }
         CarPlayService
             .start(context)
@@ -580,8 +589,8 @@ object SessionController {
             val target = appContext?.let { TargetDevicePrefs.get(it) } ?: return@run
             val connected = BtProfiles.connectedNames(context.applicationContext, target.address)
             appendLog(
-                "BT-PROFILE: 连接前「${target.name}」的蓝牙配置文件状态=" +
-                    (connected.takeIf { it.isNotEmpty() }?.joinToString("/") ?: "未连接"),
+                "BT-ПРОФИЛЬ: состояние профиля Bluetooth «${target.name}» перед подключением =" +
+                    (connected.takeIf { it.isNotEmpty() }?.joinToString("/") ?: "Не подключено"),
             )
         }
     }
@@ -617,9 +626,13 @@ object SessionController {
         if (hadProjection) {
             // Android 14+：MediaProjection 与保活服务（mediaProjection FGS 类型）绑定，
             // 停服务会连带失效授权——下次连接需重新点「申请投屏权限」
-            appendLog("已手动断开并停止保活服务（常亮已恢复）；投屏授权已随服务停止失效，下次连接如需声音请重新申请")
+            appendLog(
+                "Служба Keep-Alive вручную отключена и остановлена (восстановлен постоянный свет); Срок действия " +
+                    "разрешения на зеркалирование экрана истек с остановкой службы. Если при следующем подключении вам " +
+                    "понадобится звук, подайте заявку еще раз.",
+            )
         } else {
-            appendLog("已手动断开并停止保活服务（常亮已恢复）")
+            appendLog("Служба проверки активности отключена и остановлена вручную (восстановлен постоянный свет)")
         }
     }
 
@@ -653,7 +666,7 @@ object SessionController {
                 if (phoneScreenOff) return@synchronized
                 // Bg 任务可能晚于会话结束才被执行：会话没了就绝不能再关屏
                 if (videoSender?.isRunning != true) {
-                    appendLog("SCREEN: 会话已结束——跳过物理息屏")
+                    appendLog("ЭКРАН: сеанс завершен – пропустить физический экран")
                     return@synchronized
                 }
                 // 手机若正在休眠：先唤醒让框架把物理屏置 ON；否则我们设 OFF 之后，框架的
@@ -663,7 +676,10 @@ object SessionController {
                         (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isInteractive
                     }.getOrDefault(true)
                 if (!interactive) {
-                    appendLog("SCREEN: 手机处于休眠——先唤醒再物理息屏（避免框架把面板重新点亮）")
+                    appendLog(
+                        "ЭКРАН: Телефон спит - сначала разбудите его, а затем физически закройте экран (чтобы " +
+                            "рамка не перезасветила панель)",
+                    )
                     Shell.exec("input keyevent KEYCODE_WAKEUP", 4_000L)
                     Thread.sleep(400)
                     // 无密码 / SmartLock 场景顺手划开锁屏；安全锁会失败，忽略即可
@@ -675,16 +691,21 @@ object SessionController {
                 if (ScreenDimmer.isAttached()) {
                     ScreenDimmer.enterDimNow()
                     phoneScreenOff = true
-                    appendLog("SCREEN: 真息屏已进入（暗幕承载触摸检测——点暗幕唤醒，无需按电源键）")
+                    appendLog(
+                        "ЭКРАН: введен настоящий экран (темный экран обеспечивает обнаружение касания — щелкните " +
+                            "темный экран, чтобы проснуться, не нужно нажимать кнопку питания)",
+                    )
                 } else {
                     // 暗幕不可用（缺悬浮窗权限）降级裸断电：无触摸唤醒手段，只能按电源键
                     val ok = CarInputClient.setPhysicalScreenPower(false)
                     phoneScreenOff = ok
                     appendLog(
                         if (ok) {
-                            "SCREEN: 物理屏已断电（暗幕不可用——无触摸唤醒手段，按电源键两次可恢复）"
+                            "ЭКРАН: физический экран выключен (темный экран недоступен — нет сенсорного метода " +
+                                "пробуждения, дважды нажмите кнопку питания для восстановления)"
                         } else {
-                            "SCREEN: 物理屏断电失败（ROM 未给 shell 权限 / 取不到 display token）"
+                            "ЭКРАН: физический экран не выключился (ПЗУ не предоставило разрешения оболочке/не удалось " +
+                                "получить токен отображения)"
                         },
                     )
                 }
@@ -719,12 +740,12 @@ object SessionController {
                 if (sleepIfCarSide) {
                     // 保持 SurfaceFlinger 的 OFF 状态，让框架正常休眠；下次唤醒时框架会把面板置 ON
                     Shell.exec("input keyevent KEYCODE_SLEEP", 4_000L)
-                    appendLog("SCREEN: 车机侧断开——已让手机休眠（面板保持黑）")
+                    appendLog("ЭКРАН: Сторона автомобиля отключена - телефон переведен в режим сна (панель остается темной)")
                 } else {
                     // 暗幕承载的断电态在这里收口：撤暗幕 + 恢复面板电（幂等）
                     ScreenDimmer.exitPanelOff()
                     val ok = CarInputClient.setPhysicalScreenPower(true)
-                    appendLog("SCREEN: 物理屏已恢复点亮 ok=$ok")
+                    appendLog("ЭКРАН: Физический экран снова стал светиться ok=$ok")
                 }
             }
         }
@@ -772,16 +793,19 @@ object SessionController {
     fun maybeStartAudioNow(context: Context) {
         val client =
             currentClient ?: run {
-                appendLog("MODE: 投屏已就绪（当前无会话——下次连接时自动启用音频）")
+                appendLog(
+                    "РЕЖИМ: зеркалирование готово (в данный момент сеанса нет — звук автоматически включается при " +
+                        "следующем подключении)",
+                )
                 return
             }
         val secret = currentSharedSecret
         if (secret == null) {
-            appendLog("MODE: 明文会话（未配对）无共享密钥——不补启音频")
+            appendLog("РЕЖИМ: сеанс открытого текста (неспаренный), общий ключ отсутствует, звук не включается повторно.")
             return
         }
         if (audioSender?.isRunning == true) return
-        appendLog("MODE: 会话进行中，动态补启音频通道…")
+        appendLog("РЕЖИМ: сеанс продолжается, и аудиоканал включен динамически...")
         startAudioChannel(context, client, secret, currentAudioHost)
     }
 
@@ -799,20 +823,23 @@ object SessionController {
         if (videoSender?.isRunning == true) {
             lastWifiPsk = wifi.passphrase
             lastCarWifiSsid = wifi.ssid
-            appendLog("0x5703 冗余凭据（会话推流中）——保持现有 WiFi 绑定与 ctrl 广播不变")
+            appendLog(
+                "0x5703 Избыточные учетные данные (потоковая передача сеанса) — оставьте существующие привязки " +
+                    "Wi-Fi и трансляцию ctrl без изменений.",
+            )
             return
         }
         ssidSink?.invoke(wifi.ssid)
         lastWifiPsk = wifi.passphrase
         lastCarWifiSsid = wifi.ssid
-        phaseHint = "拿到车机热点凭据，绑定 WiFi…"
-        appendLog(">>> 拿到车机热点凭据（0x5703）——立即绑定 WiFi + 广播 _carplay-ctrl")
+        phaseHint = "Получите учетные данные автомобильной точки доступа и привяжите Wi-Fi..."
+        appendLog(">>> Получите учетные данные автомобильной точки доступа (0x5703) — немедленно привяжите WiFi + трансляцию _carplay-ctrl")
         // ctrl 广播已在 startConnection 时发布（catplay：连接前保持发布能力在线）。
         // 这里登记 SSID 并让注册对齐一次（手机若已手动连在车机热点上、Shizuku 不可用
         // 时这是唯一一次重注册机会）；加入热点后 bindCarWifiAndRegister 还会 force
         // 重注册，把组播落到车机所在网络（真车实测必需）。
         ctrlAdvertiser?.ensureForNetwork(wifi.ssid)
-        appendLog("CTRL: 广播已在启动连接时发布，此处对齐到热点 ${wifi.ssid}")
+        appendLog("CTRL: трансляция была опубликована при инициировании соединения, здесь она привязана к точке доступа ${wifi.ssid}.")
         // 绑定与切换统一走自动加入流程：bindCurrentWifi 是「任意 WiFi 即成功」的盲绑，
         // 手机连着公司 WiFi 时会误判已在车机热点（ctrl 广播落在错误网络 → 双方互等死锁），
         // 必须先核对真实 SSID 再决定绑定或切换
@@ -842,10 +869,10 @@ object SessionController {
                 // 热点已连上、只是 Network 通道没绑成：绝不能退回 specifier——那会重新
                 // 关联热点并弹系统确认框（用户看到「连上了又弹窗」）。直接中止并提示重连。
                 if (shellWifiStatus().second == wifi.ssid) {
-                    phaseHint = "已连上车机热点但未能绑定网络——请重新连接"
+                    phaseHint = "Подключено к автомобильной точке доступа, но не удалось привязаться к сети. Повторите подключение."
                     appendLog(
-                        "WIFI: 已连在 \"${wifi.ssid}\" 但 requestNetwork 未回调——本轮中止" +
-                            "（不退回会弹窗的 specifier 路径）",
+                        "WIFI: подключен к \"${wifi.ssid}\", но requestNetwork не перезвонил - этот раунд прерван" +
+                            "(Не возвращайте появившийся путь спецификатора)",
                     )
                     return@run
                 }
@@ -857,7 +884,10 @@ object SessionController {
                 is WifiCarPlayConnector.JoinResult.Joined -> Unit
 
                 WifiCarPlayConnector.JoinResult.Unsupported -> {
-                    appendLog("WIFI: 热点安全类型 ${wifi.securityType} 无法用应用专属网络表达——退回系统级加入")
+                    appendLog(
+                        "WIFI: тип безопасности точки доступа ${wifi.securityType} не может быть выражен с " +
+                            "использованием сети для конкретного приложения — вернитесь к присоединению на уровне системы.",
+                    )
                     legacyJoinCarWifi(wifi, shellReady)
                 }
 
@@ -913,19 +943,22 @@ object SessionController {
         if (connectCancelled) return WifiCarPlayConnector.JoinResult.Unavailable
         val existing = connector.currentNetwork
         if (boundCarSsid == wifi.ssid && existing != null) {
-            appendLog("WIFI: 车机热点已就绪且网络通道已绑定——跳过重复加入")
+            appendLog("WIFI: точка доступа в автомобиле готова, сетевой канал привязан – пропустите повторное подключение.")
             return WifiCarPlayConnector.JoinResult.Joined(existing)
         }
         if (!ensureWifiEnabledSilently()) return WifiCarPlayConnector.JoinResult.Unavailable
         if (connectCancelled) return WifiCarPlayConnector.JoinResult.Unavailable
         val current = shellWifiStatus().second
         if (current == wifi.ssid) {
-            appendLog("WIFI: 手机已连在车机热点 \"${wifi.ssid}\"——直接建立网络通道并绑定")
-        } else {
-            phaseHint = "正在静默连接车机热点 ${wifi.ssid}…"
             appendLog(
-                ">>> 静默加入车机热点 \"${wifi.ssid}\"（cmd wifi connect-network，0 弹窗；" +
-                    "当前 ${current ?: "未连接"}）",
+                "WIFI: мобильный телефон подключен к автомобильной точке доступа \"${wifi.ssid}\" — напрямую " +
+                    "установите сетевой канал и привяжите его.",
+            )
+        } else {
+            phaseHint = "Тихое подключение к автомобильной точке доступа ${wifi.ssid}…"
+            appendLog(
+                ">>> Тихо подключитесь к автомобильной точке доступа \"${wifi.ssid}\" (cmd wifi Connect-Network, 0 всплывающее окно;" +
+                    "текущий ${current ?: "не подключено"}）",
             )
             // 命令把连接投给 WifiService 就返回，exit=0 不代表已连上 —— 必须轮询 SSID
             val result =
@@ -935,7 +968,7 @@ object SessionController {
                 )
             if (!result.ok) {
                 appendLog(
-                    "WIFI: connect-network 失败（exit=${result.exitCode} " +
+                    "WIFI: не удалось подключиться к сети (exit=${result.exitCode}" +
                         "${result.output.take(80)}）",
                 )
                 return WifiCarPlayConnector.JoinResult.Unavailable
@@ -957,10 +990,10 @@ object SessionController {
     /** WLAN 关着时经 Shizuku 直接打开（`cmd wifi set-wifi-enabled`），返回是否已开启。 */
     private fun ensureWifiEnabledSilently(): Boolean {
         if (!shellWifiDisabled()) return true
-        appendLog("WIFI: WLAN 未开启——经 Shizuku 打开（cmd wifi set-wifi-enabled enabled，免手动）")
+        appendLog("WIFI: WLAN не включен - включите его через Shizuku (cmd wifi set-wifi-enabled включен, ручная работа не требуется)")
         val result = Shell.exec("cmd wifi set-wifi-enabled enabled", 8_000L)
         if (!result.ok) {
-            appendLog("WIFI: 打开 WLAN 失败（exit=${result.exitCode} ${result.output.take(60)}）")
+            appendLog("WIFI: не удалось открыть WLAN (exit=${result.exitCode} ${result.output.take(60)})")
             return false
         }
         val deadline = android.os.SystemClock.uptimeMillis() + WIFI_ENABLE_WAIT_MS
@@ -969,7 +1002,7 @@ object SessionController {
             Thread.sleep(500)
         }
         if (shellWifiDisabled()) {
-            appendLog("WIFI: 等待 WLAN 开启超时（${WIFI_ENABLE_WAIT_MS / 1000}s）")
+            appendLog("WIFI: тайм-аут ожидания включения WLAN (${WIFI_ENABLE_WAIT_MS / 1000} с)")
             return false
         }
         return true
@@ -987,18 +1020,18 @@ object SessionController {
             if (connectCancelled) return false
             current = shellWifiStatus().second
             if (current == ssid) {
-                appendLog("WIFI: 已切到车机热点 \"$ssid\"")
+                appendLog("WIFI: переключен на точку доступа автомобиля \"$ssid\"")
                 return true
             }
             val now = android.os.SystemClock.uptimeMillis()
             if (now - lastLogAt >= 3_000L) {
                 lastLogAt = now
-                phaseHint = "正在切换到车机热点 $ssid…"
-                appendLog("WIFI: 等待切换到 \"$ssid\"（当前 ${current ?: "未连接"}）…")
+                phaseHint = "Переключение на автомобильную точку доступа $ssid…"
+                appendLog("WIFI: Ожидание переключения на \"$ssid\" (текущий ${current ?: "не подключено"}）…")
             }
             Thread.sleep(500)
         }
-        appendLog("WIFI: 等待切换到 \"$ssid\" 超时（当前 ${current ?: "未连接"}）")
+        appendLog("WIFI: тайм-аут ожидания переключения на \"$ssid\" (текущий ${current ?: "не подключено"}）")
         return false
     }
 
@@ -1012,15 +1045,16 @@ object SessionController {
      */
     private fun joinCarWifiSpecifier(wifi: Iap2SenderSession.WifiConfiguration): WifiCarPlayConnector.JoinResult {
         val connector = wifiConnector ?: return WifiCarPlayConnector.JoinResult.Unavailable
-        phaseHint = "正在加入车机热点 ${wifi.ssid}…（不影响移动数据）"
+        phaseHint = "Подключение к автомобильной точке доступа ${wifi.ssid}… (не влияет на передачу мобильных данных)"
         appendLog(
-            ">>> 以应用专属网络加入 \"${wifi.ssid}\"（不保存为系统 WiFi，其它应用继续走 4G/5G）",
+            ">>> Подключитесь к \"${wifi.ssid}\" к сети конкретного приложения (не сохраняется как системный Wi-Fi, " +
+                "другие приложения продолжают использовать 4G/5G)",
         )
         val result =
             synchronized(wifiBindLock) {
                 val existing = connector.currentNetwork
                 if (boundCarSsid == wifi.ssid && existing != null) {
-                    appendLog("WIFI: 应用专属网络已在位——跳过重复加入")
+                    appendLog("WIFI: Сеть для конкретного приложения уже создана. Пропустите повторное подключение.")
                     WifiCarPlayConnector.JoinResult.Joined(existing)
                 } else {
                     connector.joinCarPlayNetwork(
@@ -1036,27 +1070,33 @@ object SessionController {
             }
         if (result is WifiCarPlayConnector.JoinResult.Joined) {
             boundCarSsid = wifi.ssid
-            phaseHint = "已加入车机热点"
+            phaseHint = "Уже присоединился к автомобильной точке доступа"
             // 关键时机：bindProcessToNetwork 完成后再注册，车机才能看到 ctrl 广播
             ctrlAdvertiser?.ensureForNetwork(wifi.ssid, force = true, network = connector.currentNetwork)
-            appendLog(">>> WiFi 已加入车机热点（应用专属网络），ctrl 广播已重新注册，等待车机 ctrl 邀请")
+            appendLog(
+                ">>> В автомобильную точку доступа добавлен Wi-Fi (эксклюзивная сеть приложения), трансляция " +
+                    "управления перерегистрирована, ожидание приглашения управления автомобилем",
+            )
         } else if (!connectCancelled) {
-            appendLog("WIFI: 应用专属网络加入未成功（${result.javaClass.simpleName}）")
+            appendLog("WIFI: не удалось подключиться к сети приложения (${result.javaClass.simpleName}).")
             // 兜底：系统里保存过该热点时，系统可能已自动全局连上它——specifier 挂起
             // 的形态下这条近路反而最稳（2026-10-22 真机：用户选「保留系统网络」+
             // Android 16 specifier 永久 pending）。校验当前 SSID 后直接绑定现有连接。
             val currentSsid = shellWifiStatus().second
             if (currentSsid == wifi.ssid) {
-                appendLog("WIFI: 系统当前已连着 \"$currentSsid\"——直接绑定现有连接（保存网络自动连上的近路）")
+                appendLog(
+                    "WIFI: Система в настоящее время подключена к \"$currentSsid\" — напрямую привяжите " +
+                        "существующее соединение (сохраните ярлык, к которому автоматически подключается сеть)",
+                )
                 // bindCurrentWifi 异步回调：短等绑定完成（回调很快，系统已在网）
                 if (bindExistingCarWifi(connector, wifi.ssid) != null) {
                     boundCarSsid = wifi.ssid
-                    phaseHint = "已加入车机热点"
+                    phaseHint = "Уже присоединился к автомобильной точке доступа"
                     ctrlAdvertiser?.ensureForNetwork(wifi.ssid, force = true, network = connector.currentNetwork)
-                    appendLog(">>> WiFi 已绑定现有 \"$currentSsid\" 连接，ctrl 广播已重新注册")
+                    appendLog(">>> WiFi привязан к существующему соединению \"$currentSsid\", трансляция ctrl перерегистрирована")
                     return WifiCarPlayConnector.JoinResult.Joined(connector.currentNetwork!!)
                 }
-                appendLog("WIFI: 绑定现有连接未成功——按失败处理")
+                appendLog("WIFI: не удалось установить существующее соединение — рассматривается как сбой")
             }
         }
         return result
@@ -1085,7 +1125,7 @@ object SessionController {
         val connector = wifiConnector ?: return null
         val current = shellWifiStatus().second
         if (current != wifi.ssid) return null
-        appendLog("WIFI: 系统已连着 \"$current\"——直接绑定（快速兜底）")
+        appendLog("WIFI: Система подключена к \"$current\" – прямая привязка (быстро подтвердите)")
         val network = bindExistingCarWifi(connector, wifi.ssid)
         if (network != null) boundCarSsid = wifi.ssid
         return network
@@ -1111,22 +1151,28 @@ object SessionController {
         if (!shellWifiReady()) return null
         val connector = wifiConnector ?: return null
         appendLog(
-            "WIFI: specifier 两窗均无回调——深度兜底 connect-network 直连 \"${wifi.ssid}\"" +
-                "（本轮窗口大概率已过，为下一轮占位）",
+            "WIFI: у спецификатора нет обратного вызова в обоих окнах - прямое подключение к прямой сети \"${wifi.ssid}\"" +
+                "(Окно для этого раунда, скорее всего, прошло и займет место для следующего раунда)",
         )
         val preExisting = savedNetworkIds(wifi.ssid).isNotEmpty()
         val security =
             if (wifi.passphrase.isEmpty()) "open" else "wpa2 ${shellQuote(wifi.passphrase)}"
         val r = Shell.exec("cmd wifi connect-network ${shellQuote(wifi.ssid)} $security", 10_000L)
         if (!r.ok) {
-            appendLog("WIFI: connect-network 失败（${r.output.take(80)}）")
+            appendLog("WIFI: ошибка подключения к сети (${r.output.take(80)})")
             return null
         }
         if (preExisting) {
-            appendLog("WIFI: \"${wifi.ssid}\" 此前已保存在系统（用户选过保留）——不作会话末清除")
+            appendLog(
+                "WIFI: \"${wifi.ssid}\" уже был сохранен в системе ранее (пользователь решил сохранить его) — он " +
+                    "не будет удален в конце сеанса.",
+            )
         } else {
             shellFallbackCleanupSsid = wifi.ssid
-            appendLog("WIFI: connect-network 已执行（新存系统网络，已登记会话末自动清除）")
+            appendLog(
+                "WIFI: подключение к сети выполнено (вновь сохраненная системная сеть, зарегистрированный сеанс " +
+                    "будет автоматически очищен в конце)",
+            )
         }
         // 轮询切网完成（断旧网/关联/DHCP，实测 2-10s）
         repeat(30) {
@@ -1136,12 +1182,15 @@ object SessionController {
                 val network = bindExistingCarWifi(connector, wifi.ssid)
                 if (network != null) {
                     boundCarSsid = wifi.ssid
-                    appendLog("WIFI: connect-network 已连上 \"${wifi.ssid}\"")
+                    appendLog("WIFI: Connect-Network Подключено \"${wifi.ssid}\"")
                 }
                 return network
             }
         }
-        appendLog("WIFI: connect-network 后 9s 未切到车机热点——按失败返回（系统网络已登记，会话末清除）")
+        appendLog(
+            "WIFI: 9 с после подключения к сети, точка доступа автомобиля не переключается - невозможность нажатия " +
+                "кнопки возврата (системная сеть зарегистрирована и сеанс очищается в конце)",
+        )
         return null
     }
 
@@ -1172,8 +1221,8 @@ object SessionController {
         Bg.run("wifi-fallback-cleanup") {
             val r = Shell.exec("cmd wifi forget-network ${shellQuote(ssid)}", 5_000L)
             appendLog(
-                "WIFI: 会话末清除 shell 兜底保存的 \"$ssid\" ok=" + r.ok +
-                    (if (!r.ok) "（请到 系统设置>WLAN 手动删除）" else ""),
+                "WIFI: очистите \"$ssid\", сохраненный в оболочке, в конце сеанса ok=" + r.ok +
+                    (if (!r.ok) "(Чтобы удалить вручную, перейдите в «Настройки системы» > «WLAN»)." else ""),
             )
         }
     }
@@ -1198,20 +1247,20 @@ object SessionController {
         val ids = savedNetworkIds(ssid)
         if (ids.isEmpty()) return
         appendLog(
-            "WIFI: 系统里已保存热点 \"$ssid\"（netId=${ids.joinToString(",")}）" +
-                "——询问用户是否清除（保留也能正常连接）",
+            "WIFI: Точка доступа \"$ssid\" сохранена в системе (netId=${ids.joinToString(",")}）" +
+                "—— Спросите пользователя, следует ли очистить (сохранение также может нормально подключаться)",
         )
         val forget =
             askWifiJoinChoice(
                 DialogSpec(
-                    title = "已保存该车机热点",
+                    title = "Точка доступа автомобиля сохранена.",
                     message =
-                        "系统里保存过 \"$ssid\"。保留会让手机在进入范围时自动连接它，" +
-                            "若该热点没有互联网，可能导致手机无法使用移动数据。\n\n" +
-                            "「清除」只是不再自动连接，不影响本次使用；" +
-                            "如果车机热点本身提供网络，选「保留」。",
-                    positive = "清除保存",
-                    negative = "保留",
+                        "Сеть \"$ssid\" сохранена: телефон будет подключаться к ней автоматически. " +
+                            "Без интернета это может повлиять на мобильные данные.\n\n" +
+                            "«Удалить» отключает только автоподключение, не текущий сеанс. " +
+                            "Если сеть нужна для интернета, выберите «Сохранить».",
+                    positive = "Удалить сеть",
+                    negative = "Сохранить",
                 ),
             )
         if (connectCancelled) return
@@ -1220,15 +1269,24 @@ object SessionController {
                 ids.forEach { id ->
                     val result = Shell.exec("cmd wifi forget-network $id", 5_000L)
                     appendLog(
-                        "WIFI: 已按用户选择清除系统级保存的热点 \"$ssid\"（netId=$id ok=${result.ok}）",
+                        "WIFI: сохраненные на системном уровне точки доступа \"$ssid\" были удалены в соответствии с " +
+                            "выбором пользователя (netId=$id ok=${result.ok})",
                     )
                 }
             }
 
-            false -> appendLog("WIFI: 用户选择保留系统保存的 \"$ssid\"——继续以应用专属网络连接")
+            false ->
+                appendLog(
+                    "WIFI: пользователь решает сохранить \"$ssid\", сохраненный системой, — продолжить " +
+                        "подключение к сети конкретного приложения.",
+                )
 
             // 无人应答（UI 不在前台）：按「保留」处理，绝不在用户未确认时删网络
-            null -> appendLog("WIFI: 无人应答是否清除保存的网络——按保留处理（不改用户配置）")
+            null ->
+                appendLog(
+                    "WIFI: Никто не отвечает, нужно ли очищать сохраненную сеть - обрабатывать как сохраненную " +
+                        "(конфигурация пользователя не изменится)",
+                )
         }
     }
 
@@ -1236,7 +1294,7 @@ object SessionController {
     private fun savedNetworkIds(ssid: String): List<Int> {
         val listing = Shell.exec("cmd wifi list-networks", 5_000L)
         if (!listing.ok) {
-            appendLog("WIFI: 无法读取系统已保存网络（exit=${listing.exitCode}）——跳过检查")
+            appendLog("WIFI: невозможно прочитать сохраненную в системе сеть (exit=${listing.exitCode}) — пропустить проверку.")
             return emptyList()
         }
         return WifiSavedNetworks.idsOf(listing.output, ssid)
@@ -1247,47 +1305,52 @@ object SessionController {
         val open =
             askWifiJoinChoice(
                 DialogSpec(
-                    title = "WiFi 未开启",
-                    message = "连接车机热点需要打开手机 WLAN。是否打开 WLAN 设置？",
-                    positive = "打开 WLAN 设置",
-                    negative = "取消",
+                    title = "Wi-Fi не включен",
+                    message =
+                        "Чтобы подключиться к автомобильной точке доступа, необходимо включить WLAN на мобильном " +
+                            "телефоне. Открыть настройки Wi-Fi?",
+                    positive = "Открыть настройки Wi-Fi",
+                    negative = "Отмена",
                 ),
             )
         if (connectCancelled) return false
         when (open) {
             true -> {
                 openWlanSettings()
-                uiHintSink?.invoke("请在 WLAN 设置中打开 WiFi 开关")
+                uiHintSink?.invoke("Пожалуйста, включите переключатель Wi-Fi в настройках WLAN.")
             }
 
             false -> {
-                phaseHint = "已取消——连接车机热点需要开启 WLAN"
-                appendLog("WIFI: 用户取消——自动加入中止（WiFi 未开启）")
+                phaseHint = "Отменено: для подключения к автомобильной точке доступа необходимо включить WLAN."
+                appendLog("WIFI: отмена пользователя – автоматическое присоединение прервано (Wi-Fi не включен)")
                 return false
             }
 
             null -> {
-                phaseHint = "WiFi 未开启——连接车机热点需要开启 WLAN"
-                appendLog("WIFI: 弹窗无人应答——自动加入中止（WiFi 未开启）")
+                phaseHint = "Wi-Fi не включен — для подключения к автомобильной точке доступа необходимо включить WLAN."
+                appendLog("WIFI: Никто не отвечает на всплывающее окно – автоматическое подключение прервано (Wi-Fi не включен)")
                 return false
             }
         }
         var waited = 0
         while (shellWifiDisabled() && waited < WLAN_WAIT_TIMEOUT_MS && !connectCancelled) {
             if (waited == 0) {
-                phaseHint = "等待打开 WLAN（最长 120 秒，取消连接可中止）"
-                appendLog("WIFI: 等待用户打开 WLAN（最长 120 秒，取消连接可中止）")
+                phaseHint = "Подождите, пока включится Wi-Fi (до 120 секунд, прерывается при отмене соединения)"
+                appendLog("WIFI: Подождите, пока пользователь включит Wi-Fi (до 120 секунд, прекращается при отмене соединения)")
             }
             Thread.sleep(2_000)
             waited += 2_000
         }
         if (connectCancelled) {
-            phaseHint = "已取消连接"
+            phaseHint = "Соединение отменено"
             return false
         }
         if (shellWifiDisabled()) {
-            phaseHint = "WiFi 未开启——无法连接车机热点"
-            appendLog("WIFI: 等待超时 WiFi 仍未开启——自动加入中止，请打开 WLAN 后重新连接")
+            phaseHint = "Wi-Fi не включен — невозможно подключиться к точке доступа в автомобиле."
+            appendLog(
+                "WIFI: время ожидания истекло, Wi-Fi все еще не включен – автоматическое подключение прервано, " +
+                    "включите WLAN и подключитесь повторно.",
+            )
             return false
         }
         return true
@@ -1302,13 +1365,15 @@ object SessionController {
         val choice =
             askWifiJoinChoice(
                 DialogSpec(
-                    title = "未能加入车机热点",
+                    title = "Не удалось подключиться к автомобильной точке доступа.",
                     message =
-                        "自动加入 \"${wifi.ssid}\" 没有成功（热点可能不在范围内，或系统拒绝了连接）。\n\n" +
-                            "「重试」会再自动加入一次（先走免弹窗的静默路径，仍不行才会弹系统确认框）；" +
-                            "也可以到 WLAN 设置手动连接（密码已复制到剪贴板）。",
-                    positive = "重试",
-                    negative = "打开 WLAN 设置",
+                        "Автоподключение \"${wifi.ssid}\" не удалось (возможно, точка доступа находится вне зоны " +
+                            "действия или система отказала в соединении). \n\n" +
+                            "«Повторить» автоматически добавит его снова (сначала используйте тихий путь, чтобы избежать " +
+                            "всплывающих окон, а если это все равно не сработает, появится окно подтверждения системы);" +
+                            "Вы также можете перейти к настройкам WLAN для подключения вручную (пароль скопируется в буфер обмена).",
+                    positive = "Попробуйте еще раз",
+                    negative = "Открыть настройки Wi-Fi",
                 ),
             )
         if (connectCancelled) return
@@ -1318,8 +1383,12 @@ object SessionController {
                     is WifiCarPlayConnector.JoinResult.Joined -> Unit
                     WifiCarPlayConnector.JoinResult.Unsupported -> legacyJoinCarWifi(wifi, shellReady)
                     WifiCarPlayConnector.JoinResult.Unavailable -> {
-                        phaseHint = "未能加入车机热点——请到 WLAN 设置手动连接"
-                        appendLog("WIFI: 重试仍未加入 \"${wifi.ssid}\"——请到系统 WLAN 手动连接")
+                        phaseHint = "Не удалось подключиться к автомобильной точке доступа. Чтобы подключиться вручную, " +
+                            "перейдите в настройки WLAN."
+                        appendLog(
+                            "WIFI: \"${wifi.ssid}\" не был добавлен после повторной попытки — перейдите в систему " +
+                                "WLAN для подключения вручную.",
+                        )
                     }
                 }
             }
@@ -1327,8 +1396,8 @@ object SessionController {
             false -> manualJoinCarWifi(wifi)
 
             null -> {
-                phaseHint = "未能加入车机热点——请重新连接"
-                appendLog("WIFI: 弹窗无人应答——自动加入中止")
+                phaseHint = "Не удалось подключиться к автомобильной точке доступа. Подключитесь повторно."
+                appendLog("WIFI: Никто не отвечает на всплывающее окно – автоматическое подключение прервано")
             }
         }
     }
@@ -1337,10 +1406,11 @@ object SessionController {
     private fun manualJoinCarWifi(wifi: Iap2SenderSession.WifiConfiguration) {
         copyHotspotPsk(wifi.passphrase)
         openWlanSettings()
-        phaseHint = "请在 WLAN 设置中连接 ${wifi.ssid}…"
+        phaseHint = "Пожалуйста, подключите ${wifi.ssid}… в настройках WLAN."
         appendLog(
-            "WIFI: 用户选择手动连接——等待 WLAN 连上 \"${wifi.ssid}\"（最长 120 秒）；" +
-                "注意：手动连接会把该热点保存为系统网络，若它没有互联网可能影响移动数据",
+            "WIFI: Пользователь выбирает подключение вручную — подождите, пока WLAN подключится \"${wifi.ssid}\" (до 120 секунд);" +
+                "Примечание. При подключении вручную точка доступа будет сохранена как системная сеть, что может " +
+                "повлиять на передачу мобильных данных, если у нее нет доступа к Интернету.",
         )
         val manualDeadline = android.os.SystemClock.uptimeMillis() + WLAN_WAIT_TIMEOUT_MS
         while (android.os.SystemClock.uptimeMillis() < manualDeadline) {
@@ -1351,8 +1421,8 @@ object SessionController {
                 return
             }
         }
-        phaseHint = "尚未连接 ${wifi.ssid}——自动加入已中止"
-        appendLog("WIFI: 手动连接等待超时——自动加入中止")
+        phaseHint = "Еще не подключен ${wifi.ssid} – автоматическое подключение прервано"
+        appendLog("WIFI: тайм-аут ожидания соединения вручную – автоматическое подключение прервано")
     }
 
     /**
@@ -1365,16 +1435,18 @@ object SessionController {
         shellReady: Boolean,
     ) {
         if (!shellReady) {
-            phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${wifi.ssid}"
+            phaseHint = "Телефон не подключен к автомобильной точке доступа. Чтобы подключиться к ${wifi.ssid}, перейдите в настройки WLAN."
             appendLog(
-                ">>> 手机不在车机热点 \"${wifi.ssid}\" 且 Shizuku 未就绪（无法自动加入）——" +
-                    "请到 系统设置>WLAN 手动加入（密码可点「去连接」复制）",
+                ">>> Мобильный телефон не находится в автомобильной точке доступа \"${wifi.ssid}\", а Шизуку не готов " +
+                    "(не может подключиться автоматически) ——" +
+                    "Пожалуйста, перейдите в «Системные настройки»> «WLAN», чтобы подключиться вручную (пароль можно " +
+                    "скопировать, нажав «Подключиться»).",
             )
             return
         }
         val current = shellWifiStatus().second
         if (current == wifi.ssid) {
-            appendLog("WIFI: 手机已在车机热点 \"$current\"——直接绑定")
+            appendLog("WIFI: мобильный телефон уже находится в точке доступа в автомобиле \"$current\" — прямая связь")
             bindCarWifiAndRegister(wifi.ssid)
             return
         }
@@ -1382,12 +1454,14 @@ object SessionController {
         val choice =
             askWifiJoinChoice(
                 DialogSpec(
-                    title = "连接车机热点",
+                    title = "Подключить автомобильную точку доступа",
                     message =
-                        "将自动加入 \"${wifi.ssid}\" 热点。该热点无互联网，系统可能自动切回原 WiFi。" +
-                            "\n\n出现断连时，请到 WLAN 设置中主动连接 \"${wifi.ssid}\"（手动连接不会被切回）。",
-                    positive = "继续自动加入",
-                    negative = "打开 WLAN 设置",
+                        "Автоматически подключится к точке доступа \"${wifi.ssid}\". Эта точка доступа не имеет доступа " +
+                            "в Интернет, и система может автоматически переключиться обратно на исходный Wi-Fi." +
+                            "\n\nПри возникновении отключения перейдите в настройки WLAN, чтобы активно подключиться к " +
+                            "\"${wifi.ssid}\" (подключение вручную не будет переключено обратно).",
+                    positive = "Продолжать присоединяться автоматически",
+                    negative = "Открыть настройки Wi-Fi",
                 ),
             )
         if (connectCancelled) return
@@ -1396,14 +1470,14 @@ object SessionController {
             return
         }
         if (choice == null) {
-            phaseHint = "未能加入车机热点——请重新连接"
-            appendLog("WIFI: 弹窗无人应答——自动加入中止")
+            phaseHint = "Не удалось подключиться к автомобильной точке доступа. Подключитесь повторно."
+            appendLog("WIFI: Никто не отвечает на всплывающее окно – автоматическое подключение прервано")
             return
         }
-        phaseHint = "正在自动加入车机热点 ${wifi.ssid}…"
+        phaseHint = "Автоматическое подключение к автомобильной точке доступа ${wifi.ssid}…"
         appendLog(
-            ">>> 手机当前 WiFi: ${current ?: "未连接"}（非车机热点）——" +
-                "经 Shizuku 自动切换到 \"${wifi.ssid}\"",
+            ">>> Текущий Wi-Fi: ${current ?: "не подключено"} (не автомобиль) — " +
+                "переключение на \"${wifi.ssid}\" через Shizuku",
         )
         if (connectCancelled) return
         val result =
@@ -1412,19 +1486,22 @@ object SessionController {
                 10_000L,
             )
         if (!result.ok) {
-            phaseHint = "自动加入热点失败——请到 WLAN 设置加入 ${wifi.ssid}"
+            phaseHint = "Не удалось автоматически подключиться к точке доступа. Чтобы подключиться к ${wifi.ssid}, " +
+                "перейдите в настройки WLAN."
             appendLog(
-                "WIFI: connect-network 失败（${result.output.take(80).ifEmpty { "exit=${result.exitCode}" }}）" +
-                    "——请到 系统设置>WLAN 手动加入（密码可点「去连接」复制）",
+                "WIFI: ошибка подключения к сети (${result.output.take(80).ifEmpty { "exit=${result.exitCode}" }}）" +
+                    "—— Пожалуйста, перейдите в «Настройки системы»> «WLAN», чтобы подключиться вручную (пароль можно " +
+                    "скопировать, нажав «Подключиться»)",
             )
             return
         }
-        phaseHint = "正在加入车机热点 ${wifi.ssid}…若被切回原 WiFi，请在 WLAN 中手动连接"
-        appendLog("WIFI: connect-network 已发起（自动保存网络，等待切换…）")
+        phaseHint = "Подключение к автомобильной точке доступа ${wifi.ssid}... Если она снова переключена на исходный " +
+            "Wi-Fi, подключитесь к WLAN вручную."
+        appendLog("WIFI: подключение к сети инициировано (автоматическое сохранение сети, ожидание переключения...)")
         // 系统切换是异步的（断开当前网/扫描/关联/DHCP，2-10 秒）：轮询 SSID 确认。
         repeat(20) {
             if (connectCancelled) {
-                appendLog("WIFI: 自动加入已取消（用户断开）")
+                appendLog("WIFI: автоматическое подключение отменено (пользователь отключен)")
                 return
             }
             val ssid = shellWifiStatus().second
@@ -1434,17 +1511,21 @@ object SessionController {
                 return
             }
             if (ssid == wifi.ssid) {
-                appendLog("WIFI: 已切到车机热点 ${wifi.ssid}")
+                appendLog("WIFI: переключено на точку доступа в автомобиле ${wifi.ssid}")
                 bindCarWifiAndRegister(wifi.ssid)
                 return
             }
             Thread.sleep(800)
         }
-        phaseHint = "未能在热点驻留——请到 WLAN 设置手动连接 ${wifi.ssid}"
-        uiHintSink?.invoke("未能在热点驻留——请到 WLAN 设置中主动连接 ${wifi.ssid}")
+        phaseHint = "Не удалось припарковаться в точке доступа. Чтобы подключиться вручную, перейдите в настройки WLAN ${wifi.ssid}"
+        uiHintSink?.invoke(
+            "Не удалось припарковаться в точке доступа. Чтобы активировать подключение ${wifi.ssid}, " +
+                "перейдите в настройки WLAN.",
+        )
         appendLog(
-            ">>> WiFi 自动加入超时（可能被系统切回原 WiFi）——" +
-                "请到 系统设置>WLAN 手动连接 \"${wifi.ssid}\"（手动连接不会被自动切回）",
+            ">>> Тайм-аут автоматического подключения к Wi-Fi (может быть переключен системой обратно на исходный Wi-Fi) ——" +
+                "Перейдите в «Системные настройки» > «Ручное подключение WLAN \"${wifi.ssid}\"» (ручное подключение не " +
+                "будет автоматически переключено обратно).",
         )
     }
 
@@ -1486,15 +1567,18 @@ object SessionController {
             }
         }
         if (bound && !connectCancelled) {
-            phaseHint = "已加入车机热点"
+            phaseHint = "Уже присоединился к автомобильной точке доступа"
             // 关键时机：bindProcessToNetwork 完成后再注册，车机才能看到 ctrl 广播
             ctrlAdvertiser?.ensureForNetwork(ssid, force = true, network = wifiConnector?.currentNetwork)
-            appendLog(">>> WiFi 已绑定车机热点，ctrl 广播已重新注册，等待车机 ctrl 邀请（随后才回 0x4301）")
-        } else if (!connectCancelled) {
-            phaseHint = "未能绑定车机热点 $ssid 的网络通道"
             appendLog(
-                ">>> 等待 ${WIFI_BIND_WAIT_S}s 仍未拿到 \"$ssid\" 的 WiFi 网络句柄——" +
-                    "请确认 WLAN 已连上该热点后重新连接",
+                ">>> Wi-Fi привязан к точке доступа автомобиля, трансляция управления перерегистрирована, ожидание " +
+                    "приглашения управления автомобилем (0x4301 будет возвращено позже)",
+            )
+        } else if (!connectCancelled) {
+            phaseHint = "Не удалось привязать сетевой канал автомобильной точки доступа $ssid."
+            appendLog(
+                ">>> Ожидание ${WIFI_BIND_WAIT_S} с, но все еще не получен дескриптор сети Wi-Fi \"$ssid\"——" +
+                    "Пожалуйста, подтвердите, что WLAN подключен к точке доступа, а затем повторно подключитесь.",
             )
         }
         return bound
@@ -1548,7 +1632,7 @@ object SessionController {
                     cm.setPrimaryClip(
                         android.content.ClipData.newPlainText("carplay-wifi", passphrase),
                     )
-                    uiHintSink?.invoke("热点密码已复制（${passphrase.length} 位）——粘贴到密码框即可")
+                    uiHintSink?.invoke("Пароль точки доступа скопирован (биты ${passphrase.length}) — просто вставьте его в поле пароля.")
                 }
             }
         }
@@ -1603,14 +1687,15 @@ object SessionController {
             val invites = advertiser?.inviteCount ?: 0
             if (invites > 0) {
                 appendLog(
-                    "CTRL: ✓ 收到车机邀请（${android.os.SystemClock.uptimeMillis() - startedAt}ms，第 $invites 次）" +
-                        "——立即连接 AirPlay",
+                    "CTRL: ✓ Получено приглашение на транспортное средство " +
+                        "(${android.os.SystemClock.uptimeMillis() - startedAt}ms, время $invites)" +
+                        "—— Подключите AirPlay сейчас",
                 )
                 return true
             }
             if (endpointBrowser?.awaitEndpoint(0) != null) {
                 appendLog(
-                    "CTRL: 已发现 _airplay._tcp（未收到邀请，旧机型行为）——直接连接 AirPlay",
+                    "CTRL: найден _airplay._tcp (приглашение не получено, поведение старой модели) — подключайтесь напрямую к AirPlay",
                 )
                 return true
             }
@@ -1619,11 +1704,14 @@ object SessionController {
             // force_announce。这里在等待中途补发一次，覆盖「绑网瞬间公告丢失」的情况。
             if (!reannounced && now - startedAt >= 2_000) {
                 reannounced = true
-                appendLog("CTRL: 2s 未收到邀请——强制重新公告一次（catplay 同款 force_announce）")
+                appendLog(
+                    "CTRL: приглашение не получено в течение 2 секунд — вынуждено объявить повторно (то же самое, " +
+                        "что и в кошачьей игре Force_announce)",
+                )
                 ctrlAdvertiser?.ensureForNetwork(ssid, force = true, network = wifiConnector?.currentNetwork)
             }
             if (now - lastLogAt > 1_200) {
-                appendLog("CTRL: 等待车机 ctrl 邀请…（已等 ${now - startedAt}ms）")
+                appendLog("CTRL: Ожидание приглашения управления автомобилем... (Ожидание ${now - startedAt}ms)")
                 lastLogAt = now
             }
             try {
@@ -1632,7 +1720,10 @@ object SessionController {
                 return false
             }
         }
-        appendLog("CTRL: ${timeoutMillis}ms 未收到邀请——按超时继续连接（可能车机走旧发现路径）")
+        appendLog(
+            "CTRL: ${timeoutMillis}ms Приглашение не получено — нажмите таймаут, чтобы продолжить соединение " +
+                "(автомобиль может поехать по старому маршруту обнаружения)",
+        )
         return false
     }
 
@@ -1653,24 +1744,29 @@ object SessionController {
         host: String?,
     ): Boolean {
         if (!audioEnabledForSession) {
-            appendLog("AUDIO: 本次连接未开启车机侧声音（「启动连接」弹窗选择）——仅推视频")
+            appendLog(
+                "АУДИО: Звук со стороны автомобиля не включается для этого подключения (выбор всплывающего окна " +
+                    "«Начать подключение») — только push-видео",
+            )
             return false
         }
         if (sharedSecret == null) {
             // 明文会话（et=NONE）没有共享密钥可派生 DataStream 输出密钥：
             // 推出去的 RTP 车机无法解密。宁可不推，也不要制造「有包无声」的假象。
-            appendLog("AUDIO: 明文会话（未配对）无共享密钥——跳过音频通道")
+            appendLog("АУДИО: сеанс открытого текста (неспаренный), нет общего ключа — аудиоканал пропущен")
             return false
         }
         if (host == null) {
-            appendLog("AUDIO: 无接收端可用地址，跳过音频通道")
+            appendLog("АУДИО: адрес приемника недоступен, аудиоканал пропущен.")
             return false
         }
         val projection = CarPlayService.mediaProjection
         if (projection == null) {
             appendLog(
-                "AUDIO: 缺少投屏权限（播放捕获依赖 MediaProjection）——音频通道未启动。" +
-                    "现在点「申请投屏权限」也可即时补启（无需重连）；注意「断开连接」会停服务并连带失效投屏授权",
+                "АУДИО: Отсутствие разрешения на кастинг (захват воспроизведения зависит от MediaProjection) - аудиоканал не запускается." +
+                    "Теперь нажмите «Подать заявку на разрешение на зеркалирование экрана», чтобы немедленно включить " +
+                    "его (повторное подключение не требуется); Обратите внимание, что «отключение» приведет к " +
+                    "остановке службы и аннулированию разрешения на зеркалирование экрана.",
             )
             return false
         }
@@ -1685,18 +1781,21 @@ object SessionController {
                 // 「清除记忆」。现在音频通路已换成 AAC-LC 且实测能稳定跑满 147s，
                 // 旧结论不再可信：用户既然主动选了「开启声音」，就直接清记忆重试。
                 AudioProfileMemory.clearAll(context.applicationContext)
-                appendLog("AUDIO: 本车机（$identity）有「全部档位拆链」的旧记忆，已自动清除并重试")
+                appendLog(
+                    "АУДИО: У этого автомобиля ($identity) есть старая память о «разблокировке всех передач». Он " +
+                        "был автоматически удален и повторен.",
+                )
             }
             val candidates = client.audioCandidates(preferCompat = audioPreferCompat)
             val ordered = AudioProfileMemory.order(candidates, entry)
             if (ordered.isEmpty()) {
-                appendLog("AUDIO: 没有可用音频档位（候选=${candidates.map { it.label }}）——仅推视频")
+                appendLog("АУДИО: аудиофайл недоступен (candidate=${candidates.map { it.label }}) – только отправить видео")
                 return false
             }
             appendLog(
-                "AUDIO: 音频档位候选=${ordered.map { it.label }}" +
-                    "（本车机记忆：${AudioProfileMemory.describe(entry)}；" +
-                    "封装=${tuning.detail}）",
+                "АУДИО: кандидат на аудиооборудование =${ordered.map { it.label }}" +
+                    "(Память этого автомобиля: ${AudioProfileMemory.describe(entry)};" +
+                    "пакет=${tuning.detail})",
             )
             // SETUP 失败不会扰动会话（车机只是不接这条流的请求），所以本会话内就把候选
             // 试完，不必等下一次连接。这一点对当前场景很关键：102/AAC-LC 与 100/PCM 是
@@ -1719,12 +1818,18 @@ object SessionController {
                     ordered.map { it.key }.toSet(),
                     markExhausted = false,
                 )
-                appendLog("AUDIO: 档位 ${candidate.label} 协商失败——本会话继续试下一档")
+                appendLog(
+                    "АУДИО: Не удалось выполнить согласование для механизма ${candidate.label} — в этом сеансе " +
+                        "продолжаются попытки использовать следующий механизм.",
+                )
             }
             val profile = chosen
             val audio = streamInfo
             if (profile == null || audio == null) {
-                appendLog("AUDIO: 全部候选档位协商失败（共 ${ordered.size} 档）——本次仅推视频")
+                appendLog(
+                    "АУДИО: согласование не удалось для всех файлов-кандидатов (всего файлов ${ordered.size}) – на " +
+                        "этот раз будут отправлены только видео.",
+                )
                 return false
             }
             activeAudioProfile = profile
@@ -1755,7 +1860,7 @@ object SessionController {
                 true
             }
         } catch (error: Exception) {
-            appendLog("AUDIO: 通道启动异常 - ${error.message}")
+            appendLog("АУДИО: Исключение запуска канала – ${error.message}")
             audioSender = null
             activeAudioProfile = null
             activeAudioStartedAt = 0L
@@ -1786,7 +1891,10 @@ object SessionController {
         // 从此永远没声。
         currentClient?.let { client ->
             if (client.mib3LinkArmed && !client.mib3ControlSessionDone) {
-                appendLog("AUDIO: 会话在链路协商完成前被车机拆掉（~10s 看门狗形态）——不记音频档位")
+                appendLog(
+                    "АУДИО: сессия была прервана автомобилем до завершения согласования соединения (режим " +
+                        "наблюдения ~10 с) – аудиоустройство не записывается",
+                )
                 activeAudioProfile = null
                 activeAudioStartedAt = 0L
                 return
@@ -1800,26 +1908,29 @@ object SessionController {
         val ctx = appContext?.applicationContext
         if (lived >= AUDIO_PROFILE_PROBE_MS) {
             AudioProfileMemory.recordWorking(ctx, identity, profile.key)
-            appendLog("AUDIO: 档位 ${profile.label} 存活 ${lived / 1000}s——记为本车机可用档位")
+            appendLog("АУДИО: снаряжение ${profile.label} живо ${lived / 1000} с — записано как снаряжение, доступное для этой машины")
             return
         }
         val allKeys = audioCandidateKeys(identity)
         AudioProfileMemory.recordRejected(ctx, identity, profile.key, allKeys)
         val after = AudioProfileMemory.load(ctx, identity)
         appendLog(
-            "AUDIO: ⚠ 档位 ${profile.label} 起流 ${lived / 1000}s 后整条会话被车机拆掉——" +
-                "判定为本车机不兼容档位（已记入名单）。" +
+            "АУДИО: ⚠ Gear ${profile.label} начинает течь ${lived / 1000}, а затем машина разбирает всю сессию——" +
+                "Установлено, что данное транспортное средство несовместимо с передачей (уже записанной в списке)." +
                 if (after.disabled) {
-                    "全部档位均不兼容：下次连接将自动只推视频（车机侧无声音）。"
+                    "Все шестерни несовместимы: при следующем подключении автоматически будет проталкиваться только " +
+                        "видео (со стороны автомобиля звука нет)."
                 } else {
-                    "下次点「启动连接」会自动换用下一档；也可直接选「开启声音（兼容档）」。"
+                    "В следующий раз, когда вы нажмете «Начать подключение», произойдет автоматическое переключение на " +
+                        "следующий файл; вы также можете напрямую выбрать «Включить звук (совместимый файл)»."
                 },
         )
         uiHintSink?.invoke(
             if (after.disabled) {
-                "本车机音频不兼容，下次连接将自动只推视频"
+                "Звук этой машины не совместим. При следующем подключении автоматически будет отправлено только видео."
             } else {
-                "该音频档位导致断开，已记录；重连会自动换档"
+                "Это аудиооборудование вызывает отключение и записано; повторное подключение приведет к автоматическому " +
+                    "переключению передач."
             },
         )
     }
@@ -1858,7 +1969,7 @@ object SessionController {
                 }
                 if (epoch != modesReclaimEpoch || client.cancelled || connectCancelled) return@run
                 if (!client.assertModes()) return@run
-                appendLog("AIRPLAY: modesChanged 资源重申（burst 后 +${atMs / 1000}s，AADisplay r17 时序）")
+                appendLog("AIRPLAY: обновлен ресурс modeChanged (+${atMs / 1000} с после пакета, время AADisplay r17)")
             }
         }
     }
@@ -1885,8 +1996,11 @@ object SessionController {
         val needPort = effective.airPlayPort <= 0
         if (!needHost && !needPort) return effective
 
-        phaseHint = "mDNS 解析车机地址…"
-        appendLog(">>> [$source] 0x4301 端点不完整（port=${effective.airPlayPort} ips=${effective.ipAddresses}），取 mDNS 车机 _airplay._tcp…")
+        phaseHint = "mDNS разрешает адреса автомобилей и машин…"
+        appendLog(
+            ">>> [$source] Конечная точка 0x4301 неполная (port=${effective.airPlayPort} " +
+                "ips=${effective.ipAddresses}), возьмите машину mDNS _airplay._tcp…",
+        )
         // 用常驻发现器的缓存（绑网时已开始后台发现，通常此时已命中）。
         // 此前现起一次发现并硬重试 3×6s：车机 mDNS 稳定时白等，不稳定时又拖满 18s。
         // 网段过滤（防误连同网 macOS 接收器）由 browser 的 accept 统一做。
@@ -1897,13 +2011,19 @@ object SessionController {
                 // 网关地址 + 默认端口 7000 直接连，AirPlay 端口是固定约定。
                 val gateway = wifiConnector?.gatewayAddress()
                 if (gateway != null && EndpointHosts.candidates(listOf(gateway)).isNotEmpty()) {
-                    appendLog(">>> [$source] mDNS 未发现，兜底使用网关地址 $gateway:7000（车机热点网关=车机）")
+                    appendLog(
+                        ">>> [$source] mDNS не найден, используйте адрес шлюза $gateway:7000 (шлюз точки доступа " +
+                            "автомобиля = машина автомобиля)",
+                    )
                     return effective.copy(
                         ipAddresses = listOf(gateway) + effective.ipAddresses,
                         airPlayPort = if (needPort) 7000 else effective.airPlayPort,
                     )
                 }
-                appendLog(">>> [$source] mDNS 未发现车机 AirPlay 服务（车机可能尚未启动无线会话）")
+                appendLog(
+                    ">>> [$source] mDNS не обнаружил службу AirPlay в автомобиле (возможно, в автомобиле еще не " +
+                        "запущен беспроводной сеанс)",
+                )
                 return effective
             }
         return mergeBrowserEndpoint(effective, info, source, needPort)
@@ -1927,7 +2047,7 @@ object SessionController {
             result.ipAddresses.none { EndpointHosts.stripScope(it) == EndpointHosts.stripScope(address) }
         ) {
             result = result.copy(ipAddresses = listOf(address) + result.ipAddresses)
-            appendLog(">>> [$source] mDNS 解析到车机地址 $address:${info.port}")
+            appendLog(">>> [$source] mDNS преобразуется в адрес автомобиля $address:${info.port}")
         }
         if (needPort && info.port > 0) {
             result = result.copy(airPlayPort = info.port)
@@ -1966,11 +2086,11 @@ object SessionController {
         source: String,
     ) {
         if (connectCancelled) {
-            appendLog(">>> [$source] 0x4301 晚到（已取消连接）——忽略")
+            appendLog(">>> [$source] 0x4301 Опоздал (соединение отменено) – игнорировать")
             return
         }
         if (videoSender?.isRunning == true) {
-            appendLog(">>> [$source] 0x4301 晚到（推流中）——忽略冗余端点")
+            appendLog(">>> [$source] 0x4301 Позднее (нажатие) — игнорировать избыточные конечные точки")
             return
         }
         val client = currentClient
@@ -1979,35 +2099,42 @@ object SessionController {
                 // 合并而非替换：0x4301 可能不带 IPv4（Audi MMI 9310 实测端点解析依赖
                 // mDNS/网关），直接替换会把已解析到的地址抹掉，配对循环反而连不上。
                 val merged = preferEndpoint(endpoint, client.currentEndpoint)
-                val changed = client.updateEndpoint(merged, "0x4301 晚到")
+                val changed = client.updateEndpoint(merged, "0x4301 Поздно")
                 appendLog(
                     if (changed) {
-                        ">>> [$source] 0x4301 晚到（配对进行中）——端点已热更新，下一轮重试用新地址"
+                        ">>> [$source] 0x4301 Позднее (выполняется сопряжение) — конечная точка была обновлена в горячем " +
+                            "режиме и снова попытается использовать новый адрес в следующем раунде."
                     } else {
-                        ">>> [$source] 0x4301 晚到（配对进行中）——端点无变化，忽略"
+                        ">>> [$source] 0x4301 поздно (выполняется сопряжение) — без изменений конечной точки, игнорируется"
                     },
                 )
             } else {
                 pendingEndpointUpdate = endpoint
-                appendLog(">>> [$source] 0x4301 晚到（交接尚未创建配对客户端）——暂存，配对起步时采用")
+                appendLog(
+                    ">>> [$source] 0x4301 Позднее (при передаче еще не создан клиент сопряжения) — временное " +
+                        "хранилище, используемое при запуске сопряжения",
+                )
             }
             return
         }
         // 用户已断开（BT 组件已停）时不得用晚到消息复活会话
         if (bluetoothClient?.isRunning != true && bluetoothServer?.isRunning != true) {
-            appendLog(">>> [$source] 0x4301 晚到（蓝牙链路已退役）——忽略")
+            appendLog(">>> [$source] 0x4301 Поздно (соединение Bluetooth удалено) – игнорировать")
             return
         }
-        appendLog(">>> [$source] 0x4301 晚到（上一轮已结束）——按新端点重走一轮连接")
-        onCarPlayEndpoint(endpoint, "$source/0x4301 晚到")
+        appendLog(
+            ">>> [$source] 0x4301 Позднее прибытие (предыдущий раунд закончился) — перезапуск раунда соединения на " +
+                "основе новой конечной точки",
+        )
+        onCarPlayEndpoint(endpoint, "$source/0x4301 Поздно")
     }
 
     /** 把交接期间暂存的晚到端点并入新建的客户端（建 client 与收到 0x4301 的竞态窗口）。 */
     private fun drainPendingEndpoint(client: AirPlayClient) {
         val late = pendingEndpointUpdate ?: return
         pendingEndpointUpdate = null
-        if (client.updateEndpoint(preferEndpoint(late, client.currentEndpoint), "交接期间晚到 0x4301")) {
-            appendLog("AIRPLAY: 交界窗口的 0x4301 端点已并入配对客户端")
+        if (client.updateEndpoint(preferEndpoint(late, client.currentEndpoint), "Опоздание во время передачи 0x4301")) {
+            appendLog("AIRPLAY: конечная точка 0x4301 соединительного окна была объединена с парным клиентом.")
         }
     }
 
@@ -2038,24 +2165,30 @@ object SessionController {
                 val choice =
                     askWifiJoinChoice(
                         DialogSpec(
-                            title = "检测到已连接 $ssid",
+                            title = "Обнаружен подключенный $ssid",
                             message =
-                                "车机尚未经蓝牙下发连接信息（0x4301）。是否把当前网络 \"$ssid\" 当车机热点，" +
-                                    "直接尝试 mDNS/网关连接？（点「继续等待」则保持蓝牙保活等车机下发）",
-                            positive = "按车机热点继续",
-                            negative = "继续等待",
+                                "Автомобильный аппарат не отправил информацию о соединении (0x4301) через Bluetooth. " +
+                                    "Использовать ли текущую сеть \"$ssid\" в качестве автомобильной точки доступа?" +
+                                    "Попробуйте напрямую подключиться к mDNS/шлюзу? (Нажмите «Продолжить ожидание», " +
+                                    "чтобы поддерживать связь Bluetooth и дождаться, пока автомобиль доставит его)",
+                            positive = "Нажмите на точку доступа автомобиля, чтобы продолжить.",
+                            negative = "Продолжайте ждать",
                         ),
                     )
                 if (choice == true && !connectCancelled && !sessionStarting.get()) {
-                    appendLog(">>> [$source] 用户确认当前网络 \"$ssid\" 为车机热点——以合成端点重走连接")
-                    onCarPlayEndpoint(endpoint.copy(ssid = ssid), "$source/手动入网")
+                    appendLog(
+                        ">>> [$source] Пользователь подтверждает, что текущая сеть \"$ssid\" является точкой " +
+                            "доступа «автомобиль-машина» — повторно подключитесь к синтетической конечной точке.",
+                    )
+                    onCarPlayEndpoint(endpoint.copy(ssid = ssid), "$source/Ручной доступ к сети")
                     return@run
                 }
             }
             if (!connectCancelled && !sessionStarting.get()) {
                 appendLog(
-                    ">>> [$source] 空端点等待 ${PENDING_START_SESSION_WAIT_MS / 60_000} 分钟超时——" +
-                        "车机未下发 0x4301。拆掉保活链路让重连循环接管，请导出日志反馈",
+                    ">>> [$source] Ожидание нулевой конечной точки: время ожидания ${PENDING_START_SESSION_WAIT_MS / 60_000} минут -" +
+                        "Машина не выдала 0x4301. Удалите ссылку поддержания активности и позвольте циклу повторного " +
+                        "подключения взять на себя управление. Пожалуйста, экспортируйте журнал отзывов.",
                 )
                 detachActiveBtSessions()
             }
@@ -2098,7 +2231,7 @@ object SessionController {
         }
         if (result == endpoint) return null
         appendLog(
-            ">>> [$source] 配对期间 mDNS 刷新端点 → " +
+            ">>> [$source] Конечная точка обновления mDNS во время сопряжения →" +
                 "${result.ipAddresses.firstOrNull()}:${result.airPlayPort}",
         )
         return result
@@ -2149,7 +2282,10 @@ object SessionController {
         var attempt = 1
         while (android.os.SystemClock.uptimeMillis() < deadline && !connectCancelled) {
             attempt++
-            appendLog("AIRPLAY: 明文 SETUP 第 ${attempt - 1} 次未通过——2s 后重连重试（车机 AirPlay 端口可能尚未开放）")
+            appendLog(
+                "AIRPLAY: настройка обычного текста не удалась в течение ${attempt - 1} времени — повторно " +
+                    "подключитесь и повторите попытку через 2 секунды (порт AirPlay в автомобиле может быть еще не открыт)",
+            )
             try {
                 Thread.sleep(2_000)
             } catch (_: InterruptedException) {
@@ -2160,7 +2296,7 @@ object SessionController {
             if (!client.reconnect(2_000)) continue
             val retried = client.runSetup()
             if (retried != null) {
-                appendLog("AIRPLAY: ✓ 明文 SETUP 在第 $attempt 次尝试成功")
+                appendLog("AIRPLAY: ✓ НАСТРОЙКА открытого текста завершилась успешно при попытке $attempt.")
                 return retried
             }
             // 端口开了但 SETUP 仍被拒：TXT 判断可能错了，交给调用方的加密升级路径
@@ -2180,11 +2316,14 @@ object SessionController {
         // （编码器 stop 竞态 = 「连上后自动断开」循环的根因）。推流中的端点一律忽略；
         // 真断连时推流自行终止（isRunning=false），下一个端点自然接续重连。
         if (videoSender?.isRunning == true) {
-            appendLog(">>> [$source] 会话推流中——忽略冗余端点（接收端周期重连的重复 0x4301）")
+            appendLog(
+                ">>> [$source] Отправка сеанса — игнорировать избыточные конечные точки (повторяющийся 0x4301 " +
+                    "периодического переподключения на принимающей стороне)",
+            )
             return
         }
         if (!sessionStarting.compareAndSet(false, true)) {
-            appendLog(">>> [$source] 已有会话在处理中，忽略本次端点（等待上一轮结束）")
+            appendLog(">>> [$source] Уже обрабатывается сеанс, игнорируйте эту конечную точку (дождитесь окончания предыдущего раунда)")
             return
         }
         // 新轮次起步清取消标志：上一轮可能因「BT 链路断开」置位退出（见
@@ -2201,19 +2340,21 @@ object SessionController {
         // 可直接以该 SSID 合成端点走 mDNS/网关路径。
         if (endpoint.ssid.isEmpty()) {
             appendLog(
-                ">>> [$source] 端点无 AP 信息（车机未在窗口内下发 0x4301）——蓝牙保持保活等待晚到 0x4301；" +
-                    "检测到手机已连 WiFi 时会询问是否按车机热点继续",
+                ">>> [$source] Конечная точка не имеет информации о точке доступа (автомобиль не отправляет 0x4301 в " +
+                    "окне) - Bluetooth продолжает работать и ожидает позднего прибытия 0x4301;" +
+                    "Когда будет обнаружено, что телефон подключен к Wi-Fi, он спросит, нажать ли точку доступа в " +
+                    "автомобиле, чтобы продолжить.",
             )
-            phaseHint = "等待车机下发连接信息（0x4301）…"
+            phaseHint = "Ожидание отправки автомобилем информации о соединении (0x4301)..."
             sessionStarting.set(false)
             watchForPendingStartSession(endpoint, source)
             return
         }
         appendLog(
-            ">>> [$source] 拿到接收端热点：SSID=${endpoint.ssid}；" +
-                "密码=${if (endpoint.passphrase.isEmpty()) "(空)" else "已获取"}",
+            ">>> [$source] Получите точку доступа принимающей стороны: SSID=${endpoint.ssid};" +
+                "Пароль=${if (endpoint.passphrase.isEmpty()) "(нет)" else "получен"}",
         )
-        phaseHint = "蓝牙已连上车机，解析热点地址…"
+        phaseHint = "Bluetooth был подключен к автомобилю, и адрес точки доступа определен..."
         ssidSink?.invoke(endpoint.ssid)
         // 凭据缓存对两条路径都要写：0x5703 走 onWifiCredentials，0x4301 只到这里。
         // 漏写会让「车机热点 → 去连接」手动兜底误报「尚未拿到热点密码（需 0x5703）」
@@ -2228,7 +2369,7 @@ object SessionController {
         val hasIpv4 = addresses.any { EndpointHosts.isIpv4(it) }
         val pairingFlag = AirPlayFeatures.supportsPairing(endpoint.advertisedFeatures)
         appendLog(
-            ">>> [$source] 端点诊断：地址=${addresses.ifEmpty { listOf("(无)") }}" +
+            ">>> [$source] Диагностика конечной точки: адреса=${addresses.ifEmpty { listOf("(нет)") }}" +
                 "（${if (hasIpv4) {
                     "IPv4"
                 } else if (addresses.isEmpty()) {
@@ -2236,12 +2377,12 @@ object SessionController {
                 } else {
                     "仅 IPv6"
                 }}）" +
-                " features=" + (endpoint.advertisedFeatures?.let { "0x${it.toString(16)}" } ?: "未知") +
-                " HomeKit配对=" +
+                " features=" + (endpoint.advertisedFeatures?.let { "0x${it.toString(16)}" } ?: "неизвестно") +
+                "Сопряжение с HomeKit =" +
                 when (pairingFlag) {
-                    true -> "声明支持"
-                    false -> "未声明（按 pre-HomeKit 明文会话处理）"
-                    null -> "未知（按需配对）"
+                    true -> "Заявление о поддержке"
+                    false -> "Необъявлен (обрабатывается как сеанс открытого текста до HomeKit)"
+                    null -> "Неизвестно (пара по запросу)"
                 },
         )
         // 车机画像（信号收口点）：mDNS 侧信号到达——era 判定 + 依据一行可解释
@@ -2261,8 +2402,12 @@ object SessionController {
         // 等车机 ctrl 邀请（车机已发现我们的权威信号）。
         val continueWithNetwork: (Boolean) -> Unit = proceed@{ bound ->
             if (!bound) {
-                phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${endpoint.ssid}"
-                appendLog(">>> [$source] 手机当前不在该热点——请到 设置>WLAN 加入 \"${endpoint.ssid}\" 后断开重连")
+                phaseHint = "Телефон не подключен к автомобильной точке доступа. Чтобы подключиться к ${endpoint.ssid}, " +
+                    "перейдите в настройки WLAN."
+                appendLog(
+                    ">>> [$source] Телефон в настоящее время не находится в точке доступа — перейдите в " +
+                        "«Настройки» > «WLAN», чтобы присоединиться к \"${endpoint.ssid}\", а затем отключитесь и снова подключитесь.",
+                )
                 sessionStarting.set(false)
                 return@proceed
             }
@@ -2280,12 +2425,16 @@ object SessionController {
             Bg.run("airplay-pairing") {
                 try {
                     if (connectCancelled) {
-                        appendLog("AIRPLAY: 用户已取消——中止配对")
+                        appendLog("AIRPLAY: Пользователь отменен – сопряжение прервано")
                         sessionStarting.set(false)
                         return@run
                     }
                     if (endpointSelfContained) {
-                        appendLog("AIRPLAY: 0x4301 端点完整（${endpoint.ipAddresses.firstOrNull()}:${endpoint.airPlayPort}）——直接配对，不等 ctrl 邀请")
+                        appendLog(
+                            "AIRPLAY: 0x4301 Конечная точка завершена " +
+                                "(${endpoint.ipAddresses.firstOrNull()}:${endpoint.airPlayPort}) — прямое сопряжение, без " +
+                                "ожидания приглашения ctrl",
+                        )
                     } else {
                         // 等 ctrl 邀请（catplay CarPlayCtrlServer：邀请=车机已发现手机且
                         // AirPlay 窗口已开，收到即刻连接）。此前是「固定睡 1.6s 赌它已到」，
@@ -2300,12 +2449,12 @@ object SessionController {
                         pendingEndpointUpdate = null
                         effectiveEndpoint = preferEndpoint(late, effectiveEndpoint)
                         appendLog(
-                            "AIRPLAY: 并入交接期间晚到的 0x4301 端点 → " +
+                            "AIRPLAY: объединить конечную точку 0x4301, которая прибыла с опозданием во время передачи →" +
                                 "${effectiveEndpoint.ipAddresses.firstOrNull()}:${effectiveEndpoint.airPlayPort}",
                         )
                     }
                     if (connectCancelled) {
-                        appendLog("AIRPLAY: 用户已取消——中止配对")
+                        appendLog("AIRPLAY: Пользователь отменен – сопряжение прервано")
                         sessionStarting.set(false)
                         return@run
                     }
@@ -2332,9 +2481,9 @@ object SessionController {
                                 val invites = ctrlAdvertiser?.inviteCount ?: 0
                                 val found = endpointBrowser?.awaitEndpoint(0)
                                 appendLog(
-                                    "AIRPLAY: 重试 #$attempt —— 已重新公告 ctrl；" +
-                                        "车机邀请=$invites 次，mDNS _airplay._tcp=" +
-                                        (found?.let { "${it.host?.hostAddress}:${it.port}" } ?: "未发现"),
+                                    "AIRPLAY: Повторите попытку #$attempt — Ctrl объявлен повторно;" +
+                                        "Приглашения на машине и машине=$invites раз, mDNS _airplay._tcp=" +
+                                        (found?.let { "${it.host?.hostAddress}:${it.port}" } ?: "не найден"),
                                 )
                             },
                         ).also { created ->
@@ -2342,7 +2491,7 @@ object SessionController {
                             // 放在这里而不是调用点，保证重连重建 client 时也挂得上。
                             created.onMediaKey = { keyCode ->
                                 dispatchMediaKey(keyCode)
-                                appendLog("EVENT: 车机媒体键（iAP2 0x6802）→ keyCode=$keyCode 已注入")
+                                appendLog("СОБЫТИЕ: Автомобильный мультимедийный ключ (iAP2 0x6802) → keyCode=$keyCode был введен")
                             }
                             // 旋钮/四向拨杆（iAP2 0x6802 通路）：注入虚拟屏的 DPAD
                             created.onNavKey = { keyCode -> injectNavigationKey(keyCode) }
@@ -2364,7 +2513,7 @@ object SessionController {
                     // （典型：连着 DiPlay 测试台时不再噪音式探测 Audi）。会话结束/断开时解除。
                     BtSessionGate.sessionActive = true
                     // 第一阶段：保持 BT 在位直接配对 + SETUP（协议上正确的形态）
-                    phaseHint = "AirPlay 配对中…"
+                    phaseHint = "Сопряжение AirPlay..."
                     var client = newClient()
                     currentClient = client
                     drainPendingEndpoint(client)
@@ -2377,7 +2526,7 @@ object SessionController {
                         AirPlayFeatures.supportsPairing(client.currentEndpoint.advertisedFeatures) == false
                     var keys: PairVerifyClient.ControlKeys? =
                         if (noPairing) {
-                            client.skipPairing("TXT features 未声明 HK_PAIRING_AND_ENCRYPT")
+                            client.skipPairing("Функции TXT не заявлены HK_PAIRING_AND_ENCRYPT")
                             client.reconnect()
                             null
                         } else {
@@ -2385,7 +2534,7 @@ object SessionController {
                         }
                     if (connectCancelled) {
                         retireSession()
-                        appendLog("AIRPLAY: 用户已取消——中止配对")
+                        appendLog("AIRPLAY: Пользователь отменен – сопряжение прервано")
                         sessionStarting.set(false)
                         return@run
                     }
@@ -2417,7 +2566,7 @@ object SessionController {
                         keys = client.runPairing()
                         if (connectCancelled) {
                             retireSession()
-                            appendLog("AIRPLAY: 用户已取消——中止配对")
+                            appendLog("AIRPLAY: Пользователь отменен – сопряжение прервано")
                             sessionStarting.set(false)
                             return@run
                         }
@@ -2441,24 +2590,34 @@ object SessionController {
                             pairingUnsupported = client.pairingUnsupported,
                         ).usePlainSession
                     if (plainSession) {
-                        phaseHint = "建立明文会话…"
+                        phaseHint = "Создать сеанс открытого текста…"
                         appendLog(
-                            "AIRPLAY: 配对不可用（${if (client.pairingUnsupported) "接收端不支持" else "配对失败"}）" +
-                                "——改用 et=NONE 明文会话 + AES-CTR 屏幕流（catplay 接收端分类 1/2）",
+                            "AIRPLAY: сопряжение не выполнено " +
+                                "(${if (client.pairingUnsupported) "не поддерживается" else "ошибка"}) — " +
+                                "переход на et=NONE + AES-CTR",
                         )
                         // 配对循环结束时 socket 已关/状态机不可用：SETUP 前必须重连一次。
                         // 失败不直接判死：车机 AirPlay 端口可能还没开，下面会按窗口重试。
                         if (!client.reconnect()) {
-                            appendLog("AIRPLAY: 明文会话首次重连未成功——继续按窗口重试 SETUP")
+                            appendLog(
+                                "AIRPLAY: первое переподключение сеанса с открытым текстом не удалось. Повторите " +
+                                    "попытку в окне SETUP.",
+                            )
                         }
                     }
                     // keys 是 lambda 内的可变捕获变量：Kotlin 无法智能转换，先固化成不可变值。
                     val pairedKeys = keys
                     if (pairedKeys != null || plainSession) {
-                        phaseHint = if (pairedKeys != null) "配对完成，建立 CarPlay 会话…" else "建立明文会话…"
+                        phaseHint =
+                            if (pairedKeys != null) {
+                                "Сопряжение завершено, сеанс CarPlay " +
+                                    "установлен…"
+                            } else {
+                                "Создать сеанс открытого текста…"
+                            }
                         if (pairedKeys != null) {
                             appendLog(
-                                "AIRPLAY: ✓ 配对完成 writeKey=" +
+                                "AIRPLAY: ✓ Сопряжение завершено writeKey=" +
                                     pairedKeys.phoneWriteKey.joinToString("") { "%02x".format(it) }.take(16) + "… " +
                                     "readKey=" + pairedKeys.phoneReadKey.joinToString("") { "%02x".format(it) }.take(16) + "…",
                             )
@@ -2541,7 +2700,7 @@ object SessionController {
                                         if (navKeys.isNotEmpty()) {
                                             navKeys.forEach(::injectNavigationKey)
                                             appendLog(
-                                                "EVENT: 旋钮/导航键 " +
+                                                "СОБЫТИЕ: Ручка/Клавиша навигации" +
                                                     navKeys.joinToString("+") { HidNavigation.nameOf(it) } +
                                                     "（uuid=$uuid）",
                                             )
@@ -2550,14 +2709,14 @@ object SessionController {
                                             if (keyCode != 0) {
                                                 dispatchMediaKey(keyCode)
                                                 appendLog(
-                                                    "EVENT: 车机媒体键 ${ConsumerKeys.nameOf(consumerUsage)}" +
+                                                    "СОБЫТИЕ: Автомобильный мультимедийный ключ ${ConsumerKeys.nameOf(consumerUsage)}" +
                                                         "（uuid=$uuid usage=0x%02x → keyCode=$keyCode）"
                                                             .format(consumerUsage),
                                                 )
                                             } else {
                                                 appendLog(
-                                                    "EVENT: 车机媒体键 ${ConsumerKeys.nameOf(consumerUsage)}" +
-                                                        "（uuid=$uuid usage=0x%02x）无对应 Android 键，忽略"
+                                                    "СОБЫТИЕ: Автомобильный мультимедийный ключ ${ConsumerKeys.nameOf(consumerUsage)}" +
+                                                        "(uuid=$uuid use=0x%02x) Нет соответствующего ключа Android, игнорируется"
                                                             .format(consumerUsage),
                                                 )
                                             }
@@ -2568,7 +2727,7 @@ object SessionController {
                                         } else if (contacts != null) {
                                             if (touchLogCount <= 30 || touchLogCount % 50 == 0) {
                                                 appendLog(
-                                                    "EVENT: 触摸 " +
+                                                    "СОБЫТИЕ: коснитесь" +
                                                         contacts.joinToString {
                                                             "#${it.slot}(${it.xPixels},${it.yPixels})${if (it.down) "↓" else "↑"}"
                                                         },
@@ -2583,7 +2742,7 @@ object SessionController {
                                             }
                                         } else if (report != null) {
                                             appendLog(
-                                                "EVENT: 其他 HID 报告 uuid=$uuid bytes=${report.size}" +
+                                                "СОБЫТИЕ: Другие отчеты HID uuid=$uuid bytes=${report.size}" +
                                                     " hex=${report.joinToString(" ") { "%02x".format(it) }}",
                                             )
                                         }
@@ -2595,7 +2754,7 @@ object SessionController {
                                         val params = command["params"] as? Map<*, *>
                                         val data = params?.get("data") as? ByteArray
                                         if (data == null) {
-                                            appendLog("EVENT: iAPSendMessage 无 data（params=$params）")
+                                            appendLog("СОБЫТИЕ: iAPSendMessage нет данных (params=$params)")
                                         } else {
                                             iapEventMessageCount++
                                             client.onIapEventBytes(data)
@@ -2607,15 +2766,23 @@ object SessionController {
                                         // 拖到下一个周期 I 帧（1s）车机可能一直卡在等帧状态。
                                         val forced = videoSender?.requestKeyFrame() == true
                                         appendLog(
-                                            "EVENT: 车机请求关键帧（forceKeyFrame）→ " +
-                                                if (forced) "已强制编码 I 帧" else "编码器未就绪，等周期 I 帧",
+                                            "СОБЫТИЕ: ключевой кадр запроса машины транспортного средства (forceKeyFrame) →" +
+                                                if (forced) {
+                                                    "Принудительное кодирование " +
+                                                        "I-кадров"
+                                                } else {
+                                                    "Кодер не готов, ожидание периодического I-кадра"
+                                                },
                                         )
                                     }
 
                                     "changeModes" -> {
                                         // 车机请求资源仲裁（如用户在 MMI 上点了手机）：
                                         // 回 modesChanged 声明手机持有主屏/主音频
-                                        appendLog("EVENT: 车机请求 changeModes → 回 modesChanged 接管资源")
+                                        appendLog(
+                                            "СОБЫТИЕ: Транспортное средство запрашивает изменение режима → " +
+                                                "возвращается в режим «Изменено», чтобы взять на себя управление ресурсами.",
+                                        )
                                         client.assertModes()
                                     }
 
@@ -2623,7 +2790,7 @@ object SessionController {
                                         appendLog(
                                             // 未识别的命令必须带参数：车机的私有命令（如 requestUI）
                                             // 到底要什么，全在 params 里——只打 type 等于没打。
-                                            "EVENT: 命令 type=${command["type"]} " +
+                                            "СОБЫТИЕ: тип команды=${command["type"]} " +
                                                 command.entries
                                                     .filter { it.key?.toString() != "type" }
                                                     .joinToString(" ") { (key, value) ->
@@ -2716,7 +2883,7 @@ object SessionController {
                                             streamH,
                                         )
                                     appendLog(
-                                        "DISPLAY: 流 ${setup.displayWidth}x${setup.displayHeight} → " +
+                                        "ДИСПЛЕЙ: поток ${setup.displayWidth}x${setup.displayHeight} →" +
                                             "${streamW}x$streamH（$scalePct%）@${fps}fps",
                                     )
                                     pendingVideoW = streamW
@@ -2742,7 +2909,10 @@ object SessionController {
                                             keepAliveWithStats = setup.keepAliveSendStatsAsBody,
                                             onEnded = {
                                                 // 会话真实结束：解除静默降噪（客户端恢复探测/重连）
-                                                appendLog(">>> CarPlay 会话结束（推流终止）——恢复蓝牙探测")
+                                                appendLog(
+                                                    ">>> Сеанс CarPlay завершен (нажатие прекращено) – возобновить " +
+                                                        "обнаружение Bluetooth",
+                                                )
                                                 BtSessionGate.sessionActive = false
                                                 // 车机掉线类结束（无用户断开操作）：暗幕/常亮必须一起收掉。
                                                 // 这条路径不经过 retireSession（VirtualLauncher 仍挂着），
@@ -2798,7 +2968,8 @@ object SessionController {
                                                 videoDensity,
                                             )
                                         appendLog(
-                                            "MODE: 隐形屏 ${if (ok) "已启动（高德车机版优先）display=${source.displayId}" else "启动失败（Shizuku 就绪？）"}",
+                                            "РЕЖИМ: невидимый экран " +
+                                                "${if (ok) "запущен (Amap Auto), display=${source.displayId}" else "ошибка запуска (Shizuku готов?)"}",
                                         )
                                         // 暗幕/常亮只在真正开始投屏后生效（见 ScreenDimmer.sessionActive）：
                                         // 应用启动时只挂触摸探针，避免「会话早断了、手机过一会儿还是变暗」。
@@ -2808,7 +2979,10 @@ object SessionController {
                                             if (DisplayPrefs.screenOffOnConnect(context)) {
                                                 enterPhoneScreenOff()
                                             } else {
-                                                appendLog("SCREEN: 「连接时真息屏」已关闭——本次仅用暗幕")
+                                                appendLog(
+                                                    "ЭКРАН: «Настоящий экран при подключении» отключен — на этот " +
+                                                        "раз используется только темный экран.",
+                                                )
                                             }
                                         }
                                     }
@@ -2821,7 +2995,10 @@ object SessionController {
                                     // 把新流纳入已激活的会话。缺这一步时车机对 SETUP 回 200
                                     // 并给 dataPort，但不会真正播放（2026-10-17 奥迪实测：
                                     // 音频包持续发送、采集内容非零，车机无声）。
-                                    appendLog("AUDIO: 音频流已加入——补发 RECORD 激活（流后加入会话）")
+                                    appendLog(
+                                        "АУДИО: Аудиопоток присоединен – повторите активацию ЗАПИСИ " +
+                                            "(присоединитесь к сеансу после потоковой передачи)",
+                                    )
                                     client.record()
                                 }
                             }
@@ -2830,15 +3007,18 @@ object SessionController {
                             // AirPlayClient.runSetup 的 deviceID 说明）。主动关闭控制通道：
                             // 否则接收端要等约 45s 视频超时才拆 BT 链路，用户只看到
                             // 「连上之后自动断开」，无从判断是会话建立失败。
-                            phaseHint = "接收端拒绝了会话建立（SETUP 未通过）"
-                            appendLog("AIRPLAY: 会话建立失败——主动关闭控制通道，本轮结束")
-                            uiHintSink?.invoke("接收端拒绝了会话建立（SETUP）——请查看日志中的 deviceID 提示")
+                            phaseHint = "Установление сеанса было отклонено принимающей стороной (сбой установки)"
+                            appendLog("AIRPLAY: Не удалось установить сеанс — канал управления был активно закрыт, и раунд завершился.")
+                            uiHintSink?.invoke(
+                                "Получатель отклонил установление сеанса (SETUP) — проверьте журналы на " +
+                                    "наличие подсказок по идентификатору устройства.",
+                            )
                             runCatching { client.close() }
                         }
                     }
                 } catch (error: Throwable) {
                     // 配对线程任何异常都不能留下「已有会话在处理中」的卡死状态
-                    appendLog("AIRPLAY: 配对线程异常 - ${error.message ?: error.javaClass.simpleName}")
+                    appendLog("AIRPLAY: исключение потока сопряжения - ${error.message ?: error.javaClass.simpleName}")
                 } finally {
                     sessionStarting.set(false)
                     // 配对未成功建立推流（fail/异常/start 失败提前退出）时解除静默降噪，
@@ -2852,9 +3032,12 @@ object SessionController {
                         val pending = pendingEndpointUpdate
                         if (pending != null && !connectCancelled) {
                             pendingEndpointUpdate = null
-                            appendLog(">>> 收尾时发现暂存的晚到 0x4301——立即按新端点重走一轮")
+                            appendLog(
+                                ">>> В конце выяснилось, что временное хранилище опоздало 0x4301 - немедленно " +
+                                    "перезапускаем раунд по новой конечной точке",
+                            )
                             Bg.run("late-endpoint-retry") {
-                                onCarPlayEndpoint(pending, "0x4301 晚到（本轮收尾补投）")
+                                onCarPlayEndpoint(pending, "0x4301 Поздно (дополнительные инвестиции в конце этого раунда)")
                             }
                         }
                     }
@@ -2872,7 +3055,7 @@ object SessionController {
                 endpoint.securityType,
             )
         if (boundCarSsid == endpoint.ssid && wifiConnector?.currentNetwork != null) {
-            appendLog(">>> [$source] 已绑定车机热点 ${endpoint.ssid}，跳过重复绑定")
+            appendLog(">>> [$source] Автомобильная точка доступа ${endpoint.ssid} привязана, пропустите повторную привязку")
             continueWithNetwork(true)
         } else {
             // 端点先于 0x5703 到达（或上一轮换网失败）：同样的入口——静默路径优先，
@@ -2930,16 +3113,25 @@ object SessionController {
             }
             if (android.os.SystemClock.uptimeMillis() - lastHintAt > 5_000) {
                 lastHintAt = android.os.SystemClock.uptimeMillis()
-                phaseHint = "等待手机加入车机热点 ${wifi.ssid}…"
-                appendLog("WIFI: 等待用户在系统 WLAN 中加入车机热点（当前 ${current ?: "未连接"}）…")
+                phaseHint = "Ожидание подключения телефона к автомобильной точке доступа ${wifi.ssid}…"
+                appendLog(
+                    "WIFI: Ожидание подключения пользователя к автомобильной точке доступа в WLAN системы (текущий " +
+                        "${current ?: "не подключено"}）…",
+                )
                 openWlanSettings()
             }
             Thread.sleep(1_000)
         }
         if (!connectCancelled) {
-            phaseHint = "手机不在车机热点——请到 WLAN 设置加入 ${wifi.ssid}"
-            appendLog(">>> 等待车机热点超时——请到 设置>WLAN 加入 \"${wifi.ssid}\" 后重新连接")
-            uiHintSink?.invoke("未连上车机热点 \"${wifi.ssid}\"——请到 WLAN 设置中主动连接")
+            phaseHint = "Телефон не подключен к автомобильной точке доступа. Чтобы подключиться к ${wifi.ssid}, перейдите в настройки WLAN."
+            appendLog(
+                ">>> Ожидание истечения времени ожидания точки доступа в автомобиле. Откройте «Настройки» > " +
+                    "«WLAN», чтобы присоединиться к \"${wifi.ssid}\" и переподключитесь.",
+            )
+            uiHintSink?.invoke(
+                "Не подключено к автомобильной точке доступа \"${wifi.ssid}\". Чтобы активировать " +
+                    "подключение, перейдите в настройки WLAN.",
+            )
         }
         onBound(false)
     }

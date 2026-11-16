@@ -159,7 +159,7 @@ object LetterboxHintController {
             if (!should) {
                 if (isVisible()) {
                     VirtualLauncher.logSink?.invoke(
-                        "HINT: 清除提示（$reason）——" +
+                        "ПОДСКАЗКА: Четкая подсказка ($reason)——" +
                             "letterbox=${activity.letterboxed} reason=${activity.letterboxReason}",
                     )
                     clear()
@@ -182,7 +182,7 @@ object LetterboxHintController {
                         AppOrientationCompat.WriteResult.OK
                 systemOn = healed || AppOrientationCompat.isSystemEnabledFor(activity.packageName)
                 VirtualLauncher.logSink?.invoke(
-                    "HINT: 「${activity.packageName}」系统侧横屏覆盖缺失——补写" +
+                    "ПОДСКАЗКА: отсутствует покрытие горизонтального экрана на стороне системы «${activity.packageName}» — заполните" +
                         "${if (healed) "成功" else "失败"}",
                 )
                 if (systemOn) {
@@ -194,7 +194,7 @@ object LetterboxHintController {
                             timeoutMs = 8_000,
                         )
                     VirtualLauncher.logSink?.invoke(
-                        "HINT: 补写后重启 「${activity.packageName}」ok=" +
+                        "СОВЕТ: перезагрузите компьютер после перезаписи «${activity.packageName}» ok=" +
                             (start.ok && start.output.contains("Starting:", ignoreCase = true)),
                     )
                     healedAndRelaunched = true
@@ -213,7 +213,7 @@ object LetterboxHintController {
                     ) {
                         if (isVisible()) clear()
                         VirtualLauncher.logSink?.invoke(
-                            "HINT: 补写覆盖并重启后「${activity.packageName}」已横屏",
+                            "СОВЕТ: после перезаписи и перезапуска «${activity.packageName}» стал горизонтальным.",
                         )
                         return
                     }
@@ -221,8 +221,8 @@ object LetterboxHintController {
             }
             if (!systemOn) {
                 VirtualLauncher.logSink?.invoke(
-                    "HINT: 「${activity.packageName}」letterbox，但本机不支持横屏覆盖——" +
-                        "不提示重启（changeIds=$changeIds）",
+                    "СОВЕТ: 「${activity.packageName}」почтовый ящик, но этот компьютер не поддерживает горизонтальное наложение экрана——" +
+                        "Не предлагать перезапустить (changeIds=$changeIds)",
                 )
                 if (isVisible()) clear()
                 return
@@ -241,11 +241,11 @@ object LetterboxHintController {
             }
             if (!wasVisible) {
                 VirtualLauncher.logSink?.invoke(
-                    "HINT: 「${current.packageName}」横屏未生效（$reason）" +
-                        " 内窗=${current.inner.width}x${current.inner.height}" +
-                        " 外框=${current.full.width}x${current.full.height}" +
-                        " 黑边 左=${current.inner.left - current.full.left}" +
-                        "/右=${current.full.right - current.inner.right}",
+                    "ПОДСКАЗКА: горизонтальный экран «${current.packageName}» не действует ($reason)." +
+                        " Внутреннее окно=${current.inner.width}x${current.inner.height}" +
+                        " Внешняя рамка=${current.full.width}x${current.full.height}" +
+                        " Черная рамка слева=${current.inner.left - current.full.left}" +
+                        "/right=${current.full.right - current.inner.right}",
                 )
             }
         } finally {
@@ -306,7 +306,7 @@ object LetterboxHintController {
         cardRight = left + bitmap.width
         cardBottom = top + bitmap.height
         VirtualLauncher.logSink?.invoke(
-            "HINT: 卡片 bitmap=${bitmap.width}x${bitmap.height} rect=" +
+            "ПОДСКАЗКА: карта bitmap=${bitmap.width}x${bitmap.height} rect=" +
                 "(${cardLeft.toInt()},${cardTop.toInt()}-${cardRight.toInt()},${cardBottom.toInt()})" +
                 " bar=$barWidth density=$density widthPx=$width",
         )
@@ -330,7 +330,7 @@ object LetterboxHintController {
     private fun restart(t: Target) {
         state = State.BUSY
         reRenderBusy()
-        VirtualLauncher.logSink?.invoke("HINT: 强制重启 ${t.packageName}（display=${t.displayId}）")
+        VirtualLauncher.logSink?.invoke("СОВЕТ: Принудительно перезапустите ${t.packageName} (display=${t.displayId})")
         Bg.run("letterbox-restart") {
             runCatching {
                 AppOrientationCompat.awaitPending()
@@ -346,7 +346,7 @@ object LetterboxHintController {
                     )
                 if (!start.ok) {
                     VirtualLauncher.logSink?.invoke(
-                        "HINT: 重启 ${t.packageName} 失败 exit=${start.exitCode} out=${start.output.take(120)}",
+                        "СОВЕТ: Не удалось перезапустить ${t.packageName}. exit=${start.exitCode} out=${start.output.take(120)}",
                     )
                 }
                 // 等应用重建窗口后再复探
@@ -370,15 +370,16 @@ object LetterboxHintController {
                         clear()
                     }
                     VirtualLauncher.logSink?.invoke(
-                        "HINT: 重启后「${t.packageName}」仍然 letterbox（reason=${activity.letterboxReason}）",
+                        "ПОДСКАЗКА: «${t.packageName}» по-прежнему остается почтовым ящиком после перезапуска (причина = " +
+                            "${activity.letterboxReason})",
                     )
                 } else {
                     clear()
-                    VirtualLauncher.logSink?.invoke("HINT: 重启后「${t.packageName}」已横屏")
+                    VirtualLauncher.logSink?.invoke("ПОДСКАЗКА: «${t.packageName}» отображается горизонтально после перезапуска.")
                 }
             }.onFailure {
                 state = State.NORMAL
-                VirtualLauncher.logSink?.invoke("HINT: 重启异常 ${it.message}")
+                VirtualLauncher.logSink?.invoke("СОВЕТ: исключение перезапуска ${it.message}")
             }
         }
     }
